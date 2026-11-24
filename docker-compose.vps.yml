@@ -1,0 +1,47 @@
+services:
+  intelligence:
+    image: ghcr.io/danizean/cointrac-cmc/intelligence:latest
+    build:
+      context: .
+      dockerfile: apps/intelligence/Dockerfile
+    network_mode: host
+    env_file:
+      - ./.env
+    environment:
+      CORS_ORIGINS: https://cointrac.xyz,https://www.cointrac.xyz
+      TRUSTED_HOSTS: api.cointrac.xyz,mcp.cointrac.xyz,localhost,127.0.0.1
+      MCP_ALLOWED_HOSTS: "127.0.0.1:*,localhost:*,[::1]:*,api.cointrac.xyz,mcp.cointrac.xyz"
+      MCP_ALLOWED_ORIGINS: "http://127.0.0.1:*,http://localhost:*,http://[::1]:*,https://cointrac.xyz,https://www.cointrac.xyz"
+      PUBLIC_API_BASE_URL: https://api.cointrac.xyz
+      REMOTE_MCP_PUBLIC_URL: https://mcp.cointrac.xyz/mcp
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - 127.0.0.1
+    mem_limit: 768m
+    memswap_limit: 1536m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped

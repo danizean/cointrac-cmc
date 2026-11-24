@@ -1,0 +1,335 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  CoinTrac Design System — Canonical Semantic Tokens (R1 Foundation)
+  Source of truth: docs/brand_guide/Cointrac_Brand_and_Design_Guidelines_v1.md
+  Dark mode is the default product theme (html.dark). Light mode lives on :root.
+*/
+:root {
+  /* Brand primitives */
+  --ct-brand-50: #eaf2ff;
+  --ct-brand-100: #d5e5ff;
+  --ct-brand-200: #a8c9ff;
+  --ct-brand-300: #75a8ff;
+  --ct-brand-400: #4388ff;
+  --ct-brand-500: #1769ff;
+  --ct-brand-600: #0f55e8;
+  --ct-brand-700: #1246b8;
+  --ct-brand-800: #153987;
+  --ct-brand-900: #102653;
+
+  /* Light surfaces */
+  --background: #f5f7fa;
+  --card: #ffffff;
+  --card-elevated: #edf1f6;
+  --card-foreground: #101828;
+  --muted: #e7edf5;
+  --input-bg: #ffffff;
+  --code-bg: #f8fafc;
+
+  /* Light typography */
+  --foreground: #101828;
+  --muted-foreground: #475467;
+  --subtle-foreground: #5b677a;
+  --disabled-foreground: #98a2b3;
+
+  /* Light borders */
+  --border: #dce3ec;
+  --border-strong: #c5d0df;
+
+  /* Actions & links */
+  --primary: var(--ct-brand-500);
+  --primary-hover: var(--ct-brand-600);
+  --primary-pressed: var(--ct-brand-700);
+  --on-primary: #ffffff;
+  --secondary: var(--ct-brand-700);
+  --on-secondary: #ffffff;
+  --link: var(--ct-brand-700);
+  --ring: var(--ct-brand-500);
+
+  /* Semantic statuses (AA-safe >= 4.5:1 on light surfaces) */
+  --positive: #15803d;
+  --positive-soft: #ecfdf3;
+  --on-positive: #ffffff;
+  --warning: #b45309;
+  --warning-soft: #fef3c7;
+  --on-warning: #ffffff;
+  --accent: var(--warning);
+  --on-accent: #ffffff;
+  --destructive: #b91c1c;
+  --destructive-soft: #fef2f2;
+  --on-destructive: #ffffff;
+  --info: #0369a1;
+  --info-soft: #e0f2fe;
+  --on-info: #ffffff;
+
+  /* Canvas & spacing */
+  --canvas-gradient: none;
+  --canvas-attachment: scroll;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Radius & motion */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --duration-fast: 150ms;
+  --duration-normal: 220ms;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.12);
+  --shadow-focus: 0 0 0 3px rgba(23, 105, 255, 0.28);
+  --header-height: 4rem;
+}
+
+.dark {
+  /* Dark surfaces (default product theme) */
+  --background: #080b12;
+  --card: #0d111b;
+  --card-elevated: #111827;
+  --card-foreground: #f2f5fa;
+  --muted: #151d2b;
+  --input-bg: #0b1019;
+  --code-bg: #0b1019;
+
+  /* Dark typography (WCAG AA contrast >= 4.7:1 for subtle labels) */
+  --foreground: #f2f5fa;
+  --muted-foreground: #a6b1c2;
+  --subtle-foreground: #8794a8;
+  --disabled-foreground: #566174;
+
+  /* Dark borders */
+  --border: #202a3a;
+  --border-strong: #2c3a50;
+
+  /* Actions & links */
+  --primary: var(--ct-brand-500);
+  --primary-hover: var(--ct-brand-600);
+  --primary-pressed: var(--ct-brand-700);
+  --on-primary: #ffffff;
+  --secondary: var(--ct-brand-300);
+  --on-secondary: #080b12;
+  --link: var(--ct-brand-300);
+  --ring: var(--ct-brand-400);
+
+  /* Semantic statuses (official CoinTrac dark values, WCAG AA >= 4.5:1) */
+  --positive: #22c55e;
+  --positive-soft: #102b20;
+  --on-positive: #052e16;
+  --warning: #f5a623;
+  --warning-soft: #332817;
+  --on-warning: #080b12;
+  --accent: var(--warning);
+  --on-accent: #080b12;
+  --destructive: #f04452;
+  --destructive-soft: #241016;
+  --on-destructive: #ffffff;
+  --info: #38bdf8;
+  --info-soft: #122a36;
+  --on-info: #080b12;
+
+  --canvas-gradient: none;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.26);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.34);
+  --shadow-focus: 0 0 0 3px rgba(67, 136, 255, 0.32);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-elevated: var(--card-elevated);
+  --color-card-foreground: var(--card-foreground);
+  --color-input-bg: var(--input-bg);
+  --color-code-bg: var(--code-bg);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-pressed: var(--primary-pressed);
+  --color-primary-foreground: var(--on-primary);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--on-secondary);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--on-accent);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-positive-foreground: var(--on-positive);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-foreground: var(--on-warning);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-foreground: var(--on-destructive);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-foreground: var(--on-info);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-disabled-foreground: var(--disabled-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-link: var(--link);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+}
+
+html {
+  scroll-padding-top: calc(var(--header-height) + 1rem);
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), Inter, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.tg-canvas {
+  background-color: var(--background);
+  background-image: var(--canvas-gradient);
+  background-attachment: var(--canvas-attachment);
+  background-repeat: no-repeat;
+}
+
+.tg-panel {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.tg-panel-elevated {
+  background: var(--card-elevated);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+
+.tg-panel-interactive {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--duration-fast) ease, background-color var(--duration-fast) ease;
+}
+
+.tg-panel-interactive:hover {
+  background: var(--card-elevated);
+  border-color: var(--border-strong);
+}
+
+.tg-glass-header {
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.dark .tg-glass-header {
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+}
+
+.tg-btn {
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-md);
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+
+.tg-btn-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.tg-btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.tg-btn-primary:active {
+  background: var(--primary-pressed);
+}
+
+.tg-btn-secondary {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--foreground);
+}
+
+.tg-btn-secondary:hover {
+  background: var(--muted);
+}
+
+.tg-brand-stage {
+  background: #080b12;
+  color: #f2f5fa;
+  border: 1px solid #202a3a;
+  border-radius: var(--radius-xl);
+}
+
+.tg-brand-stage-muted {
+  color: #a6b1c2;
+}
+
+.tg-brand-stage-cell {
+  background: #0d111b;
+}
+
+.tg-brand-stage-rule {
+  background: #202a3a;
+}
+
+.tg-brand-stage-grid {
+  display: grid;
+  gap: 1px;
+  background: #202a3a;
+}
+
+.tg-brand-stage-field {
+  color: #75a8ff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

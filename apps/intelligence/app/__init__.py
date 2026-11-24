@@ -1,0 +1,1 @@
+"""CoinTrac Market Intelligence service."""

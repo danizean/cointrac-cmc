@@ -1,0 +1,374 @@
+{
+  "generated_at_utc": "2026-11-22T16:30:18Z",
+  "base_url": "https://pro-api.coinmarketcap.com",
+  "credit_budget": 30,
+  "total_credits_used": 13,
+  "results": [
+    {
+      "endpoint": "/v1/cryptocurrency/map",
+      "params": {
+        "limit": 5
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 0,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "id",
+        "name",
+        "symbol",
+        "slug",
+        "rank",
+        "is_active",
+        "first_historical_data",
+        "last_historical_data",
+        "platform"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v2/cryptocurrency/info",
+      "params": {
+        "id": "1,1027"
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "1",
+        "1027"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v2/cryptocurrency/quotes/latest",
+      "params": {
+        "id": "1,1027,5426"
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "1",
+        "1027",
+        "5426"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v1/cryptocurrency/listings/latest",
+      "params": {
+        "limit": 10
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "id",
+        "name",
+        "symbol",
+        "slug",
+        "infinite_supply",
+        "circulating_supply",
+        "total_supply",
+        "max_supply",
+        "date_added",
+        "num_market_pairs",
+        "cmc_rank",
+        "last_updated"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v1/global-metrics/quotes/latest",
+      "params": {},
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "quote",
+        "btc_dominance",
+        "eth_dominance",
+        "active_cryptocurrencies",
+        "total_cryptocurrencies",
+        "active_market_pairs",
+        "active_exchanges",
+        "total_exchanges",
+        "last_updated",
+        "eth_dominance_yesterday",
+        "btc_dominance_yesterday",
+        "eth_dominance_24h_percentage_change"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v1/global-metrics/quotes/historical",
+      "params": {
+        "count": 7,
+        "interval": "daily"
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "quotes"
+      ],
+      "historical_count_returned": 7
+    },
+    {
+      "endpoint": "/v3/fear-and-greed/latest",
+      "params": {},
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "value",
+        "update_time",
+        "value_classification"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v3/fear-and-greed/historical",
+      "params": {
+        "limit": 7
+      },
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "timestamp",
+        "value",
+        "value_classification"
+      ],
+      "historical_count_returned": 7
+    },
+    {
+      "endpoint": "/v1/cryptocurrency/categories",
+      "params": {
+        "limit": 10
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "id",
+        "name",
+        "title",
+        "description",
+        "volume",
+        "num_tokens",
+        "avg_price_change",
+        "market_cap",
+        "market_cap_change",
+        "volume_change",
+        "last_updated"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v1/cryptocurrency/category",
+      "params": {
+        "id": "6051a82066fc1b42617d6dc0",
+        "limit": 5
+      },
+      "http_status": 200,
+      "cmc_error_code": 0,
+      "cmc_error_message": null,
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "id",
+        "name",
+        "title",
+        "description",
+        "volume",
+        "coins",
+        "num_tokens",
+        "last_updated",
+        "avg_price_change",
+        "market_cap",
+        "market_cap_change",
+        "volume_change"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v2/cryptocurrency/ohlcv/historical",
+      "params": {
+        "id": 1,
+        "count": 30,
+        "interval": "daily"
+      },
+      "http_status": 403,
+      "cmc_error_code": 1006,
+      "cmc_error_message": "Your API Key subscription plan doesn't support this endpoint.",
+      "credit_count": 0,
+      "status": "TIER_RESTRICTED",
+      "sample_top_keys": [
+        "status"
+      ],
+      "historical_count_returned": 0
+    },
+    {
+      "endpoint": "/v2/cryptocurrency/price-performance-stats/latest",
+      "params": {
+        "id": 1
+      },
+      "http_status": 403,
+      "cmc_error_code": 1006,
+      "cmc_error_message": "Your API Key subscription plan doesn't support this endpoint.",
+      "credit_count": 0,
+      "status": "TIER_RESTRICTED",
+      "sample_top_keys": [
+        "status"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v1/cryptocurrency/trending/latest",
+      "params": {
+        "limit": 5
+      },
+      "http_status": 403,
+      "cmc_error_code": 1006,
+      "cmc_error_message": "Your API Key subscription plan doesn't support this endpoint.",
+      "credit_count": 0,
+      "status": "TIER_RESTRICTED",
+      "sample_top_keys": [
+        "status"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v2/cryptocurrency/market-pairs/latest",
+      "params": {
+        "id": 1,
+        "limit": 5
+      },
+      "http_status": 403,
+      "cmc_error_code": 1006,
+      "cmc_error_message": "Your API Key subscription plan doesn't support this endpoint.",
+      "credit_count": 0,
+      "status": "TIER_RESTRICTED",
+      "sample_top_keys": [
+        "status"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v5/real-world-assets/map",
+      "params": {
+        "limit": 5
+      },
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 0,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "rwa_assets",
+        "total_size",
+        "has_more"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v5/real-world-assets/assets/list",
+      "params": {
+        "limit": 5
+      },
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "total_size",
+        "has_more",
+        "rwa_assets"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v5/exchange/derivatives/list",
+      "params": {
+        "limit": 5
+      },
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "exchanges"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v5/cryptocurrency/derivatives/market-pairs/list/latest",
+      "params": {
+        "crypto_id": 1,
+        "limit": 5
+      },
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "crypto_id",
+        "crypto_name",
+        "symbol",
+        "num_market_pairs",
+        "market_pairs"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v5/derivatives/liquidations/quotes/latest",
+      "params": {},
+      "http_status": 200,
+      "cmc_error_code": null,
+      "cmc_error_message": "",
+      "credit_count": 1,
+      "status": "AVAILABLE",
+      "sample_top_keys": [
+        "quotes"
+      ],
+      "historical_count_returned": null
+    },
+    {
+      "endpoint": "/v4/dex/spot-pairs/latest",
+      "params": {
+        "limit": 5
+      },
+      "http_status": 400,
+      "cmc_error_code": null,
+      "cmc_error_message": "Please provide either a network id or network slug.",
+      "credit_count": 0,
+      "status": "ERROR",
+      "sample_top_keys": [
+        "status"
+      ],
+      "historical_count_returned": null
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cointrac": {
+      "command": "/ABSOLUTE/PATH/TO/REPO/apps/intelligence/.venv/bin/python",
+      "args": ["-m", "app.mcp.stdio_entry"],
+      "cwd": "/ABSOLUTE/PATH/TO/REPO/apps/intelligence",
+      "env": {
+        "PYTHONPATH": "/ABSOLUTE/PATH/TO/REPO/apps/intelligence"
+      }
+    }
+  }
+}
