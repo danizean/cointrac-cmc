@@ -1,6 +1,8 @@
 "use client";
 
+import { ArrowRight, Check, Copy, KeyRound, Plug, Server } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { PROMPT_CATALOG, RESOURCE_CATALOG, publicMcpUrl } from "@/lib/catalog";
 import { MARKETING } from "@/lib/marketing-copy";
 import { useAppPreferences } from "../app-preferences";
@@ -8,75 +10,175 @@ import { useAppPreferences } from "../app-preferences";
 export function IntegrationsView() {
   const { locale } = useAppPreferences();
   const copy = MARKETING[locale].integrations;
-  const localUrl = publicMcpUrl();
+  const mcpUrl = publicMcpUrl();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(mcpUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard unavailable in restricted context
+    }
+  };
 
   return (
-    <main id="content" className="mx-auto w-full max-w-[1200px] px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-link">{copy.eyebrow}</p>
-      <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">{copy.title}</h1>
-      <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">{copy.lede}</p>
+    <main id="content" className="relative overflow-x-clip">
+      {/* Hero Header */}
+      <div className="ct-hero-glow relative border-b border-border/80">
+        <div
+          aria-hidden="true"
+          className="ct-grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[360px]"
+        />
+        <div className="relative mx-auto w-full max-w-[1240px] px-4 pb-12 pt-12 sm:px-6 lg:px-8 lg:pb-16 lg:pt-16">
+          <div className="ct-enter inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-link">
+            <Plug className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{copy.eyebrow}</span>
+          </div>
 
-      <div className="mt-14 grid gap-10 md:grid-cols-3">
-        <section>
-          <h2 className="text-lg font-semibold">{copy.conceptTitle}</h2>
-          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{copy.conceptBody}</p>
-        </section>
-        <section>
-          <h2 className="text-lg font-semibold">{copy.localTitle}</h2>
-          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{copy.localBody}</p>
-          <p className="mt-3 font-mono text-xs break-all text-foreground">{localUrl}</p>
-        </section>
-        <section>
-          <h2 className="text-lg font-semibold">{copy.publicTitle}</h2>
-          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{copy.publicBody}</p>
-        </section>
+          <h1 className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl">
+            {copy.title}
+          </h1>
+
+          <p className="ct-enter-delay-2 mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-[17px]">
+            {copy.lede}
+          </p>
+
+          <div className="ct-enter-delay-3 mt-7 flex flex-wrap gap-3">
+            <Link href="/connect" className="tg-btn tg-btn-primary ct-btn-glow inline-flex">
+              <span>{copy.connectCta}</span>
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+            <Link href="/app/connections" className="tg-btn tg-btn-secondary inline-flex">
+              {locale === "id" ? "Buka Koneksi Workspace" : "Open Workspace Connections"}
+            </Link>
+          </div>
+        </div>
       </div>
 
-      <div className="mt-8">
-        <Link href="/connect" className="tg-btn tg-btn-primary inline-flex">
-          {copy.connectCta}
-        </Link>
+      <div className="mx-auto w-full max-w-[1240px] px-4 py-14 sm:px-6 lg:px-8">
+        {/* Transport, Endpoint, Auth Cards */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <section className="ct-surface-card rounded-[16px] p-6">
+            <div className="flex items-center gap-2 text-link">
+              <Plug className="h-4 w-4" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-foreground">{copy.conceptTitle}</h2>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              {copy.conceptBody}
+            </p>
+          </section>
+
+          <section className="ct-surface-featured rounded-[16px] p-6">
+            <div className="flex items-center gap-2 text-link">
+              <Server className="h-4 w-4" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-foreground">{copy.localTitle}</h2>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{copy.localBody}</p>
+            <div className="mt-4 flex items-center justify-between gap-2 rounded-[9px] border border-border bg-code-bg px-3 py-2">
+              <code className="truncate font-mono text-xs text-link">{mcpUrl}</code>
+              <button
+                type="button"
+                onClick={() => void handleCopy()}
+                aria-label={locale === "id" ? "Salin URL MCP" : "Copy MCP URL"}
+                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+          </section>
+
+          <section className="ct-surface-card rounded-[16px] p-6">
+            <div className="flex items-center gap-2 text-link">
+              <KeyRound className="h-4 w-4" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-foreground">{copy.publicTitle}</h2>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{copy.publicBody}</p>
+          </section>
+        </div>
+
+        {/* 4 Target Clients: ChatGPT, Claude, Gemini, Hermes */}
+        <section className="mt-16">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+              {copy.statusTitle}
+            </h2>
+            <span className="font-mono text-xs text-subtle-foreground">
+              ChatGPT · Claude · Gemini · Hermes
+            </span>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            {copy.rows.map((row) => (
+              <article
+                key={row.name}
+                className="ct-surface-card flex flex-col justify-between rounded-[16px] p-6 transition-colors hover:border-border-strong"
+              >
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-lg font-semibold tracking-tight text-foreground">
+                      {row.name}
+                    </h3>
+                    <span className="rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 font-mono text-[11px] font-medium text-link">
+                      {row.status}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{row.detail}</p>
+                </div>
+                <div className="mt-5 border-t border-border/80 pt-3">
+                  <Link
+                    href="/connect"
+                    className="inline-flex items-center gap-1.5 font-mono text-xs font-medium text-link hover:underline"
+                  >
+                    <span>{locale === "id" ? "Lihat panduan koneksi" : "View setup guide"}</span>
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Link>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        {/* Resources & Prompts */}
+        <section className="mt-16 grid gap-6 border-t border-border pt-14 lg:grid-cols-2">
+          <div className="ct-surface-featured rounded-[16px] p-6">
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">
+              Resources &amp; URI templates
+            </h2>
+            <ul className="mt-4 divide-y divide-border">
+              {RESOURCE_CATALOG.map((resource) => (
+                <li key={resource.uri} className="py-3 first:pt-0 last:pb-0">
+                  <p className="font-mono text-xs font-semibold text-link">{resource.uri}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    {resource.description}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="ct-surface-featured rounded-[16px] p-6">
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">
+              MCP Prompts
+            </h2>
+            <ul className="mt-4 divide-y divide-border">
+              {PROMPT_CATALOG.map((prompt) => (
+                <li key={prompt.name} className="py-3 first:pt-0 last:pb-0">
+                  <p className="font-mono text-xs font-semibold text-link">{prompt.name}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    {prompt.description}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
       </div>
-
-      <section className="mt-16 grid gap-10 lg:grid-cols-2">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Resources and templates</h2>
-          <ul className="mt-4 space-y-4">
-            {RESOURCE_CATALOG.map((resource) => (
-              <li key={resource.uri}>
-                <p className="font-mono text-xs text-primary">{resource.uri}</p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{resource.description}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Prompts</h2>
-          <ul className="mt-4 space-y-4">
-            {PROMPT_CATALOG.map((prompt) => (
-              <li key={prompt.name}>
-                <p className="font-mono text-xs text-primary">{prompt.name}</p>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{prompt.description}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <section className="mt-16">
-        <h2 className="text-2xl font-semibold tracking-tight">{copy.statusTitle}</h2>
-        <ul className="mt-6 border-t border-border">
-          {copy.rows.map((row) => (
-            <li key={row.name} className="grid gap-2 border-b border-border py-5 md:grid-cols-[16rem_minmax(0,1fr)]">
-              <div>
-                <p className="text-sm font-semibold text-foreground">{row.name}</p>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-link">{row.status}</p>
-              </div>
-              <p className="text-sm leading-relaxed text-muted-foreground">{row.detail}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
     </main>
   );
 }

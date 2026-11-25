@@ -1,9 +1,14 @@
 "use client";
 
-import { Activity, Coins, Layers, RefreshCw } from "lucide-react";
+import { Activity, Coins, Gauge, Layers, Radar, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StatusIndicator } from "@/components/status-badges";
+import { useAppPreferences } from "@/components/app-preferences";
+import {
+  BudgetStateBadge,
+  QuotaProfileBadge,
+  StatusIndicator,
+} from "@/components/status-badges";
 import {
   Badge,
   Button,
@@ -16,6 +21,7 @@ import {
   Skeleton,
 } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
+import { KNOWN_BUDGET_STATES, presentBudgetState } from "@/lib/budget-state";
 import {
   fetchCapabilities,
   fetchUsage,
@@ -53,6 +59,8 @@ function capabilityTone(status: string): "positive" | "warning" | "neutral" {
 }
 
 export function UsageConsole() {
+  const { locale } = useAppPreferences();
+  const isId = locale === "id";
   const { pushToast } = useToast();
 
   const [usage, setUsage] = useState<UsagePayload | null>(null);
@@ -89,9 +97,9 @@ export function UsageConsole() {
 
       if (isManual) {
         if (!usageRes.ok || !capRes.ok) {
-          pushToast("Usage refresh completed with errors.", "error");
+          pushToast("Usage telemetry check completed with degraded status.", "info");
         } else {
-          pushToast("Usage telemetry refreshed.", "info");
+          pushToast("Usage telemetry refreshed.", "success");
         }
       }
     },
@@ -136,22 +144,36 @@ export function UsageConsole() {
 
   const quota = usage?.tool_quota ?? null;
   const credits = usage?.cmc_credits ?? null;
+  const serverMode = usage?.server_mode ?? null;
   const probeRows = capabilities?.results ?? [];
+
+  const budget = presentBudgetState(serverMode?.budget_state);
+  const creditUtilizationPct =
+    credits &&
+    credits.monthly_allowance !== null &&
+    credits.monthly_allowance > 0
+      ? Math.min(100, Math.round((credits.credits_this_month / credits.monthly_allowance) * 100))
+      : null;
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Usage & Limits"
-        description="Monitor CoinTrac tool consumption and upstream data-provider usage separately."
+        title={isId ? "Penggunaan, Kuota & Kredit" : "Usage, Quota & Credit Accounting"}
+        description={
+          isId
+            ? "Pemisahan transparan antara kuota API CoinTrac pribadi Anda dan penggunaan kredit CoinMarketCap di upstream."
+            : "Transparent separation between your personal CoinTrac API quota and upstream CoinMarketCap credit governance."
+        }
         actions={
           <Button
-            variant="secondary"
+            variant="primary"
             size="md"
             loading={refreshing}
             onClick={() => void loadAll(true)}
+            className="ct-btn-glow"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            <span>Refresh</span>
+            <span>{isId ? "Muat ulang" : "Refresh"}</span>
           </Button>
         }
       />
@@ -164,15 +186,173 @@ export function UsageConsole() {
         />
       ) : null}
 
-      {/* Strictly Separated Top-Level Sections: CoinTrac Usage vs CoinMarketCap Credits */}
+      {/* Top 3-Column Budget & Quota Profile Transparency Bento */}
+      <section aria-labelledby="governance-heading" className="space-y-4">
+        <SectionHeader
+          id="governance-heading"
+          title={isId ? "Profil kuota & tata kelola anggaran" : "Quota profile & upstream budget governance"}
+          description={
+            isId
+              ? "Profil server aktif, status anggaran kredit bulanan, dan ketersediaan Deep Scan."
+              : "Live server profile, monthly credit budget state, and Deep Scan availability."
+          }
+        />
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {/* Card 1: Quota Profile (startup vs basic) */}
+          <Card className="ct-surface-featured flex flex-col justify-between gap-4 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <ShieldCheck className="h-4 w-4 text-link" aria-hidden="true" />
+                <span>{isId ? "Profil kuota" : "Quota profile"}</span>
+              </span>
+              {loading ? (
+                <StatusIndicator state="LOADING" />
+              ) : (
+                <QuotaProfileBadge profile={serverMode?.effective_profile} />
+              )}
+            </div>
+
+            {loading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="font-mono text-lg font-semibold uppercase text-foreground">
+                    {serverMode?.effective_profile ?? "—"}
+                  </p>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {isId ? "Tier terdeteksi:" : "Detected tier:"}{" "}
+                    <strong className="uppercase text-foreground">
+                      {serverMode?.detected_tier ?? "—"}
+                    </strong>
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {serverMode?.effective_profile
+                    ? isId
+                      ? "TTL cache dan anggaran bulanan mengikuti konfigurasi server aktif."
+                      : "Cache TTL and the monthly upstream budget come from server configuration. This page does not repeat those numbers."
+                    : isId
+                      ? "Profil kuota efektif tidak disertakan dalam respons."
+                      : "The effective quota profile was not included in the usage payload."}
+                </p>
+              </div>
+            )}
+          </Card>
+
+          {/* Card 2: Budget State (NORMAL / CONSERVATION / CUTOFF) */}
+          <Card className="flex flex-col justify-between gap-4 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <Gauge className="h-4 w-4 text-link" aria-hidden="true" />
+                <span>{isId ? "Status anggaran" : "Budget state"}</span>
+              </span>
+              {loading ? (
+                <StatusIndicator state="LOADING" />
+              ) : (
+                <BudgetStateBadge state={serverMode?.budget_state} />
+              )}
+            </div>
+
+            {loading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : (
+              <div className="space-y-3">
+                <div
+                  className="grid grid-cols-2 gap-1.5 sm:grid-cols-3"
+                  aria-label="Budget governance stages"
+                >
+                  {KNOWN_BUDGET_STATES.map((stage) => {
+                    const stagePresentation = presentBudgetState(stage);
+                    const isCurrent = budget.code === stage;
+                    const activeClass =
+                      stagePresentation.visual === "NORMAL"
+                        ? "border-positive/45 bg-positive-soft text-positive"
+                        : stagePresentation.visual === "ELEVATED"
+                          ? "border-info/45 bg-info-soft text-info"
+                          : stagePresentation.visual === "CONSERVATION"
+                            ? "border-warning/45 bg-warning-soft text-warning"
+                            : stagePresentation.visual === "EMERGENCY"
+                              ? "border-destructive/45 bg-destructive-soft text-destructive"
+                              : "border-destructive bg-destructive text-destructive-foreground";
+                    return (
+                      <div
+                        key={stage}
+                        className={`rounded-[8px] border px-2 py-1.5 text-center font-mono text-[10px] font-semibold ${
+                          isCurrent
+                            ? activeClass
+                            : "border-border bg-background/50 text-subtle-foreground"
+                        }`}
+                      >
+                        {stage}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">{budget.description}</p>
+              </div>
+            )}
+          </Card>
+
+          {/* Card 3: Deep Scan Availability */}
+          <Card className="flex flex-col justify-between gap-4 p-5 md:col-span-2 lg:col-span-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <Radar className="h-4 w-4 text-link" aria-hidden="true" />
+                <span>{isId ? "Ketersediaan Deep Scan" : "Deep Scan availability"}</span>
+              </span>
+              {loading ? (
+                <StatusIndicator state="LOADING" />
+              ) : serverMode?.deep_scan_available === true ? (
+                <StatusIndicator state="CONNECTED" label="AVAILABLE" />
+              ) : serverMode?.deep_scan_available === false ? (
+                <StatusIndicator state="STANDBY" label="CONSERVED" />
+              ) : (
+                <StatusIndicator state="UNVERIFIED" label="—" />
+              )}
+            </div>
+
+            {loading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : (
+              <div className="space-y-2">
+                <p className="font-mono text-sm font-semibold text-foreground">
+                  {serverMode?.deep_scan_available === true
+                    ? isId
+                      ? "Deep Scan multi-aset aktif"
+                      : "Multi-asset Deep Scan enabled"
+                    : serverMode?.deep_scan_available === false
+                      ? isId
+                        ? "Deep Scan dihemat"
+                        : "Deep Scan conserved"
+                      : isId
+                        ? "Status Deep Scan belum terverifikasi"
+                        : "Deep Scan status unverified"}
+                </p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {serverMode?.deep_scan_reason ??
+                    (isId
+                      ? "Ketersediaan Deep Scan dilaporkan setelah telemetri selesai dimuat."
+                      : "Deep Scan availability is reported once usage telemetry loads.")}
+                </p>
+              </div>
+            )}
+          </Card>
+        </div>
+      </section>
+
+      {/* Strictly Separated Two-Column Comparison: CoinTrac Quota vs CoinMarketCap Credits */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Section 1: CoinTrac Usage */}
-        <Card className="flex flex-col justify-between space-y-4 p-5">
+        {/* Section 1: CoinTrac Application Quota */}
+        <Card className="ct-surface-featured flex flex-col justify-between space-y-4 p-5">
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-link" aria-hidden="true" />
-                <h2 className="text-base font-semibold text-foreground">CoinTrac Usage</h2>
+                <h2 className="text-base font-semibold text-foreground">
+                  {isId ? "1. Kuota Aplikasi CoinTrac" : "1. CoinTrac Application Quota"}
+                </h2>
                 <InfoTip
                   label="About CoinTrac application quota"
                   text="Tracks requests processed by CoinTrac across MCP, REST, and Playground under your verified account. All API keys you create share this single account rate window."
@@ -181,16 +361,17 @@ export function UsageConsole() {
               {loading ? (
                 <StatusIndicator state="LOADING" />
               ) : usageError ? (
-                <StatusIndicator state="ERROR" />
+                <StatusIndicator state="STANDBY" />
               ) : (
                 <Badge tone="brand">
-                  {quota ? `${quota.active_tier.toUpperCase()} TIER` : "UNAVAILABLE"}
+                  {quota ? `${quota.active_tier.toUpperCase()} TIER` : "—"}
                 </Badge>
               )}
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Application-level tool quota enforced by CoinTrac per account. Separate from upstream
-              CoinMarketCap plan billing.
+              {isId
+                ? "Batas laju per akun yang diterapkan CoinTrac di klien MCP, kunci REST, dan workspace. Terpisah dari tagihan CoinMarketCap."
+                : "Per-account request rate window enforced by CoinTrac across your MCP clients, REST keys, and workspace desks. Independent of upstream CoinMarketCap billing."}
             </p>
           </div>
 
@@ -205,37 +386,41 @@ export function UsageConsole() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
                 <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Rate limit window
+                  {isId ? "Jendela batas laju" : "Rate limit window"}
                 </p>
-                <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+                <p className="mt-1 font-mono text-base font-semibold tabular-nums text-foreground">
                   {quota
                     ? `${quota.rate_limit_per_min} req / ${quota.window_seconds}s`
-                    : "Unavailable"}
+                    : "—"}
                 </p>
               </div>
               <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
                 <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Calls (24h / 30d)
+                  {isId ? "Panggilan (24j / 30h)" : "Calls (24h / 30d)"}
                 </p>
-                <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                  {quota ? `${quota.calls_last_24h} / ${quota.calls_last_30d}` : "Unavailable"}
+                <p className="mt-1 font-mono text-base font-semibold tabular-nums text-foreground">
+                  {quota
+                    ? `${quota.calls_last_24h.toLocaleString()} / ${quota.calls_last_30d.toLocaleString()}`
+                    : "—"}
                 </p>
               </div>
               <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
                 <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Daily quota limit
+                  {isId ? "Batas harian" : "Daily quota cap"}
                 </p>
                 <p className="mt-1 font-mono text-xs font-medium text-foreground">
                   {!quota
-                    ? "Unavailable"
+                    ? "—"
                     : quota.daily_quota_limit !== null
-                      ? `${quota.daily_quota_limit} calls / day`
-                      : "No daily cap returned"}
+                      ? `${quota.daily_quota_limit.toLocaleString()} ${isId ? "panggilan / hari" : "calls / day"}`
+                      : isId
+                        ? "Tanpa batas harian (mengikuti rate limit)"
+                        : "Uncapped (rate-window governed)"}
                 </p>
               </div>
               <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
                 <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Calls by surface
+                  {isId ? "Panggilan per jalur" : "Calls by surface"}
                 </p>
                 {quota ? (
                   <p className="mt-1 font-mono text-xs tabular-nums text-foreground">
@@ -243,37 +428,39 @@ export function UsageConsole() {
                     {quota.calls_by_surface.playground}
                   </p>
                 ) : (
-                  <p className="mt-1 font-mono text-xs text-muted-foreground">Unavailable</p>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">—</p>
                 )}
               </div>
             </div>
           )}
         </Card>
 
-        {/* Section 2: CoinMarketCap API Credits */}
-        <Card className="flex flex-col justify-between space-y-4 p-5">
+        {/* Section 2: CoinMarketCap Upstream Credits */}
+        <Card className="ct-surface-featured flex flex-col justify-between space-y-4 p-5">
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Coins className="h-4 w-4 text-link" aria-hidden="true" />
                 <h2 className="text-base font-semibold text-foreground">
-                  CoinMarketCap API Credits
+                  {isId ? "2. Kredit Upstream CoinMarketCap" : "2. Upstream CoinMarketCap Credits"}
                 </h2>
                 <InfoTip
                   label="About upstream CoinMarketCap credits"
-                  text="CoinMarketCap credits are upstream data-provider consumption tracked separately from your CoinTrac quota. CoinTrac does not own, control, or reset CoinMarketCap credits. Consult your CoinMarketCap developer dashboard for authoritative billing."
+                  text="CoinMarketCap credits measure upstream data-provider consumption on uncached misses. Cached responses consume 0 CMC credits. Consult your CoinMarketCap dashboard for authoritative billing."
                 />
               </div>
               <Badge tone="neutral">UPSTREAM PROVIDER</Badge>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Estimated upstream CoinMarketCap credit cost attributed to your account&apos;s uncached
-              calls in{" "}
+              {isId ? "Pemakaian kredit upstream untuk " : "Attributed upstream credit spend for "}
               <span className="font-mono text-foreground">
-                {credits?.billing_month_utc ?? "current UTC month"}
+                {credits?.billing_month_utc ?? (isId ? "bulan UTC berjalan" : "current UTC month")}
               </span>
-              . Cached responses consume 0 upstream credits. Consult your CoinMarketCap account for
-              authoritative plan billing.
+              . {isId ? "Cache hit memakai " : "Cache hits consume "}
+              <span className="font-mono text-positive">
+                0 {isId ? "kredit" : "credits"}
+              </span>
+              .
             </p>
           </div>
 
@@ -285,45 +472,76 @@ export function UsageConsole() {
               <Skeleton className="h-20 w-full" />
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Attributed this month
-                </p>
-                <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                  {credits ? `${credits.credits_this_month} credits` : "Unavailable"}
-                </p>
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                    {isId ? "Terpakai bulan ini" : "Attributed this month"}
+                  </p>
+                  <p className="mt-1 font-mono text-base font-semibold tabular-nums text-foreground">
+                    {credits
+                      ? `${credits.credits_this_month.toLocaleString()} ${isId ? "kredit" : "credits"}`
+                      : "—"}
+                  </p>
+                </div>
+                <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                    {isId ? "Kuota bulanan / sisa" : "Monthly allowance / left"}
+                  </p>
+                  <p className="mt-1 font-mono text-xs font-medium tabular-nums text-foreground">
+                    {credits && credits.monthly_allowance !== null
+                      ? `${credits.monthly_allowance.toLocaleString()} (${
+                          credits.remaining_credits !== null
+                            ? credits.remaining_credits.toLocaleString()
+                            : "—"
+                        } ${isId ? "tersisa" : "left"})`
+                      : "—"}
+                  </p>
+                </div>
+                <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                    {isId ? "Efisiensi cache hit" : "Cache hit efficiency"}
+                  </p>
+                  <p className="mt-1 font-mono text-base font-semibold tabular-nums text-positive">
+                    {credits && credits.cache_hit_rate_pct !== null
+                      ? `${credits.cache_hit_rate_pct}%`
+                      : "—"}
+                  </p>
+                </div>
+                <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                    {isId ? "Rata-rata latensi" : "Average latency"}
+                  </p>
+                  <p className="mt-1 font-mono text-base font-semibold tabular-nums text-foreground">
+                    {credits && credits.average_latency_ms !== null
+                      ? `${credits.average_latency_ms} ms`
+                      : "—"}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Plan allowance / left
-                </p>
-                <p className="mt-1 font-mono text-xs font-medium text-muted-foreground">
-                  {credits && credits.monthly_allowance !== null
-                    ? `${credits.monthly_allowance} (${credits.remaining_credits ?? "—"} remaining)`
-                    : "Unavailable"}
-                </p>
-              </div>
-              <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Cache hit rate
-                </p>
-                <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                  {credits && credits.cache_hit_rate_pct !== null
-                    ? `${credits.cache_hit_rate_pct}%`
-                    : "Unavailable"}
-                </p>
-              </div>
-              <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Average latency
-                </p>
-                <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                  {credits && credits.average_latency_ms !== null
-                    ? `${credits.average_latency_ms} ms`
-                    : "Unavailable"}
-                </p>
-              </div>
+
+              {creditUtilizationPct !== null ? (
+                <div className="space-y-1.5 rounded-[10px] border border-border bg-background/60 p-3">
+                  <div className="flex items-center justify-between font-mono text-[11px]">
+                    <span className="text-muted-foreground">
+                      {isId ? "Pemakaian anggaran bulanan" : "Monthly budget utilization"}
+                    </span>
+                    <span className="font-semibold text-foreground">{creditUtilizationPct}%</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={`h-full rounded-full ${
+                        creditUtilizationPct >= 85
+                          ? "bg-destructive"
+                          : creditUtilizationPct >= 65
+                            ? "bg-warning"
+                            : "bg-primary"
+                      }`}
+                      style={{ width: `${creditUtilizationPct}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
         </Card>
@@ -333,19 +551,23 @@ export function UsageConsole() {
       <section aria-labelledby="usage-history-heading" className="space-y-4">
         <SectionHeader
           id="usage-history-heading"
-          title="Activity breakdown"
-          description="Client-side date filter over retrieved account logs (backend returns up to 1,000 recent request logs)."
+          title={isId ? "Rincian aktivitas" : "Activity breakdown"}
+          description={
+            isId
+              ? "Filter tanggal atas log aktivitas akun yang diambil (hingga 1.000 permintaan terakhir)."
+              : "Client-side date filter over retrieved account logs (up to 1,000 recent request logs)."
+          }
           action={
             <div
               role="group"
               aria-label="Filter retrieved usage logs by window"
-              className="inline-flex rounded-[10px] border border-border bg-card p-1"
+              className="inline-flex h-9 items-center rounded-full border border-border bg-card/80 p-0.5"
             >
               {(
                 [
                   { value: "7d", label: "7d" },
                   { value: "30d", label: "30d" },
-                  { value: "all", label: "All retrieved" },
+                  { value: "all", label: isId ? "Semua" : "All retrieved" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -353,9 +575,9 @@ export function UsageConsole() {
                   type="button"
                   aria-pressed={windowFilter === opt.value}
                   onClick={() => setWindowFilter(opt.value)}
-                  className={`min-h-8 cursor-pointer rounded-[8px] px-3 font-mono text-xs font-semibold transition-colors ${
+                  className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors ${
                     windowFilter === opt.value
-                      ? "bg-foreground text-background"
+                      ? "bg-primary text-white shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -370,7 +592,9 @@ export function UsageConsole() {
           {/* Daily Totals */}
           <Card className="overflow-hidden">
             <div className="border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold text-foreground">Daily activity (UTC)</h3>
+              <h3 className="text-sm font-semibold text-foreground">
+                {isId ? "Aktivitas harian (UTC)" : "Daily activity (UTC)"}
+              </h3>
             </div>
             {loading ? (
               <div className="space-y-2 p-4">
@@ -379,11 +603,11 @@ export function UsageConsole() {
               </div>
             ) : usageError ? (
               <p className="p-4 text-xs text-muted-foreground">
-                Daily activity unavailable while telemetry endpoint is unreachable.
+                Daily activity unavailable while telemetry endpoint is in standby.
               </p>
             ) : filteredDaily.length === 0 ? (
-              <p className="p-5 text-center text-xs text-muted-foreground">
-                No recorded tool calls in this window yet (0 calls).
+              <p className="p-6 text-center text-xs text-muted-foreground">
+                No recorded tool calls in this window yet.
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -427,10 +651,10 @@ export function UsageConsole() {
               </div>
             ) : usageError ? (
               <p className="p-4 text-xs text-muted-foreground">
-                Tool breakdown unavailable while telemetry endpoint is unreachable.
+                Tool breakdown unavailable while telemetry endpoint is in standby.
               </p>
             ) : (usage?.tool_breakdown ?? []).length === 0 ? (
-              <p className="p-5 text-center text-xs text-muted-foreground">
+              <p className="p-6 text-center text-xs text-muted-foreground">
                 No tool executions recorded for this account yet.
               </p>
             ) : (
@@ -478,7 +702,7 @@ export function UsageConsole() {
             </div>
           ) : usageError ? (
             <p className="p-4 text-xs text-muted-foreground">
-              Recent requests unavailable while telemetry endpoint is unreachable.
+              Recent requests unavailable while telemetry endpoint is in standby.
             </p>
           ) : filteredRequests.length === 0 ? (
             <div className="p-4">
@@ -559,7 +783,7 @@ export function UsageConsole() {
                     {req.evidence_id ? (
                       <Link
                         href={`/app/evidence?id=${encodeURIComponent(req.evidence_id)}`}
-                        className="inline-flex min-h-8 items-center font-mono text-xs font-semibold text-link hover:underline"
+                        className="inline-flex min-h-11 items-center font-mono text-xs font-semibold text-link hover:underline"
                       >
                         Inspect {req.evidence_id}
                       </Link>
@@ -576,8 +800,16 @@ export function UsageConsole() {
       <section aria-labelledby="tier-transparency-heading" className="space-y-4">
         <SectionHeader
           id="tier-transparency-heading"
-          title="CoinMarketCap endpoint capabilities & data modes"
-          description="CoinTrac discloses LIVE, CACHED, SNAPSHOT, and TIER_RESTRICTED explicitly (for example, historical OHLCV returns HTTP 403 / CMC code 1006 on Basic plans)."
+          title={
+            isId
+              ? "Kemampuan endpoint CoinMarketCap & mode data"
+              : "CoinMarketCap endpoint capabilities & data modes"
+          }
+          description={
+            isId
+              ? "CoinTrac menampilkan status LIVE, CACHED, SNAPSHOT, dan TIER_RESTRICTED secara terbuka (misalnya OHLCV historis mengembalikan HTTP 403 / kode CMC 1006 pada paket Basic)."
+              : "CoinTrac discloses LIVE, CACHED, SNAPSHOT, and TIER_RESTRICTED explicitly (for example, historical OHLCV returns HTTP 403 / CMC code 1006 on Basic plans)."
+          }
         />
 
         <Card className="overflow-hidden">

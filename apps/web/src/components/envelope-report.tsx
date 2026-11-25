@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { AlertCircle, ArrowUpRight, ShieldCheck } from "lucide-react";
 import {
   formatCompactUsd,
@@ -44,27 +45,39 @@ function MetricTile({
   value,
   sub,
   toneClass = "text-foreground",
+  barPct,
+  barClass = "bg-primary",
 }: {
   label: string;
   value: string;
   sub?: string;
   toneClass?: string;
+  barPct?: number | null;
+  barClass?: string;
 }) {
+  const clamped =
+    typeof barPct === "number" && Number.isFinite(barPct)
+      ? Math.max(0, Math.min(100, barPct))
+      : null;
   return (
-    <div className="rounded-xl border border-border bg-background/60 p-3.5">
-      <p className="font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <p
-        className={`mt-1.5 font-mono text-lg font-bold tabular-nums ${toneClass}`}
-      >
-        {value}
-      </p>
-      {sub && (
-        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          {sub}
+    <div className="ct-surface-card flex flex-col justify-between rounded-[14px] p-4 transition-colors hover:border-border-strong">
+      <div>
+        <p className="font-mono text-[10.5px] font-semibold uppercase tracking-wider text-subtle-foreground">
+          {label}
         </p>
-      )}
+        <p className={`mt-1.5 font-mono text-xl font-semibold tabular-nums ${toneClass}`}>
+          {value}
+        </p>
+      </div>
+      {clamped !== null ? (
+        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${barClass}`}
+            style={{ width: `${clamped}%` }}
+          />
+        </div>
+      ) : null}
+      {sub ? <p className="mt-2 font-mono text-[11px] text-muted-foreground">{sub}</p> : null}
     </div>
   );
 }
@@ -91,137 +104,210 @@ function renderToolData(envelope: EvidenceEnvelope) {
   switch (envelope.tool) {
     case "get_market_overview": {
       const d = envelope.data as MarketOverviewData;
+      const btcDom =
+        typeof d.btc_dominance === "number" && Number.isFinite(d.btc_dominance)
+          ? Math.max(0, Math.min(100, d.btc_dominance))
+          : null;
+      const ethDom =
+        typeof d.eth_dominance === "number" && Number.isFinite(d.eth_dominance)
+          ? Math.max(0, Math.min(100 - (btcDom ?? 0), d.eth_dominance))
+          : null;
+      const fg =
+        typeof d.fear_greed_value === "number" && Number.isFinite(d.fear_greed_value)
+          ? Math.max(0, Math.min(100, d.fear_greed_value))
+          : null;
+      const fgTone =
+        fg === null
+          ? "bg-muted-foreground"
+          : fg >= 60
+            ? "bg-positive"
+            : fg <= 35
+              ? "bg-destructive"
+              : "bg-warning";
+
       return (
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-5">
+          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             <MetricTile
               label="Total Market Cap"
               value={formatCompactUsd(d.total_market_cap)}
               sub={`24h: ${formatPct(d.total_market_cap_change_24h_pct, { signed: true })}`}
+              toneClass={pctToneClass(d.total_market_cap_change_24h_pct)}
             />
             <MetricTile
               label="24h Total Volume"
               value={formatCompactUsd(d.total_volume_24h)}
               sub={`Quote: ${d.quote_currency}`}
             />
-            <MetricTile
-              label="BTC / ETH Dominance"
-              value={`${formatPct(d.btc_dominance, { decimals: 1 })} / ${formatPct(d.eth_dominance, { decimals: 1 })}`}
-              sub={`BTC 24h: ${formatPct(d.btc_dominance_change_24h, { signed: true })}`}
-            />
+            <div className="ct-surface-card flex flex-col justify-between rounded-[14px] p-4 transition-colors hover:border-border-strong">
+              <div>
+                <p className="font-mono text-[10.5px] font-semibold uppercase tracking-wider text-subtle-foreground">
+                  BTC / ETH Dominance
+                </p>
+                <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-foreground">
+                  {`${formatPct(d.btc_dominance, { decimals: 1 })} / ${formatPct(d.eth_dominance, { decimals: 1 })}`}
+                </p>
+              </div>
+              {btcDom !== null ? (
+                <div className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full bg-primary" style={{ width: `${btcDom}%` }} />
+                  {ethDom !== null ? (
+                    <div className="h-full bg-info" style={{ width: `${ethDom}%` }} />
+                  ) : null}
+                </div>
+              ) : null}
+              <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                {`BTC 24h: ${formatPct(d.btc_dominance_change_24h, { signed: true })}`}
+              </p>
+            </div>
             <MetricTile
               label="Fear & Greed"
               value={
-                d.fear_greed_value !== null
-                  ? `${Math.round(d.fear_greed_value)} (${d.fear_greed_classification ?? MISSING})`
+                fg !== null
+                  ? `${Math.round(fg)} (${d.fear_greed_classification ?? MISSING})`
                   : MISSING
               }
+              barPct={fg}
+              barClass={fgTone}
               sub={`Top-50 breadth: ${formatPct(d.top50_breadth_positive_pct, { decimals: 1 })}`}
             />
           </div>
 
           {(d.btc || d.eth || d.sol) && (
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3.5 sm:grid-cols-3">
               {[d.btc, d.eth, d.sol]
                 .filter((coin): coin is NonNullable<typeof coin> => coin !== null)
-                .map((coin) => (
-                  <div
-                    key={coin.symbol}
-                    className="rounded-xl border border-border bg-background/60 p-3.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <CoinLogo
-                          cmcId={coin.cmc_id}
-                          symbol={coin.symbol}
-                          name={coin.name}
-                          size="md"
-                        />
-                        <div className="min-w-0 leading-tight">
-                          <p className="font-mono text-xs font-bold text-foreground">
-                            {coin.symbol}
-                          </p>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {coin.name ?? coin.symbol}
-                          </p>
+                .map((coin) => {
+                  const pos =
+                    typeof coin.percent_change_24h === "number" && coin.percent_change_24h >= 0;
+                  return (
+                    <Link
+                      key={coin.symbol}
+                      href={`/app/assets?symbol=${encodeURIComponent(coin.symbol)}`}
+                      className="ct-surface-card group rounded-[14px] p-4 transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:bg-card-elevated"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <CoinLogo
+                            cmcId={coin.cmc_id}
+                            symbol={coin.symbol}
+                            name={coin.name}
+                            size="md"
+                          />
+                          <div className="min-w-0 leading-tight">
+                            <p className="font-mono text-xs font-bold text-foreground group-hover:text-link">
+                              {coin.symbol}
+                            </p>
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {coin.name ?? coin.symbol}
+                            </p>
+                          </div>
                         </div>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums ${
+                            coin.percent_change_24h === null
+                              ? "bg-muted text-muted-foreground"
+                              : pos
+                                ? "bg-positive-soft text-positive"
+                                : "bg-destructive-soft text-destructive"
+                          }`}
+                        >
+                          {formatPct(coin.percent_change_24h, { signed: true })}
+                        </span>
                       </div>
-                      <span
-                        className={`shrink-0 font-mono text-xs font-semibold tabular-nums ${pctToneClass(coin.percent_change_24h)}`}
-                      >
-                        {formatPct(coin.percent_change_24h, { signed: true })}
-                      </span>
-                    </div>
-                    <p className="mt-2 font-mono text-base font-bold tabular-nums text-foreground">
-                      {formatUsd(coin.price)}
-                    </p>
-                  </div>
-                ))}
+                      <div className="mt-3 flex items-baseline justify-between gap-2">
+                        <p className="font-mono text-lg font-bold tabular-nums text-foreground">
+                          {formatUsd(coin.price)}
+                        </p>
+                        <ArrowUpRight
+                          className="h-3.5 w-3.5 text-subtle-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-link"
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </Link>
+                  );
+                })}
             </div>
           )}
 
           {(d.top_gainers.length > 0 || d.top_losers.length > 0) && (
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="overflow-x-auto rounded-xl border border-border bg-background/50">
-                <p className="border-b border-border bg-card-elevated/60 px-3.5 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-positive">
+              <div className="ct-surface-card overflow-hidden rounded-[14px]">
+                <p className="border-b border-border bg-card-elevated/60 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-positive">
                   Top Gainers (24h)
                 </p>
-                <table className="w-full text-left font-mono text-xs tabular-nums">
-                  <tbody className="divide-y divide-border">
-                    {d.top_gainers.map((item) => (
-                      <tr key={item.symbol}>
-                        <td className="px-3.5 py-2 font-bold text-foreground">
-                          <span className="inline-flex items-center gap-2">
-                            <CoinLogo
-                              cmcId={item.cmc_id}
-                              symbol={item.symbol}
-                              name={item.name}
-                              size="sm"
-                            />
-                            <span>{item.symbol}</span>
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2 text-right text-muted-foreground">
-                          {formatUsd(item.price)}
-                        </td>
-                        <td className="px-3.5 py-2 text-right font-semibold text-positive">
-                          {formatPct(item.percent_change_24h, { signed: true })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left font-mono text-xs tabular-nums">
+                    <tbody className="divide-y divide-border">
+                      {d.top_gainers.map((item) => (
+                        <tr
+                          key={item.symbol}
+                          className="transition-colors hover:bg-card-elevated/60"
+                        >
+                          <td className="px-4 py-2.5 font-bold text-foreground">
+                            <Link
+                              href={`/app/assets?symbol=${encodeURIComponent(item.symbol)}`}
+                              className="inline-flex items-center gap-2 hover:text-link"
+                            >
+                              <CoinLogo
+                                cmcId={item.cmc_id}
+                                symbol={item.symbol}
+                                name={item.name}
+                                size="sm"
+                              />
+                              <span>{item.symbol}</span>
+                            </Link>
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-muted-foreground">
+                            {formatUsd(item.price)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-positive">
+                            {formatPct(item.percent_change_24h, { signed: true })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-border bg-background/50">
-                <p className="border-b border-border bg-card-elevated/60 px-3.5 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-destructive">
+              <div className="ct-surface-card overflow-hidden rounded-[14px]">
+                <p className="border-b border-border bg-card-elevated/60 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-destructive">
                   Top Losers (24h)
                 </p>
-                <table className="w-full text-left font-mono text-xs tabular-nums">
-                  <tbody className="divide-y divide-border">
-                    {d.top_losers.map((item) => (
-                      <tr key={item.symbol}>
-                        <td className="px-3.5 py-2 font-bold text-foreground">
-                          <span className="inline-flex items-center gap-2">
-                            <CoinLogo
-                              cmcId={item.cmc_id}
-                              symbol={item.symbol}
-                              name={item.name}
-                              size="sm"
-                            />
-                            <span>{item.symbol}</span>
-                          </span>
-                        </td>
-                        <td className="px-3.5 py-2 text-right text-muted-foreground">
-                          {formatUsd(item.price)}
-                        </td>
-                        <td className="px-3.5 py-2 text-right font-semibold text-destructive">
-                          {formatPct(item.percent_change_24h, { signed: true })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left font-mono text-xs tabular-nums">
+                    <tbody className="divide-y divide-border">
+                      {d.top_losers.map((item) => (
+                        <tr
+                          key={item.symbol}
+                          className="transition-colors hover:bg-card-elevated/60"
+                        >
+                          <td className="px-4 py-2.5 font-bold text-foreground">
+                            <Link
+                              href={`/app/assets?symbol=${encodeURIComponent(item.symbol)}`}
+                              className="inline-flex items-center gap-2 hover:text-link"
+                            >
+                              <CoinLogo
+                                cmcId={item.cmc_id}
+                                symbol={item.symbol}
+                                name={item.name}
+                                size="sm"
+                              />
+                              <span>{item.symbol}</span>
+                            </Link>
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-muted-foreground">
+                            {formatUsd(item.price)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-destructive">
+                            {formatPct(item.percent_change_24h, { signed: true })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
@@ -233,23 +319,25 @@ function renderToolData(envelope: EvidenceEnvelope) {
       const d = envelope.data as MarketRegimeData;
       return (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="font-mono text-xs text-muted-foreground">
-              Classified Regime:
-            </span>
-            <RegimeBadge regime={d.regime} />
-            {d.signal_conflict && (
-              <span className="inline-flex shrink-0 items-center rounded-full border border-accent/40 bg-accent/15 px-2.5 py-0.5 font-mono text-[11px] font-medium text-accent">
-                SIGNAL CONFLICT
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-border bg-card-elevated/45 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="font-mono text-xs font-medium text-muted-foreground">
+                Market Regime
               </span>
-            )}
+              <RegimeBadge regime={d.regime} />
+              {d.signal_conflict && (
+                <span className="inline-flex shrink-0 items-center rounded-full border border-accent/40 bg-accent/15 px-2.5 py-0.5 font-mono text-[11px] font-medium text-accent">
+                  SIGNAL CONFLICT
+                </span>
+              )}
+            </div>
             {d.confidence && (
-              <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-muted/60 px-2.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+              <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-background/70 px-2.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
                 CONFIDENCE {d.confidence}
               </span>
             )}
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             <MetricTile
               label="Total MCap 24h"
               value={formatPct(d.total_mcap_change_24h_pct, { signed: true })}
@@ -263,6 +351,8 @@ function renderToolData(envelope: EvidenceEnvelope) {
             <MetricTile
               label="Top-50 Breadth"
               value={formatPct(d.top50_breadth_positive_pct, { decimals: 1 })}
+              barPct={d.top50_breadth_positive_pct}
+              barClass="bg-primary"
             />
             <MetricTile
               label="Fear & Greed"
@@ -270,6 +360,14 @@ function renderToolData(envelope: EvidenceEnvelope) {
                 d.fear_greed_value !== null
                   ? `${Math.round(d.fear_greed_value)} / 100`
                   : MISSING
+              }
+              barPct={d.fear_greed_value}
+              barClass={
+                d.fear_greed_value !== null && d.fear_greed_value >= 60
+                  ? "bg-positive"
+                  : d.fear_greed_value !== null && d.fear_greed_value <= 35
+                    ? "bg-destructive"
+                    : "bg-warning"
               }
               sub={
                 d.btc_outperforming_median_alt === null
@@ -285,7 +383,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
               {d.rationale.map((line) => (
                 <span
                   key={line}
-                  className="rounded-lg border border-border bg-background/70 px-2.5 py-1 font-mono text-[11px] text-foreground"
+                  className="rounded-[8px] border border-border bg-background/70 px-3 py-1 font-mono text-[11px] text-foreground"
                 >
                   {line}
                 </span>
@@ -300,16 +398,15 @@ function renderToolData(envelope: EvidenceEnvelope) {
       const d = envelope.data as ScanMoversData;
       return d.movers.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-          No assets satisfied all screening thresholds. Try widening{" "}
-          <code className="font-mono text-foreground">max_24h_gain_pct</code> or
-          lowering liquidity floors.
+          No coins matched all screening filters. Try raising the Max 24h Gain cap or lowering the
+          minimum Market Cap / Volume.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full min-w-[780px] text-left text-xs">
             <thead>
               <tr className="border-b border-border bg-card-elevated/70 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-3.5 py-2.5">Symbol</th>
+                <th className="px-3.5 py-2.5">Coin</th>
                 <th className="px-3.5 py-2.5 text-right">Market Cap</th>
                 <th className="px-3.5 py-2.5 text-right">Volume 24h</th>
                 <th className="px-3.5 py-2.5 text-right">Vol/MCap</th>
@@ -327,7 +424,10 @@ function renderToolData(envelope: EvidenceEnvelope) {
                   className="hover:bg-card-elevated/50"
                 >
                   <td className="px-3.5 py-2.5 font-bold text-foreground">
-                    <span className="inline-flex items-center gap-2">
+                    <Link
+                      href={`/app/assets?symbol=${encodeURIComponent(row.symbol)}`}
+                      className="group inline-flex items-center gap-2 hover:text-link"
+                    >
                       <CoinLogo
                         cmcId={row.cmc_id}
                         symbol={row.symbol}
@@ -337,12 +437,13 @@ function renderToolData(envelope: EvidenceEnvelope) {
                       <span>
                         {row.symbol}
                         {row.name ? (
-                          <span className="ml-1.5 font-sans font-normal text-muted-foreground">
+                          <span className="ml-1.5 font-sans font-normal text-muted-foreground group-hover:text-link/80">
                             {row.name}
                           </span>
                         ) : null}
                       </span>
-                    </span>
+                      <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                    </Link>
                   </td>
                   <td className="px-3.5 py-2.5 text-right">
                     {formatCompactUsd(row.market_cap)}
@@ -675,12 +776,16 @@ function renderToolData(envelope: EvidenceEnvelope) {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {d.volume_mcap_outliers.map((hit) => (
-                    <tr key={`${hit.symbol}-${hit.metric}`}>
+                    <tr key={`${hit.symbol}-${hit.metric}`} className="hover:bg-card-elevated/50">
                       <td className="px-3.5 py-2 font-bold">
-                        <span className="inline-flex items-center gap-2">
+                        <Link
+                          href={`/app/assets?symbol=${encodeURIComponent(hit.symbol)}`}
+                          className="group inline-flex items-center gap-2 hover:text-link"
+                        >
                           <CoinLogo cmcId={hit.cmc_id} symbol={hit.symbol} size="sm" />
                           <span>{hit.symbol}</span>
-                        </span>
+                          <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                        </Link>
                       </td>
                       <td className="px-3.5 py-2 text-right">
                         {formatRatio(hit.value)}
@@ -689,6 +794,53 @@ function renderToolData(envelope: EvidenceEnvelope) {
                         {formatNumber(hit.z_score)}
                       </td>
                       <td className="px-3.5 py-2 text-right font-bold text-accent">
+                        {formatNumber(hit.modified_z_score)}
+                      </td>
+                      <td className="px-3.5 py-2">
+                        <AnomalyDirectionBadge direction={hit.direction} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {d.price_change_outliers.length > 0 && (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <p className="border-b border-border bg-card-elevated/70 px-3.5 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-link">
+                Price Change Statistical Outliers
+              </p>
+              <table className="w-full text-left font-mono text-xs tabular-nums">
+                <thead>
+                  <tr className="border-b border-border text-[11px] text-muted-foreground">
+                    <th className="px-3.5 py-2">Symbol</th>
+                    <th className="px-3.5 py-2 text-right">24h Move</th>
+                    <th className="px-3.5 py-2 text-right">Z-Score</th>
+                    <th className="px-3.5 py-2 text-right">Mod Z (MAD)</th>
+                    <th className="px-3.5 py-2">Direction</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {d.price_change_outliers.map((hit) => (
+                    <tr key={`${hit.symbol}-${hit.metric}`} className="hover:bg-card-elevated/50">
+                      <td className="px-3.5 py-2 font-bold">
+                        <Link
+                          href={`/app/assets?symbol=${encodeURIComponent(hit.symbol)}`}
+                          className="group inline-flex items-center gap-2 hover:text-link"
+                        >
+                          <CoinLogo cmcId={hit.cmc_id} symbol={hit.symbol} size="sm" />
+                          <span>{hit.symbol}</span>
+                          <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                        </Link>
+                      </td>
+                      <td className={`px-3.5 py-2 text-right font-semibold ${pctToneClass(hit.value)}`}>
+                        {formatPct(hit.value, { signed: true })}
+                      </td>
+                      <td className="px-3.5 py-2 text-right">
+                        {formatNumber(hit.z_score)}
+                      </td>
+                      <td className="px-3.5 py-2 text-right font-bold text-link">
                         {formatNumber(hit.modified_z_score)}
                       </td>
                       <td className="px-3.5 py-2">
@@ -717,12 +869,16 @@ function renderToolData(envelope: EvidenceEnvelope) {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {d.btc_divergences.map((div) => (
-                    <tr key={div.symbol}>
+                    <tr key={div.symbol} className="hover:bg-card-elevated/50">
                       <td className="px-3.5 py-2 font-bold">
-                        <span className="inline-flex items-center gap-2">
+                        <Link
+                          href={`/app/assets?symbol=${encodeURIComponent(div.symbol)}`}
+                          className="group inline-flex items-center gap-2 hover:text-link"
+                        >
                           <CoinLogo cmcId={div.cmc_id} symbol={div.symbol} size="sm" />
                           <span>{div.symbol}</span>
-                        </span>
+                          <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                        </Link>
                       </td>
                       <td
                         className={`px-3.5 py-2 text-right font-semibold ${pctToneClass(div.asset_change_24h_pct)}`}
@@ -823,16 +979,25 @@ function renderToolData(envelope: EvidenceEnvelope) {
       const d = envelope.data as HistoricalPerformanceData;
       return (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <CoinLogo cmcId={d.cmc_id} symbol={d.symbol} size="md" />
-            <span className="font-mono text-sm font-bold text-foreground">
-              {d.symbol}
-            </span>
-            {d.cmc_id !== null && (
-              <span className="font-mono text-xs text-muted-foreground">
-                #{d.cmc_id}
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <CoinLogo cmcId={d.cmc_id} symbol={d.symbol} size="md" />
+              <span className="font-mono text-sm font-bold text-foreground">
+                {d.symbol}
               </span>
-            )}
+              {d.cmc_id !== null && (
+                <span className="font-mono text-xs text-muted-foreground">
+                  #{d.cmc_id}
+                </span>
+              )}
+            </div>
+            <Link
+              href={`/app/assets?symbol=${encodeURIComponent(d.symbol)}`}
+              className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-link hover:underline"
+            >
+              <span>Asset profile</span>
+              <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <MetricTile
@@ -884,15 +1049,24 @@ function renderToolData(envelope: EvidenceEnvelope) {
       const d = envelope.data as DerivativesAnalysisData;
       return (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2.5 font-mono text-xs text-muted-foreground">
-            <CoinLogo cmcId={d.cmc_id} symbol={d.symbol} size="sm" />
-            <span className="font-bold text-foreground">{d.symbol}</span>
-            {d.cmc_id !== null && <span>#{d.cmc_id}</span>}
-            <span>·</span>
-            <span>Mode:</span>
-            <strong className="rounded-full border border-border bg-card-elevated px-2.5 py-0.5 text-foreground">
-              {d.mode}
-            </strong>
+          <div className="flex flex-wrap items-center justify-between gap-2.5 font-mono text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <CoinLogo cmcId={d.cmc_id} symbol={d.symbol} size="sm" />
+              <span className="font-bold text-foreground">{d.symbol}</span>
+              {d.cmc_id !== null && <span>#{d.cmc_id}</span>}
+              <span>·</span>
+              <span>Mode:</span>
+              <strong className="rounded-full border border-border bg-card-elevated px-2.5 py-0.5 text-foreground">
+                {d.mode}
+              </strong>
+            </div>
+            <Link
+              href={`/app/assets?symbol=${encodeURIComponent(d.symbol)}`}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-link hover:underline"
+            >
+              <span>Asset profile</span>
+              <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <MetricTile
@@ -958,12 +1132,16 @@ export function EnvelopeFormattedReport({
 }: {
   envelope: EvidenceEnvelope;
 }) {
+  const pathname = usePathname();
+  const inWorkspace = pathname === "/app" || pathname.startsWith("/app/");
+  const evidenceHref = `${inWorkspace ? "/app/evidence" : "/evidence"}?id=${encodeURIComponent(envelope.evidence.evidence_id)}`;
+
   return (
-    <article className="tg-panel space-y-5 rounded-2xl p-5">
+    <article className="ct-surface-featured space-y-5 rounded-[18px] p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs font-bold text-primary">
+            <span className="font-mono text-xs font-bold text-link">
               {envelope.tool}
             </span>
             <StatusBadge status={envelope.status} />
@@ -976,8 +1154,8 @@ export function EnvelopeFormattedReport({
         </div>
 
         <Link
-          href={`/evidence?id=${encodeURIComponent(envelope.evidence.evidence_id)}`}
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-background/70 px-3 py-1.5 font-mono text-xs font-medium text-foreground transition-colors duration-200 hover:border-primary hover:text-primary"
+          href={evidenceHref}
+          className="inline-flex min-h-11 sm:min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-background/70 px-3 py-1.5 font-mono text-xs font-medium text-foreground transition-colors duration-200 hover:border-primary hover:text-link"
         >
           <ShieldCheck className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
           <span>{envelope.evidence.evidence_id}</span>
@@ -997,11 +1175,14 @@ export function EnvelopeEvidenceView({
   envelope: EvidenceEnvelope;
 }) {
   const { t } = useAppPreferences();
+  const pathname = usePathname();
+  const inWorkspace = pathname === "/app" || pathname.startsWith("/app/");
+  const evidenceHref = `${inWorkspace ? "/app/evidence" : "/evidence"}?id=${encodeURIComponent(envelope.evidence.evidence_id)}`;
   const { evidence, methodology, limitations } = envelope;
   const sourceEntries = Object.entries(evidence.source_timestamps);
 
   return (
-    <article className="tg-panel space-y-5 rounded-2xl p-5">
+    <article className="ct-surface-featured space-y-5 rounded-[18px] p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-sm font-bold text-foreground">
@@ -1015,8 +1196,8 @@ export function EnvelopeEvidenceView({
         </div>
 
         <Link
-          href={`/evidence?id=${encodeURIComponent(evidence.evidence_id)}`}
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 font-mono text-xs font-bold text-primary-foreground transition-opacity duration-200 hover:opacity-90"
+          href={evidenceHref}
+          className="inline-flex min-h-11 sm:min-h-9 cursor-pointer items-center gap-1.5 rounded-[10px] bg-primary px-3.5 py-1.5 font-mono text-xs font-bold text-primary-foreground transition-colors duration-200 hover:bg-primary-hover"
         >
           <span>{t.playground.openEvidence}</span>
           <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />

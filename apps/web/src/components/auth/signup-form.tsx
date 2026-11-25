@@ -146,13 +146,13 @@ export function SignupForm({ configured }: { configured: boolean }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="tg-panel rounded-2xl p-6 sm:p-8" noValidate>
+    <form onSubmit={handleSubmit} className="tg-panel rounded-[18px] p-6 sm:p-8" noValidate>
       <div className="mb-6 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/30 bg-primary/15 text-primary">
+        <span className="flex h-10 w-10 items-center justify-center rounded-[10px] border border-primary/35 bg-primary/14 text-link">
           <ShieldCheck className="h-5 w-5" aria-hidden="true" />
         </span>
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-foreground">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">
             Create your CoinTrac account
           </h1>
           <p className="text-xs text-muted-foreground">
@@ -197,7 +197,7 @@ export function SignupForm({ configured }: { configured: boolean }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@domain.com"
-            className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+            className="min-h-11 w-full rounded-[10px] border border-border bg-input-bg px-3.5 py-2.5 text-sm text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none"
           />
         </div>
 
@@ -218,7 +218,7 @@ export function SignupForm({ configured }: { configured: boolean }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Minimum 12 chars (A-Z, a-z, 0-9)"
-            className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+            className="min-h-11 w-full rounded-[10px] border border-border bg-input-bg px-3.5 py-2.5 text-sm text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none"
           />
         </div>
 
@@ -239,7 +239,7 @@ export function SignupForm({ configured }: { configured: boolean }) {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             placeholder="Repeat your password"
-            className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+            className="min-h-11 w-full rounded-[10px] border border-border bg-input-bg px-3.5 py-2.5 text-sm text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none"
           />
         </div>
       </div>
@@ -252,14 +252,14 @@ export function SignupForm({ configured }: { configured: boolean }) {
       <button
         type="submit"
         disabled={submitting || !configured}
-        className="mt-5 w-full cursor-pointer rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        className="tg-btn tg-btn-primary mt-5 flex w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitting ? "Creating account..." : "Create account"}
       </button>
 
       <p className="mt-5 text-center text-xs text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="font-semibold text-primary hover:underline">
+        <Link href="/login" className="font-semibold text-link hover:underline">
           Sign in
         </Link>
       </p>

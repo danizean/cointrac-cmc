@@ -20,6 +20,10 @@ test("shared browser proxy handler never attaches shared sandbox or tenant overr
   assert.equal(shared.includes("x-cointrac-key"), false);
   assert.equal(shared.includes("x-tradeguard-key"), false);
   assert.equal(shared.includes("x-user-id"), false);
+  assert.equal(shared.includes('"x-content-type-options": "nosniff"'), true);
+  assert.equal(shared.includes('"x-accel-buffering": "no"'), true);
+  assert.equal(shared.includes("text/event-stream"), true);
+  assert.equal(shared.includes("Engine Standby"), true);
 });
 
 test("the only intelligence proxy route is /api/cointrac", () => {

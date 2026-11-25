@@ -46,12 +46,16 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user && isProtectedAppPath(pathname)) {
+  if ((!user || !user.email_confirmed_at) && isProtectedAppPath(pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
-    const safeNext = sanitizeRedirectPath(`${pathname}${search}`, "/app");
-    loginUrl.searchParams.set("next", safeNext);
+    if (user && !user.email_confirmed_at) {
+      loginUrl.searchParams.set("error", "email_not_confirmed");
+    } else {
+      const safeNext = sanitizeRedirectPath(`${pathname}${search}`, "/app");
+      loginUrl.searchParams.set("next", safeNext);
+    }
     return NextResponse.redirect(loginUrl);
   }
 

@@ -9,15 +9,22 @@ ENDPOINT_TTL_SECONDS: dict[str, int] = {
     "/v1/cryptocurrency/listings/latest": 120,
     "/v2/cryptocurrency/quotes/latest": 120,
     "/v1/global-metrics/quotes/latest": 300,
+    "/v1/global-metrics/quotes/historical": 86400,
     "/v3/fear-and-greed/latest": 300,
+    "/v3/fear-and-greed/historical": 86400,
     "/v1/cryptocurrency/categories": 900,
     "/v1/cryptocurrency/category": 900,
     "/v2/cryptocurrency/info": 3600,
     "/v2/cryptocurrency/ohlcv/historical": 3600,
     "/v1/cryptocurrency/map": 3600,
+    "/v5/cryptocurrency/derivatives/market-pairs/list/latest": 300,
+    "/v5/derivatives/liquidations/quotes/latest": 300,
+    "/v5/exchange/derivatives/list": 1800,
+    "/v5/real-world-assets/assets/list": 900,
+    "/v5/real-world-assets/map": 3600,
 }
 DEFAULT_TTL_SECONDS = 120
-MAX_TTL_SECONDS = 43200
+MAX_TTL_SECONDS = 259200
 
 
 def ttl_for_endpoint(endpoint: str) -> int:

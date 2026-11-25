@@ -11,18 +11,24 @@ from typing import Literal
 
 import pandas as pd
 
+from app.adapters.cache import freshness_for_age
 from app.adapters.cmc_client import CMCClient, CMCEndpointUnavailableError, FetchMeta
 from app.adapters.normalizer import (
     SymbolResolution,
     as_float,
     choose_ids,
     fear_greed,
+    fear_greed_historical_trends,
+    global_historical_trends,
     global_quote,
     keyed_assets,
     listing_rows,
     map_rows,
     ohlcv_points,
+    parse_derivatives_exchanges,
     parse_derivatives_pairs,
+    parse_market_wide_liquidations,
+    parse_rwa_universe,
     performance_rows,
     quote_of,
 )
@@ -64,7 +70,13 @@ from app.quant.sectors import (
     market_median_benchmark,
     timestamps_aligned,
 )
-from app.schemas.envelope import EvidenceEnvelope, EvidenceMeta, EvidenceStatus, MethodologyMeta
+from app.schemas.envelope import (
+    AgentAction,
+    EvidenceEnvelope,
+    EvidenceMeta,
+    EvidenceStatus,
+    MethodologyMeta,
+)
 from app.schemas.tools import (
     AnalyzeAssetData,
     AnalyzeAssetInput,
@@ -73,26 +85,40 @@ from app.schemas.tools import (
     AnomalyHit,
     AssetComparison,
     BtcDivergence,
+    CapabilitiesData,
     CompareAssetsData,
     CompareAssetsInput,
     DerivativePairObservation,
     DerivativesAnalysisData,
     DerivativesAnalysisInput,
+    DerivativesVenuesContext,
+    DerivativeVenueBrief,
     DetectAnomaliesData,
     DetectAnomaliesInput,
     HistoricalPerformanceData,
     HistoricalPerformanceInput,
     MarketOverviewData,
     MarketRegimeData,
+    MarketWideLiquidationsContext,
     MomentumRow,
     MoverRow,
     PricePerformance,
     QuoteBrief,
+    RwaAssetBrief,
+    RwaUniverseContext,
     ScanMoversData,
     ScanMoversInput,
     SectorRotationData,
     SectorRotationInput,
     SectorSnapshot,
+    ToolAvailability,
+)
+from app.services.daily_closes import (
+    DAILY_CLOSE_SOURCE,
+    MIN_WAREHOUSE_DAYS,
+    DailyCloseRow,
+    DailyCloseStore,
+    SupabaseDailyCloseStore,
 )
 from app.services.evidence import (
     CallRecord,
@@ -106,7 +132,10 @@ from app.services.evidence import (
 )
 
 GLOBAL = "/v1/global-metrics/quotes/latest"
+GLOBAL_HISTORICAL = "/v1/global-metrics/quotes/historical"
 FEAR = "/v3/fear-and-greed/latest"
+FEAR_HISTORICAL = "/v3/fear-and-greed/historical"
+HISTORICAL_TREND_TTL_SECONDS = 86400
 LISTINGS = "/v1/cryptocurrency/listings/latest"
 QUOTES = "/v2/cryptocurrency/quotes/latest"
 INFO = "/v2/cryptocurrency/info"
@@ -116,6 +145,10 @@ MAP = "/v1/cryptocurrency/map"
 CATEGORIES = "/v1/cryptocurrency/categories"
 CATEGORY = "/v1/cryptocurrency/category"
 DERIVATIVES = "/v5/cryptocurrency/derivatives/market-pairs/list/latest"
+LIQUIDATIONS = "/v5/derivatives/liquidations/quotes/latest"
+DERIVATIVES_EXCHANGES = "/v5/exchange/derivatives/list"
+RWA_MAP = "/v5/real-world-assets/map"
+RWA_ASSETS_LIST = "/v5/real-world-assets/assets/list"
 OUTLIER_Z = 3.0
 OUTLIER_MODIFIED_Z = 3.5
 SHARED_LISTINGS_LIMIT = 200
@@ -381,6 +414,7 @@ class ServiceDeps:
     sectors: SectorBook
     capabilities: CapabilityMap
     now: Callable[[], datetime]
+    daily_closes: DailyCloseStore | None = None
 
     @classmethod
     def create(cls) -> "ServiceDeps":
@@ -391,6 +425,7 @@ class ServiceDeps:
             sectors=SectorBook(use_db=True, enrich_from_snapshots=True),
             capabilities=CapabilityMap(),
             now=lambda: datetime.now(UTC),
+            daily_closes=SupabaseDailyCloseStore(),
         )
 
 
@@ -451,9 +486,7 @@ class Collector:
                 recorder = getattr(self.capabilities, "record_outcome", None)
                 if callable(recorder):
                     recorder(endpoint, allowed=False, credential=self.override)
-            self.records.append(
-                CallRecord(endpoint, error=str(exc), error_category=exc.category)
-            )
+            self.records.append(CallRecord(endpoint, error=str(exc), error_category=exc.category))
             return None
         if not isinstance(payload, dict) or not isinstance(meta, FetchMeta):
             message = f"{endpoint} returned an unexpected payload"
@@ -466,19 +499,177 @@ class Collector:
         self.records.append(CallRecord(endpoint, payload, meta))
         return payload
 
+    async def get_optional(
+        self,
+        endpoint: str,
+        params: dict[str, object],
+        *,
+        ttl_seconds: int | None = None,
+        context_label: str = "optional context",
+    ) -> tuple[dict[str, object] | None, str | None]:
+        """Fetch optional enrichment endpoint without failing primary workflow status."""
+        handlers = getattr(self.gateway, "handlers", None)
+        if isinstance(handlers, dict) and endpoint not in handlers:
+            return None, f"{endpoint} {context_label} was unavailable; optional fields left null."
+        try:
+            payload, meta = await self.gateway.fetch(  # type: ignore[attr-defined]
+                endpoint,
+                params,
+                ttl_seconds,
+                self.override,
+            )
+        except KeyError:
+            if isinstance(self.gateway, CMCClient):
+                raise
+            return None, f"{endpoint} {context_label} was unavailable; optional fields left null."
+        except CMCEndpointUnavailableError as exc:
+            if (
+                exc.category == "tier_restricted"
+                and self.override is not None
+                and self.capabilities is not None
+            ):
+                recorder = getattr(self.capabilities, "record_outcome", None)
+                if callable(recorder):
+                    recorder(endpoint, allowed=False, credential=self.override)
+            return None, (
+                f"{endpoint} {context_label} unavailable ({exc.reason}); optional fields left null."
+            )
+        if not isinstance(payload, dict) or not isinstance(meta, FetchMeta):
+            return None, f"{endpoint} returned an unexpected {context_label} payload."
+        if self.override is not None and self.capabilities is not None:
+            recorder = getattr(self.capabilities, "record_outcome", None)
+            if callable(recorder):
+                recorder(endpoint, allowed=True, credential=self.override)
+        self.records.append(CallRecord(endpoint, payload, meta))
+        return payload, None
+
+
+async def _fetch_historical_context(
+    collector: Collector,
+    bound: ServiceDeps,
+    quote_currency: str,
+) -> tuple[dict[str, float | None], dict[str, float | None], list[str]]:
+    """Fetch 24h-cached 7d-30d macro & sentiment context via the existing CMCClient."""
+    notes: list[str] = []
+
+    async def _get_global_hist() -> dict[str, object] | None:
+        if not _capability_allows(bound, GLOBAL_HISTORICAL, collector.override):
+            notes.append(
+                f"{GLOBAL_HISTORICAL} is outside the current CoinMarketCap plan; "
+                "7d/30d market cap and BTC dominance trends left null."
+            )
+            return None
+        payload, err = await collector.get_optional(
+            GLOBAL_HISTORICAL,
+            {"count": 30, "interval": "daily", "convert": quote_currency},
+            ttl_seconds=HISTORICAL_TREND_TTL_SECONDS,
+            context_label="historical trend context",
+        )
+        if err:
+            notes.append(err)
+        return payload
+
+    async def _get_fear_hist() -> dict[str, object] | None:
+        if not _capability_allows(bound, FEAR_HISTORICAL, collector.override):
+            notes.append(
+                f"{FEAR_HISTORICAL} is outside the current CoinMarketCap plan; "
+                "7d/30d Fear & Greed trends left null."
+            )
+            return None
+        payload, err = await collector.get_optional(
+            FEAR_HISTORICAL,
+            {"limit": 30},
+            ttl_seconds=HISTORICAL_TREND_TTL_SECONDS,
+            context_label="historical trend context",
+        )
+        if err:
+            notes.append(err)
+        return payload
+
+    global_hist_payload, fear_hist_payload = await asyncio.gather(
+        _get_global_hist(),
+        _get_fear_hist(),
+    )
+    global_trends = global_historical_trends(global_hist_payload or {}, quote_currency)
+    fear_trends = fear_greed_historical_trends(fear_hist_payload or {})
+    if global_hist_payload is not None and all(v is None for v in global_trends.values()):
+        notes.append(
+            f"{GLOBAL_HISTORICAL} returned insufficient daily observations for 7d/30d trends."
+        )
+    if fear_hist_payload is not None and all(v is None for v in fear_trends.values()):
+        notes.append(
+            f"{FEAR_HISTORICAL} returned insufficient daily observations for 7d/30d trends."
+        )
+    return global_trends, fear_trends, notes
+
 
 async def _listings_universe(
     collector: Collector,
     quote_currency: str,
     limit: int,
+    *,
+    page: bool = False,
 ) -> list[dict[str, object]]:
-    """Fetch Top-200 listings once and slice so workflows share a single CMC credit."""
-    fetch_limit = SHARED_LISTINGS_LIMIT if limit <= SHARED_LISTINGS_LIMIT else limit
-    payload = await collector.get(
-        LISTINGS,
-        {"start": 1, "limit": fetch_limit, "convert": quote_currency},
+    """Fetch listings. Deep Scan pages by 200 rows up to the requested limit."""
+    if not page or limit <= SHARED_LISTINGS_LIMIT:
+        fetch_limit = SHARED_LISTINGS_LIMIT if limit <= SHARED_LISTINGS_LIMIT else limit
+        payload = await collector.get(
+            LISTINGS,
+            {"start": 1, "limit": fetch_limit, "convert": quote_currency},
+        )
+        return listing_rows(payload or {})[:limit]
+    rows: list[dict[str, object]] = []
+    start = 1
+    while len(rows) < limit:
+        page_limit = min(SHARED_LISTINGS_LIMIT, limit - len(rows))
+        payload = await collector.get(
+            LISTINGS,
+            {"start": start, "limit": page_limit, "convert": quote_currency},
+        )
+        batch = listing_rows(payload or {})
+        if not batch:
+            break
+        rows.extend(batch)
+        if len(batch) < page_limit:
+            break
+        start += page_limit
+    return rows[:limit]
+
+
+async def _deep_scan_limit(
+    requested: bool,
+    universe_size: int,
+    override_cmc_key: str | None,
+    notes: list[str],
+) -> tuple[int, bool]:
+    if not requested:
+        return universe_size, False
+    if override_cmc_key:
+        notes.append(
+            "Deep Scan was requested and downgraded because a caller-supplied key "
+            "does not use the server quota."
+        )
+        return universe_size, False
+    from app.services.budget import get_budget_controller
+    from app.services.tier_detection import get_tier_detector
+
+    snap = await get_budget_controller().snapshot()
+    if get_tier_detector().startup_features_open(
+        state=snap.state,
+        warning_level=snap.warning_level,
+        ledger_status=snap.ledger_status,
+    ):
+        notes.append(
+            "Deep Scan paged listings up to 1000 because the effective profile is startup "
+            "and the budget state is NORMAL."
+        )
+        return 1000, True
+    notes.append(
+        "Deep Scan was requested and downgraded to the normal universe. "
+        f"Effective profile is {get_tier_detector().effective_profile()} "
+        f"and budget state is {snap.state}."
     )
-    return listing_rows(payload or {})[:limit]
+    return universe_size, False
 
 
 async def get_market_overview(
@@ -488,11 +679,13 @@ async def get_market_overview(
 ) -> EvidenceEnvelope[MarketOverviewData]:
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    global_payload, fear_payload, rows = await asyncio.gather(
+    global_payload, fear_payload, rows, hist_context = await asyncio.gather(
         collector.get(GLOBAL, {"convert": quote_currency}),
         collector.get(FEAR, {}),
         _listings_universe(collector, quote_currency, 50),
+        _fetch_historical_context(collector, bound, quote_currency),
     )
+    global_trends, fear_trends, trend_notes = hist_context
     metrics = global_quote(global_payload or {}, quote_currency)
     fg_value, fg_label = fear_greed(fear_payload or {})
     briefs = [_brief(row, quote_currency) for row in rows]
@@ -504,7 +697,7 @@ async def get_market_overview(
             continue
         if brief.percent_change_24h is not None:
             directional_briefs.append(brief)
-    overview_notes: list[str] = []
+    overview_notes: list[str] = list(trend_notes)
     if overview_excluded_stables > 0:
         overview_notes.append(
             f"{overview_excluded_stables} verified stablecoin(s) excluded from directional "
@@ -521,6 +714,14 @@ async def get_market_overview(
         fear_greed_value=fg_value,
         fear_greed_classification=fg_label,
         top50_breadth_positive_pct=_breadth([row.percent_change_24h for row in briefs]),
+        total_market_cap_change_7d_pct=global_trends.get("total_market_cap_change_7d_pct"),
+        total_market_cap_change_30d_pct=global_trends.get("total_market_cap_change_30d_pct"),
+        btc_dominance_change_7d=global_trends.get("btc_dominance_change_7d"),
+        btc_dominance_change_30d=global_trends.get("btc_dominance_change_30d"),
+        fear_greed_avg_7d=fear_trends.get("fear_greed_avg_7d"),
+        fear_greed_avg_30d=fear_trends.get("fear_greed_avg_30d"),
+        fear_greed_change_7d=fear_trends.get("fear_greed_change_7d"),
+        fear_greed_change_30d=fear_trends.get("fear_greed_change_30d"),
         btc=_find(briefs, "BTC"),
         eth=_find(briefs, "ETH"),
         sol=_find(briefs, "SOL"),
@@ -534,8 +735,8 @@ async def get_market_overview(
         _status(collector, data.total_market_cap is not None),
         f"Market overview in {quote_currency}.",
         data,
-        ["total_market_cap", "fear_greed", "top50_breadth"],
-        "latest",
+        ["total_market_cap", "fear_greed", "top50_breadth", "historical_trends_7d_30d"],
+        "latest; 7d-30d daily historical context (24h cached)",
         [],
         collector,
         bound,
@@ -550,7 +751,14 @@ async def scan_market_movers(
 ) -> EvidenceEnvelope[ScanMoversData]:
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    rows = await _listings_universe(collector, params.quote_currency, params.universe_size)
+    scan_notes: list[str] = []
+    scan_limit, page = await _deep_scan_limit(
+        params.deep_scan,
+        params.universe_size,
+        override_cmc_key,
+        scan_notes,
+    )
+    rows = await _listings_universe(collector, params.quote_currency, scan_limit, page=page)
     btc = _find_raw(rows, "BTC")
     btc_7d = None
     if btc is not None:
@@ -606,6 +814,7 @@ async def scan_market_movers(
         ],
     )
     notes: list[str] = []
+    notes.extend(scan_notes)
     if excluded_stables > 0:
         notes.append(
             f"{excluded_stables} verified stablecoin(s) excluded from directional mover "
@@ -617,8 +826,7 @@ async def scan_market_movers(
             "(unknown stablecoin status) and were preserved rather than silently discarded."
         )
     if any(
-        row.timeframes_available is not None and row.timeframes_available < 4
-        for row in data.movers
+        row.timeframes_available is not None and row.timeframes_available < 4 for row in data.movers
     ):
         notes.append(
             "One or more movers had fewer than 4 momentum timeframes (24h/7d/30d/60d); "
@@ -635,9 +843,7 @@ async def scan_market_movers(
                 else "n/a"
             )
             c7 = (
-                f"{mover.percent_change_7d:+.1f}%"
-                if mover.percent_change_7d is not None
-                else "n/a"
+                f"{mover.percent_change_7d:+.1f}%" if mover.percent_change_7d is not None else "n/a"
             )
             c30 = (
                 f"{mover.percent_change_30d:+.1f}%"
@@ -698,8 +904,7 @@ async def compare_assets(
         series = utc_daily_close(closes)
         comparisons.append(_comparison(symbol, asset, params.quote_currency, series, btc_quote))
     if any(
-        row.timeframes_available is not None and row.timeframes_available < 4
-        for row in comparisons
+        row.timeframes_available is not None and row.timeframes_available < 4 for row in comparisons
     ):
         notes.append(
             "One or more assets had fewer than 4 momentum timeframes (24h/7d/30d/60d); "
@@ -878,8 +1083,7 @@ async def analyze_momentum(
             resolved_count += 1
         rows.append(_momentum_row(symbol, asset, params.quote_currency, btc))
     if any(
-        row.timeframes_available is not None and 0 < row.timeframes_available < 4
-        for row in rows
+        row.timeframes_available is not None and 0 < row.timeframes_available < 4 for row in rows
     ):
         notes.append(
             "One or more assets had fewer than 4 momentum timeframes (24h/7d/30d/60d); "
@@ -888,9 +1092,7 @@ async def analyze_momentum(
     data = AnalyzeMomentumData(quote_currency=params.quote_currency, assets=rows)
     if resolved_count == 0:
         status = EvidenceStatus.INSUFFICIENT_DATA
-    elif resolved_count < len(params.symbols) or any(
-        record.error for record in collector.records
-    ):
+    elif resolved_count < len(params.symbols) or any(record.error for record in collector.records):
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
@@ -920,7 +1122,14 @@ async def detect_market_anomalies(
 ) -> EvidenceEnvelope[DetectAnomaliesData]:
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    rows = await _listings_universe(collector, params.quote_currency, params.universe_size)
+    scan_notes: list[str] = []
+    scan_limit, page = await _deep_scan_limit(
+        params.deep_scan,
+        params.universe_size,
+        override_cmc_key,
+        scan_notes,
+    )
+    rows = await _listings_universe(collector, params.quote_currency, scan_limit, page=page)
     btc = _find_raw(rows, "BTC")
     btc_change = None
     if btc is not None:
@@ -937,6 +1146,7 @@ async def detect_market_anomalies(
             unknown_class_count += 1
         eligible_rows.append(row)
     notes: list[str] = []
+    notes.extend(scan_notes)
     if excluded_stables > 0:
         notes.append(
             f"{excluded_stables} verified stablecoin(s) excluded from anomaly distribution "
@@ -1070,11 +1280,13 @@ async def analyze_market_regime(
 ) -> EvidenceEnvelope[MarketRegimeData]:
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    global_payload, fear_payload, rows = await asyncio.gather(
+    global_payload, fear_payload, rows, hist_context = await asyncio.gather(
         collector.get(GLOBAL, {"convert": quote_currency}),
         collector.get(FEAR, {}),
         _listings_universe(collector, quote_currency, 50),
+        _fetch_historical_context(collector, bound, quote_currency),
     )
+    global_trends, fear_trends, trend_notes = hist_context
     metrics = global_quote(global_payload or {}, quote_currency)
     fg_value, _label = fear_greed(fear_payload or {})
     changes = [as_float(quote_of(row, quote_currency).get("percent_change_24h")) for row in rows]
@@ -1092,9 +1304,7 @@ async def analyze_market_regime(
     if btc_change is not None and alt_known:
         outperforming = btc_change > float(pd.Series(alt_known).median())
     stale_inputs = any(
-        record.meta.freshness != "FRESH"
-        for record in collector.records
-        if record.meta is not None
+        record.meta.freshness != "FRESH" for record in collector.records if record.meta is not None
     )
     assessment = classify_regime(
         total_mcap_change_24h_pct=metrics.get("total_market_cap_change_24h_pct"),
@@ -1104,6 +1314,10 @@ async def analyze_market_regime(
         btc_outperforming_median_alt=outperforming,
         breadth_sample_size=len(known_changes),
         stale_inputs=stale_inputs,
+        fear_greed_avg_7d=fear_trends.get("fear_greed_avg_7d"),
+        fear_greed_avg_30d=fear_trends.get("fear_greed_avg_30d"),
+        fear_greed_change_7d=fear_trends.get("fear_greed_change_7d"),
+        total_mcap_change_7d_pct=global_trends.get("total_market_cap_change_7d_pct"),
     )
     data = MarketRegimeData(
         regime=assessment.regime,  # type: ignore[arg-type]
@@ -1112,13 +1326,21 @@ async def analyze_market_regime(
         top50_breadth_positive_pct=breadth,
         fear_greed_value=fg_value,
         btc_outperforming_median_alt=outperforming,
+        total_market_cap_change_7d_pct=global_trends.get("total_market_cap_change_7d_pct"),
+        total_market_cap_change_30d_pct=global_trends.get("total_market_cap_change_30d_pct"),
+        btc_dominance_change_7d=global_trends.get("btc_dominance_change_7d"),
+        btc_dominance_change_30d=global_trends.get("btc_dominance_change_30d"),
+        fear_greed_avg_7d=fear_trends.get("fear_greed_avg_7d"),
+        fear_greed_avg_30d=fear_trends.get("fear_greed_avg_30d"),
+        fear_greed_change_7d=fear_trends.get("fear_greed_change_7d"),
+        fear_greed_change_30d=fear_trends.get("fear_greed_change_30d"),
         signal_conflict=assessment.signal_conflict,
         confidence=assessment.confidence,  # type: ignore[arg-type]
         dominant_signals=assessment.dominant_signals,
         conflicting_signals=assessment.conflicting_signals,
         rationale=assessment.rationale,
     )
-    notes: list[str] = []
+    notes: list[str] = list(trend_notes)
     if assessment.signal_conflict:
         notes.append(
             "Market structure and sentiment signals conflict; treat regime classification "
@@ -1149,8 +1371,9 @@ async def analyze_market_regime(
             "breadth",
             "fear_greed",
             "signal_conflict",
+            "historical_trends_7d_30d",
         ],
-        "latest",
+        "latest; 7d-30d daily historical context (24h cached)",
         [],
         collector,
         bound,
@@ -1252,21 +1475,96 @@ async def analyze_sector_rotation(
             f"marked INSUFFICIENT_DATA rather than directional rotation: "
             f"{', '.join(under_sampled)}."
         )
+    rwa_universe: RwaUniverseContext | None = None
     if rwa_requested:
         notes.append(
-            "CMC v5 RWA endpoints (/v5/real-world-assets/assets/list) track underlying real-world "
-            "assets without crypto cmc_id or 24h/7d crypto return fields, so RWA sector returns "
-            "rely on sector_mappings/listings tags."
+            "CMC v5 RWA endpoints (/v5/real-world-assets/assets/list, /v5/real-world-assets/map) "
+            "track underlying real-world assets keyed by rwa_id without crypto cmc_id, so crypto "
+            "RWA protocol sector returns rely on sector_mappings/listings tags while underlying "
+            "RWA universe context is returned separately in rwa_universe."
+        )
+        rwa_list_payload: dict[str, object] | None = None
+        rwa_map_payload: dict[str, object] | None = None
+        rwa_sources: list[str] = []
+
+        async def _get_rwa_list() -> dict[str, object] | None:
+            if not _capability_allows(bound, RWA_ASSETS_LIST, collector.override):
+                notes.append(
+                    f"{RWA_ASSETS_LIST} is outside the current CoinMarketCap plan; "
+                    "underlying RWA tokenized quotes unavailable."
+                )
+                return None
+            payload, err = await collector.get_optional(
+                RWA_ASSETS_LIST,
+                {"limit": 25},
+                context_label="underlying RWA asset list",
+            )
+            if err:
+                notes.append(err)
+            return payload
+
+        async def _get_rwa_map() -> dict[str, object] | None:
+            if not _capability_allows(bound, RWA_MAP, collector.override):
+                notes.append(
+                    f"{RWA_MAP} is outside the current CoinMarketCap plan; "
+                    "underlying RWA catalog map unavailable."
+                )
+                return None
+            payload, err = await collector.get_optional(
+                RWA_MAP,
+                {"limit": 100},
+                context_label="underlying RWA catalog map",
+            )
+            if err:
+                notes.append(err)
+            return payload
+
+        rwa_list_payload, rwa_map_payload = await asyncio.gather(_get_rwa_list(), _get_rwa_map())
+        if rwa_list_payload is not None:
+            rwa_sources.append(RWA_ASSETS_LIST)
+        if rwa_map_payload is not None:
+            rwa_sources.append(RWA_MAP)
+        if rwa_sources:
+            parsed_rwa = parse_rwa_universe(
+                rwa_list_payload,
+                rwa_map_payload,
+                request.quote_currency,
+            )
+            notes.extend(parsed_rwa.limitations)
+            if parsed_rwa.sampled_rwa_assets > 0:
+                rwa_universe = RwaUniverseContext(
+                    total_rwa_assets=parsed_rwa.total_rwa_assets,
+                    sampled_rwa_assets=parsed_rwa.sampled_rwa_assets,
+                    asset_type_counts=parsed_rwa.asset_type_counts,
+                    total_tokenized_market_cap=parsed_rwa.total_tokenized_market_cap,
+                    total_tokenized_volume_24h=parsed_rwa.total_tokenized_volume_24h,
+                    top_rwa_assets=[RwaAssetBrief(**item) for item in parsed_rwa.top_rwa_assets],
+                    source_endpoints=rwa_sources,
+                )
+    used_snapshot_fallback = any(
+        record.meta is not None and record.meta.data_mode == "VERIFIED_SNAPSHOT_FALLBACK"
+        for record in collector.records
+    )
+    if used_snapshot_fallback:
+        notes.append(
+            "Sector rotation relied on verified snapshot fallback for one or more tier-restricted "
+            "category endpoints; inspect evidence.freshness and source_timestamps."
         )
     data = SectorRotationData(
         quote_currency=request.quote_currency,
         sectors=snapshots,
         unique_constituent_count=unique_count,
         overlapping_asset_count=overlap_count,
+        rwa_universe=rwa_universe,
     )
     if not snapshots or all(item.constituent_count == 0 for item in snapshots):
         status = EvidenceStatus.INSUFFICIENT_DATA
-    elif under_sampled or any(record.error for record in collector.records):
+    elif (
+        under_sampled
+        or skewed_benchmark_sectors
+        or used_snapshot_fallback
+        or any(record.error for record in collector.records)
+    ):
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
@@ -1298,20 +1596,117 @@ async def get_historical_performance(
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
     ids, notes = await _resolve(bound, collector, [params.symbol, "BTC"])
-    asset_points = await _history(collector, bound, ids.get(params.symbol), params)
-    btc_points = await _history(collector, bound, ids.get("BTC"), params)
+    asset_id = ids.get(params.symbol)
+    btc_id = ids.get("BTC")
+    asset_points = await _history(collector, bound, asset_id, params)
+    btc_points = await _history(collector, bound, btc_id, params)
     asset = utc_daily_close(asset_points)
     benchmark = utc_daily_close(btc_points)
+
+    used_warehouse = False
+    warehouse_source = DAILY_CLOSE_SOURCE
+    if asset.empty and bound.daily_closes is not None and asset_id is not None:
+        warehouse_rows: list[DailyCloseRow] = await bound.daily_closes.list_asset_closes(
+            asset_id,
+            limit=max(params.count, MIN_WAREHOUSE_DAYS),
+        )
+        dedup_asset = {row.utc_date: row for row in warehouse_rows if row.close_price > 0}
+        valid_asset_rows = [dedup_asset[d] for d in sorted(dedup_asset)]
+        if len(valid_asset_rows) >= MIN_WAREHOUSE_DAYS:
+            used_warehouse = True
+            warehouse_source = valid_asset_rows[-1].source or DAILY_CLOSE_SOURCE
+            asset_points = [
+                (
+                    datetime(row.utc_date.year, row.utc_date.month, row.utc_date.day, tzinfo=UTC),
+                    row.close_price,
+                )
+                for row in valid_asset_rows
+            ]
+            asset = utc_daily_close(asset_points)
+            latest_obs = max(
+                (
+                    row.observed_at
+                    or datetime(
+                        row.utc_date.year,
+                        row.utc_date.month,
+                        row.utc_date.day,
+                        tzinfo=UTC,
+                    )
+                    for row in valid_asset_rows
+                ),
+                default=bound.now(),
+            )
+            age = max(bound.now() - latest_obs, bound.now() - bound.now())
+            collector.records.append(
+                CallRecord(
+                    endpoint="warehouse://daily_asset_closes",
+                    payload={
+                        "cmc_id": asset_id,
+                        "days": len(valid_asset_rows),
+                        "source": warehouse_source,
+                    },
+                    meta=FetchMeta(
+                        data_mode="VERIFIED_SNAPSHOT_FALLBACK",
+                        freshness=freshness_for_age(age),
+                        cache_hit=False,
+                        credit_cost=0,
+                        source_timestamp=latest_obs,
+                        retrieved_at=latest_obs,
+                    ),
+                )
+            )
+            notes.append(
+                f"Historical performance computed from daily_asset_closes warehouse "
+                f"({len(valid_asset_rows)} observed daily listings-snapshot reference closes, "
+                f"source={warehouse_source}); this is an observed snapshot/reference series, "
+                "not official CoinMarketCap OHLCV historical closes. "
+                "Volatility annualized with sqrt(365)."
+            )
+            if benchmark.empty and btc_id is not None:
+                btc_rows = await bound.daily_closes.list_asset_closes(
+                    btc_id,
+                    limit=max(params.count, MIN_WAREHOUSE_DAYS),
+                )
+                dedup_btc = {row.utc_date: row for row in btc_rows if row.close_price > 0}
+                valid_btc_rows = [dedup_btc[d] for d in sorted(dedup_btc)]
+                if len(valid_btc_rows) >= MIN_WAREHOUSE_DAYS:
+                    btc_points = [
+                        (
+                            datetime(
+                                row.utc_date.year,
+                                row.utc_date.month,
+                                row.utc_date.day,
+                                tzinfo=UTC,
+                            ),
+                            row.close_price,
+                        )
+                        for row in valid_btc_rows
+                    ]
+                    benchmark = utc_daily_close(btc_points)
+                else:
+                    notes.append(
+                        f"BTC benchmark in daily_asset_closes has {len(valid_btc_rows)} "
+                        f"observed day(s) (< {MIN_WAREHOUSE_DAYS} required); beta_vs_btc and "
+                        "correlation_vs_btc left null."
+                    )
+        elif valid_asset_rows:
+            notes.append(
+                f"daily_asset_closes warehouse currently holds {len(valid_asset_rows)} observed "
+                f"day(s) for {params.symbol} (minimum {MIN_WAREHOUSE_DAYS} required); "
+                "warehouse historical metrics withheld."
+            )
+
     overlap = asset.index.intersection(benchmark.index) if not asset.empty else asset.index
     paired_asset = asset.reindex(overlap)
     paired_btc = benchmark.reindex(overlap)
+    return_series = paired_asset if len(paired_asset) >= 2 else asset
     data = HistoricalPerformanceData(
         symbol=params.symbol,
-        cmc_id=ids.get(params.symbol),
+        cmc_id=asset_id,
         quote_currency=params.quote_currency,
         overlap_days=int(len(overlap)),
-        simple_return=_window_return(paired_asset, logarithmic=False),
-        log_return=_window_return(paired_asset, logarithmic=True),
+        simple_return=_window_return(return_series, logarithmic=False),
+        log_return=_window_return(return_series, logarithmic=True),
         annualized_volatility=annualized_volatility(log_returns(asset)),
         max_drawdown=maximum_drawdown(asset),
         beta_vs_btc=beta(simple_returns(paired_asset), simple_returns(paired_btc)),
@@ -1333,24 +1728,38 @@ async def get_historical_performance(
         status = (
             EvidenceStatus.TIER_RESTRICTED if tier_blocked else EvidenceStatus.INSUFFICIENT_DATA
         )
-    elif data.annualized_volatility is None:
+    elif used_warehouse or data.annualized_volatility is None:
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
+    window = (
+        f"{len(asset)} observed daily reference closes (daily_asset_closes warehouse; "
+        f"source={warehouse_source}; not official CMC OHLCV)"
+        if used_warehouse
+        else f"{params.count} daily closes"
+    )
+    metrics = [
+        "simple_return",
+        "log_return",
+        "annualized_volatility",
+        "max_drawdown",
+        "beta",
+        "correlation",
+    ]
+    if used_warehouse:
+        metrics.append("daily_asset_closes_observed_reference")
     return await _envelope(
         "get_historical_performance",
         status,
-        f"{params.symbol} history over {data.overlap_days or 0} shared days.",
+        (
+            f"{params.symbol} observed warehouse history over {len(asset)} daily closes "
+            f"({data.overlap_days or 0} shared with BTC)."
+            if used_warehouse
+            else f"{params.symbol} history over {data.overlap_days or 0} shared days."
+        ),
         data,
-        [
-            "simple_return",
-            "log_return",
-            "annualized_volatility",
-            "max_drawdown",
-            "beta",
-            "correlation",
-        ],
-        f"{params.count} daily closes",
+        metrics,
+        window,
         [ids[params.symbol]] if params.symbol in ids else [],
         collector,
         bound,
@@ -1367,12 +1776,82 @@ async def analyze_derivatives(
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
     ids, notes = await _resolve(bound, collector, [params.symbol])
     cmc_id = ids.get(params.symbol)
-    derivative_payload = None
-    if cmc_id is not None and _capability_allows(bound, DERIVATIVES, collector.override):
-        derivative_payload = await collector.get(
-            DERIVATIVES,
-            {"crypto_id": cmc_id, "limit": DERIVATIVES_PAIR_LIMIT},
+
+    async def _get_asset_derivatives() -> dict[str, object] | None:
+        if cmc_id is not None and _capability_allows(bound, DERIVATIVES, collector.override):
+            return await collector.get(
+                DERIVATIVES,
+                {"crypto_id": cmc_id, "limit": DERIVATIVES_PAIR_LIMIT},
+            )
+        return None
+
+    async def _get_market_liquidations() -> dict[str, object] | None:
+        if not _capability_allows(bound, LIQUIDATIONS, collector.override):
+            notes.append(
+                f"{LIQUIDATIONS} is outside the current CoinMarketCap plan; "
+                "market-wide liquidation quotes left null."
+            )
+            return None
+        payload, err = await collector.get_optional(
+            LIQUIDATIONS,
+            {},
+            context_label="market-wide liquidations",
         )
+        if err:
+            notes.append(err)
+        return payload
+
+    async def _get_derivatives_venues() -> dict[str, object] | None:
+        if not _capability_allows(bound, DERIVATIVES_EXCHANGES, collector.override):
+            notes.append(
+                f"{DERIVATIVES_EXCHANGES} is outside the current CoinMarketCap plan; "
+                "derivatives venues context left null."
+            )
+            return None
+        payload, err = await collector.get_optional(
+            DERIVATIVES_EXCHANGES,
+            {"limit": 10},
+            context_label="derivatives exchanges",
+        )
+        if err:
+            notes.append(err)
+        return payload
+
+    derivative_payload, liquidations_payload, venues_payload = await asyncio.gather(
+        _get_asset_derivatives(),
+        _get_market_liquidations(),
+        _get_derivatives_venues(),
+    )
+
+    market_wide_liquidations: MarketWideLiquidationsContext | None = None
+    if liquidations_payload is not None:
+        parsed_liq = parse_market_wide_liquidations(liquidations_payload, params.quote_currency)
+        notes.extend(parsed_liq.limitations)
+        if parsed_liq.has_data:
+            market_wide_liquidations = MarketWideLiquidationsContext(
+                quote_currency=parsed_liq.quote_currency,
+                total_24h=parsed_liq.total_24h,
+                long_24h=parsed_liq.long_24h,
+                short_24h=parsed_liq.short_24h,
+                total_1h=parsed_liq.total_1h,
+                total_4h=parsed_liq.total_4h,
+                last_updated=parsed_liq.last_updated,
+            )
+
+    derivatives_venues: DerivativesVenuesContext | None = None
+    if venues_payload is not None:
+        parsed_venues = parse_derivatives_exchanges(venues_payload, params.quote_currency)
+        notes.extend(parsed_venues.limitations)
+        if parsed_venues.sampled_exchanges > 0:
+            derivatives_venues = DerivativesVenuesContext(
+                quote_currency=parsed_venues.quote_currency,
+                total_exchanges=parsed_venues.total_exchanges,
+                sampled_exchanges=parsed_venues.sampled_exchanges,
+                total_open_interest=parsed_venues.total_open_interest,
+                total_volume_24h=parsed_venues.total_volume_24h,
+                venues=[DerivativeVenueBrief(**item) for item in parsed_venues.venues],
+            )
+
     if derivative_payload is None:
         notes.append(
             "Derivatives endpoints are unavailable on this CoinMarketCap plan. "
@@ -1386,16 +1865,23 @@ async def analyze_derivatives(
             cmc_id=cmc_id,
             quote_currency=params.quote_currency,
             mode="spot_stress_proxy",
+            market_wide_liquidations=market_wide_liquidations,
+            derivatives_venues=derivatives_venues,
             spot_volume_24h=as_float(quote.get("volume_24h")),
             annualized_volatility=annualized_volatility(log_returns(utc_daily_close(closes))),
         )
+        proxy_metrics = ["spot_volume_24h", "annualized_volatility"]
+        if market_wide_liquidations is not None:
+            proxy_metrics.append("market_wide_liquidations")
+        if derivatives_venues is not None:
+            proxy_metrics.append("derivatives_venues")
         return await _envelope(
             "analyze_derivatives",
             EvidenceStatus.PARTIAL,
             f"{params.symbol} spot stress proxy.",
             data,
-            ["spot_volume_24h", "annualized_volatility"],
-            "spot quote; daily history when available",
+            proxy_metrics,
+            "spot quote; daily history and market-wide derivatives context when available",
             [cmc_id] if cmc_id is not None else [],
             collector,
             bound,
@@ -1417,7 +1903,18 @@ async def analyze_derivatives(
         open_interest_pairs_included=parsed.open_interest_pairs_included,
         outlier_pairs_excluded=parsed.outlier_pairs_excluded,
         market_pairs=pair_models,
+        market_wide_liquidations=market_wide_liquidations,
+        derivatives_venues=derivatives_venues,
     )
+    used_snapshot_fallback = any(
+        record.meta is not None and record.meta.data_mode == "VERIFIED_SNAPSHOT_FALLBACK"
+        for record in collector.records
+    )
+    if used_snapshot_fallback:
+        notes.append(
+            "Derivatives metrics were served from a verified snapshot fallback because the live "
+            "derivatives endpoint was tier-restricted or unavailable; inspect evidence.freshness."
+        )
     has_any_metric = any(
         value is not None
         for value in (data.funding_rate, data.open_interest, data.liquidations_24h)
@@ -1425,7 +1922,8 @@ async def analyze_derivatives(
     if not has_any_metric and not pair_models:
         status = EvidenceStatus.INSUFFICIENT_DATA
     elif (
-        parsed.is_v5_nested
+        used_snapshot_fallback
+        or parsed.is_v5_nested
         or data.funding_rate is None
         or data.open_interest is None
         or data.liquidations_24h is None
@@ -1438,18 +1936,23 @@ async def analyze_derivatives(
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
+    deriv_metrics = [
+        "funding_rate",
+        "open_interest",
+        "liquidations_24h",
+        "market_pair_count",
+        "sampled_pair_count",
+    ]
+    if market_wide_liquidations is not None:
+        deriv_metrics.append("market_wide_liquidations")
+    if derivatives_venues is not None:
+        deriv_metrics.append("derivatives_venues")
     return await _envelope(
         "analyze_derivatives",
         status,
         f"{params.symbol} derivatives context.",
         data,
-        [
-            "funding_rate",
-            "open_interest",
-            "liquidations_24h",
-            "market_pair_count",
-            "sampled_pair_count",
-        ],
+        deriv_metrics,
         f"top {DERIVATIVES_PAIR_LIMIT} derivatives market pairs",
         [cmc_id] if cmc_id is not None else [],
         collector,
@@ -1598,9 +2101,7 @@ def _plan_blocked(collector: Collector, deps: ServiceDeps, endpoint: str) -> boo
     if _capability_allows(deps, endpoint, collector.override):
         return False
     message = f"{endpoint} is unavailable: current CoinMarketCap plan"
-    collector.records.append(
-        CallRecord(endpoint, error=message, error_category="tier_restricted")
-    )
+    collector.records.append(CallRecord(endpoint, error=message, error_category="tier_restricted"))
     return True
 
 
@@ -1834,6 +2335,127 @@ def _window_return(prices: pd.Series, *, logarithmic: bool) -> float | None:
 
         return math.log(ratio)
     return ratio - 1
+
+
+_CAPABILITY_TOOLS = (
+    "get_market_overview",
+    "analyze_market_regime",
+    "scan_market_movers",
+    "detect_market_anomalies",
+    "compare_assets",
+    "analyze_asset",
+    "analyze_momentum",
+    "analyze_sector_rotation",
+    "get_historical_performance",
+    "analyze_derivatives",
+    "get_capabilities",
+)
+_EXPENSIVE_CAPABILITY_TOOLS = frozenset(
+    {"analyze_derivatives", "analyze_sector_rotation", "get_historical_performance"}
+)
+
+
+async def get_capabilities(deps: ServiceDeps | None = None) -> EvidenceEnvelope[CapabilitiesData]:
+    """Report the active profile and tool modes without calling CoinMarketCap."""
+    bound = _bound(deps)
+    from app.services.budget import get_budget_controller
+
+    snap = await get_budget_controller().snapshot()
+    tools: list[ToolAvailability] = []
+    for name in _CAPABILITY_TOOLS:
+        if name == "get_capabilities":
+            tools.append(ToolAvailability(name=name, mode="full"))
+            continue
+        if snap.ledger_status != "ok" or snap.state == "CUTOFF":
+            tools.append(
+                ToolAvailability(
+                    name=name,
+                    mode="fallback",
+                    reason="Server-key budget is cutoff or the credit ledger is unavailable.",
+                )
+            )
+        elif snap.state == "EMERGENCY":
+            tools.append(
+                ToolAvailability(
+                    name=name,
+                    mode="fallback",
+                    reason="Emergency budget keeps live misses on the core warmer only.",
+                )
+            )
+        elif snap.state == "CONSERVATION" and name in _EXPENSIVE_CAPABILITY_TOOLS:
+            tools.append(
+                ToolAvailability(
+                    name=name,
+                    mode="fallback",
+                    reason="Conservation budget keeps this tool on warm cache or a snapshot.",
+                )
+            )
+        else:
+            tools.append(ToolAvailability(name=name, mode="full"))
+    data_mode = "VERIFIED_SNAPSHOT_FALLBACK" if snap.state == "CUTOFF" else "CACHED"
+    data = CapabilitiesData(
+        quota_profile=snap.quota_profile,
+        budget_state=snap.state,
+        utilization_pct=snap.utilization_pct,
+        ledger_status=snap.ledger_status,
+        data_mode=data_mode,
+        tools=tools,
+    )
+    evidence_id = new_evidence_id()
+    limitations = [
+        "This response reads the in-process budget snapshot and does not call CoinMarketCap."
+    ]
+    try:
+        await bound.evidence.persist(
+            EvidenceDraft(
+                evidence_id=evidence_id,
+                tool_name="get_capabilities",
+                asset_cmc_ids=[],
+                endpoints_called=[],
+                data_mode=data_mode,
+                freshness="AGING",
+                credit_cost=0,
+                engine_version=get_settings().engine_version,
+                methodology={
+                    "metrics": ["budget_state", "tool_mode"],
+                    "observation_window": "current",
+                    "annualization_basis": "365d",
+                },
+                limitations=limitations,
+                raw_excerpt={},
+            )
+        )
+    except Exception as exc:
+        limitations.append(f"Evidence record could not be stored ({exc.__class__.__name__}).")
+    return EvidenceEnvelope(
+        tool="get_capabilities",
+        engine_version=get_settings().engine_version,
+        status=EvidenceStatus.OK,
+        summary="Capability and budget mode without a CoinMarketCap call.",
+        data=data,
+        methodology=MethodologyMeta(
+            metrics=["budget_state", "tool_mode"],
+            observation_window="current",
+            annualization_basis="365d",
+        ),
+        evidence=EvidenceMeta(
+            evidence_id=evidence_id,
+            data_mode=data_mode,  # type: ignore[arg-type]
+            freshness="AGING",
+            retrieved_at_utc=bound.now(),
+            source_timestamps={},
+            cmc_endpoints_called=[],
+            cmc_credit_cost=0,
+            cache_hit=True,
+        ),
+        limitations=limitations,
+        agent_actions=[
+            AgentAction(
+                reason="Use a snapshot-backed overview when a tool is in fallback mode.",
+                suggested_tool="get_market_overview",
+            )
+        ],
+    )
 
 
 def _status(collector: Collector, required_present: bool) -> EvidenceStatus:

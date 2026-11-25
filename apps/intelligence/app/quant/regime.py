@@ -22,6 +22,10 @@ def classify_regime(
     btc_outperforming_median_alt: bool | None,
     breadth_sample_size: int | None = None,
     stale_inputs: bool = False,
+    fear_greed_avg_7d: float | None = None,
+    fear_greed_avg_30d: float | None = None,
+    fear_greed_change_7d: float | None = None,
+    total_mcap_change_7d_pct: float | None = None,
 ) -> RegimeAssessment:
     present = [
         total_mcap_change_24h_pct,
@@ -68,6 +72,22 @@ def classify_regime(
         notes.append(
             "One or more regime inputs are aging/stale; classification confidence reduced."
         )
+    if fear_greed_avg_7d is not None and fear_greed_avg_30d is not None:
+        delta_avg = fear_greed_avg_7d - fear_greed_avg_30d
+        direction = (
+            "improving" if delta_avg >= 3.0 else ("deteriorating" if delta_avg <= -3.0 else "flat")
+        )
+        notes.append(
+            f"Historical Fear & Greed trend is {direction} "
+            f"(7d avg {fear_greed_avg_7d:.1f} vs 30d avg {fear_greed_avg_30d:.1f})."
+        )
+    if fear_greed_change_7d is not None and abs(fear_greed_change_7d) >= 15.0:
+        notes.append(
+            f"7d Fear & Greed shifted sharply ({fear_greed_change_7d:+.1f} pts), "
+            "indicating rapid multi-day sentiment transition."
+        )
+    if total_mcap_change_7d_pct is not None:
+        notes.append(f"7d total market-cap trend is {total_mcap_change_7d_pct:+.2f}%.")
 
     # 1. Structural stress (mcap <= -2% or breadth <= 30%) cannot be erased by positive sentiment
     if structural_stress:
@@ -213,8 +233,10 @@ def classify_regime(
     has_conflict = (
         total_mcap_change_24h_pct is not None
         and effective_breadth is not None
-        and ((total_mcap_change_24h_pct > 1 and effective_breadth < 45)
-             or (total_mcap_change_24h_pct < -1 and effective_breadth > 55))
+        and (
+            (total_mcap_change_24h_pct > 1 and effective_breadth < 45)
+            or (total_mcap_change_24h_pct < -1 and effective_breadth > 55)
+        )
     )
     if has_conflict:
         conflicts.append(

@@ -1,4 +1,7 @@
 import asyncio
+import logging
+import math
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,9 +22,17 @@ from app.adapters.cache import (
 )
 from app.core.config import get_settings
 from app.core.db import supabase_client
+from app.services.budget import (
+    BudgetCaller,
+    BudgetController,
+    CallPriority,
+    MemoryBudgetStore,
+    UsageCacheStatus,
+)
 
 CMC_KEY_HEADER = "X-CMC_PRO_API_KEY"
 RETRY_DELAYS_SECONDS = (1, 2, 4)
+# Basic-tier availability of the v5 entries below is not verified; waiting on the M4 probe.
 STARTUP_ONLY_ENDPOINTS = frozenset(
     {
         "/v1/cryptocurrency/trending/latest",
@@ -48,6 +59,12 @@ CMCErrorCategory = Literal[
 ]
 _AUTH_ERROR_CODES = frozenset({1001, 1002})
 _RATE_LIMIT_ERROR_CODES = frozenset({1008, 1009, 1010, 1011})
+
+
+class CMCBudgetDeniedError(Exception):
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 class CMCTierRestrictedError(Exception):
@@ -90,6 +107,14 @@ class FetchMeta:
     source_timestamp: datetime | None = None
     retrieved_at: datetime | None = None
     limitation: str | None = None
+    credit_status: Literal["known", "unknown", "none"] = "known"
+
+
+@dataclass(frozen=True)
+class CreditObservation:
+    status: Literal["known", "unknown"]
+    credits: int | None
+    held_credits: int
 
 
 class SupabaseSnapshotStore:
@@ -133,6 +158,7 @@ class CMCClient:
         startup_only: frozenset[str] = STARTUP_ONLY_ENDPOINTS,
         simulate_basic_tier: bool | None = None,
         ttl_multiplier: float | None = None,
+        budget_controller: BudgetController | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
         now: Callable[[], datetime] | None = None,
         client: httpx.AsyncClient | None = None,
@@ -148,15 +174,42 @@ class CMCClient:
             self._simulate_basic = settings.force_simulate_basic_tier
         else:
             self._simulate_basic = simulate_basic_tier
-        resolved_mult = (
-            settings.cmc_cache_ttl_multiplier if ttl_multiplier is None else ttl_multiplier
+        self._explicit_ttl_multiplier: float | None = (
+            max(0.5, min(12.0, float(ttl_multiplier))) if ttl_multiplier is not None else None
         )
-        self._ttl_multiplier = max(0.5, min(12.0, float(resolved_mult)))
         self._sleep = sleep or asyncio.sleep
         self._now = now or (lambda: datetime.now(UTC))
+        if budget_controller is not None:
+            self._budget = budget_controller
+        else:
+            self._budget = BudgetController(
+                quota_profile=settings.cmc_quota_profile,
+                monthly_budget=settings.resolved_monthly_credit_budget(),
+                explicit_ttl_multiplier=(
+                    self._explicit_ttl_multiplier
+                    if self._explicit_ttl_multiplier is not None
+                    else settings.cmc_cache_ttl_multiplier
+                ),
+                store=MemoryBudgetStore(),
+                now=self._now,
+            )
+        resolved_mult = (
+            self._explicit_ttl_multiplier
+            if self._explicit_ttl_multiplier is not None
+            else settings.resolved_ttl_multiplier()
+        )
+        self._ttl_multiplier = max(0.5, min(12.0, float(resolved_mult)))
         self._client = client
         self._owns_client = client is None
         self._inflight: dict[str, tuple[asyncio.Lock, int]] = {}
+
+    @property
+    def snapshot_store(self) -> SnapshotStore:
+        return self._store
+
+    @property
+    def budget_controller(self) -> BudgetController:
+        return self._budget
 
     async def __aenter__(self) -> "CMCClient":
         if self._client is None:
@@ -177,16 +230,55 @@ class CMCClient:
         params: dict[str, object],
         ttl_seconds: int | None = None,
         override_api_key: str | None = None,
+        *,
+        priority: CallPriority | None = None,
+        cache_status: UsageCacheStatus = "MISS",
+        budget_caller: BudgetCaller = "user",
+        persist_snapshot: bool = True,
     ) -> tuple[dict[str, object], FetchMeta]:
-        if ttl_seconds is None:
-            ttl = max(30, int(round(ttl_for_endpoint(endpoint) * self._ttl_multiplier)))
-        else:
-            ttl = ttl_seconds
         key = cache_key(endpoint, params)
         private = bool(override_api_key)
 
+        if ttl_seconds is None:
+            if private:
+                mult = self._ttl_multiplier
+            else:
+                snap = await self._budget.snapshot()
+                if self._explicit_ttl_multiplier is not None and snap.state == "NORMAL":
+                    mult = self._explicit_ttl_multiplier
+                elif self._explicit_ttl_multiplier is not None:
+                    mult = max(self._explicit_ttl_multiplier, snap.effective_ttl_multiplier)
+                else:
+                    mult = snap.effective_ttl_multiplier
+            ttl = max(30, int(round(ttl_for_endpoint(endpoint) * mult)))
+        else:
+            ttl = ttl_seconds
+
         if private:
-            return await self._fetch_uncached(endpoint, params, ttl, key, override_api_key)
+            return await self._fetch_uncached(
+                endpoint,
+                params,
+                ttl,
+                key,
+                override_api_key,
+                priority=priority,
+                cache_status=cache_status,
+                budget_caller=budget_caller,
+                persist_snapshot=persist_snapshot,
+            )
+
+        if not persist_snapshot:
+            return await self._fetch_uncached(
+                endpoint,
+                params,
+                ttl,
+                key,
+                None,
+                priority=priority,
+                cache_status=cache_status,
+                budget_caller=budget_caller,
+                persist_snapshot=False,
+            )
 
         # Fast path: L1 hit needs no lock
         now = self._now()
@@ -208,7 +300,17 @@ class CMCClient:
                 cached = await self._read_cache(key, ttl, now)
                 if cached is not None:
                     return cached
-                return await self._fetch_uncached(endpoint, params, ttl, key, None)
+                return await self._fetch_uncached(
+                    endpoint,
+                    params,
+                    ttl,
+                    key,
+                    None,
+                    priority=priority,
+                    cache_status=cache_status,
+                    budget_caller=budget_caller,
+                    persist_snapshot=persist_snapshot,
+                )
         finally:
             current = self._inflight.get(key)
             if current is not None:
@@ -225,6 +327,11 @@ class CMCClient:
         ttl: int,
         key: str,
         override_api_key: str | None,
+        *,
+        priority: CallPriority | None = None,
+        cache_status: UsageCacheStatus = "MISS",
+        budget_caller: BudgetCaller = "user",
+        persist_snapshot: bool = True,
     ) -> tuple[dict[str, object], FetchMeta]:
         private = bool(override_api_key)
         if self._simulate_basic and not private and endpoint in self._startup_only:
@@ -242,7 +349,23 @@ class CMCClient:
 
         api_key = override_api_key or self._api_key
         try:
-            response = await self._request_with_retry(endpoint, params, api_key)
+            response, observation = await self._request_with_retry(
+                endpoint,
+                params,
+                api_key,
+                private=private,
+                priority=priority,
+                cache_status=cache_status,
+                budget_caller=budget_caller,
+            )
+        except CMCBudgetDeniedError as exc:
+            return await self._fallback(
+                endpoint,
+                params,
+                key,
+                exc.reason,
+                category="rate_limited",
+            )
         except httpx.TransportError as exc:
             reason = f"network outage: {exc.__class__.__name__}"
             if private:
@@ -261,6 +384,19 @@ class CMCClient:
 
         payload = _json_object(response)
         error_code = _error_code(payload)
+        status = payload.get("status") if isinstance(payload.get("status"), dict) else {}
+        if observation.status == "known":
+            credit_cost = int(observation.credits or 0)
+            credit_status: Literal["known", "unknown", "none"] = "known"
+            credit_limitation = None
+        else:
+            credit_cost = observation.held_credits
+            credit_status = "unknown"
+            credit_limitation = (
+                "CMC did not return an integer status.credit_count. The server-key "
+                "reservation stays held and is not recorded as zero."
+            )
+
         if response.status_code == 401 or error_code in _AUTH_ERROR_CODES:
             reason = f"HTTP {response.status_code} CMC {error_code} Invalid API Key / Unauthorized"
             if private:
@@ -347,8 +483,6 @@ class CMCClient:
                 cmc_error_code=error_code,
             )
 
-        status = payload.get("status") if isinstance(payload.get("status"), dict) else {}
-        credit_cost = _credit_count(status)
         source_timestamp = None
         if isinstance(status, dict):
             source_timestamp = parse_timestamp(status.get("timestamp"))
@@ -360,8 +494,10 @@ class CMCClient:
             credit_cost=credit_cost,
             source_timestamp=source_timestamp,
             retrieved_at=retrieved_at,
+            limitation=credit_limitation,
+            credit_status=credit_status,
         )
-        if not private:
+        if not private and persist_snapshot:
             await self._write_cache(key, endpoint, params, payload, meta, ttl)
         return payload, meta
 
@@ -426,11 +562,34 @@ class CMCClient:
         endpoint: str,
         params: dict[str, object],
         api_key: str,
-    ) -> httpx.Response:
+        *,
+        private: bool,
+        priority: CallPriority | None,
+        cache_status: UsageCacheStatus,
+        budget_caller: BudgetCaller,
+    ) -> tuple[httpx.Response, CreditObservation]:
         if self._client is not None:
-            return await self._send_with_retry(self._client, endpoint, params, api_key)
+            return await self._send_with_retry(
+                self._client,
+                endpoint,
+                params,
+                api_key,
+                private=private,
+                priority=priority,
+                cache_status=cache_status,
+                budget_caller=budget_caller,
+            )
         async with httpx.AsyncClient(base_url=self._base_url, timeout=20.0) as client:
-            return await self._send_with_retry(client, endpoint, params, api_key)
+            return await self._send_with_retry(
+                client,
+                endpoint,
+                params,
+                api_key,
+                private=private,
+                priority=priority,
+                cache_status=cache_status,
+                budget_caller=budget_caller,
+            )
 
     async def _send_with_retry(
         self,
@@ -438,29 +597,153 @@ class CMCClient:
         endpoint: str,
         params: dict[str, object],
         api_key: str,
-    ) -> httpx.Response:
+        *,
+        private: bool,
+        priority: CallPriority | None,
+        cache_status: UsageCacheStatus,
+        budget_caller: BudgetCaller,
+    ) -> tuple[httpx.Response, CreditObservation]:
         delays = RETRY_DELAYS_SECONDS
         attempt = 0
         while True:
+            attempt_no = attempt + 1
+            reservation_key: str | None = None
+            reservation_credits = 1
+            if not private:
+                reservation_key = f"cmc:{uuid.uuid4().hex}"
+                try:
+                    decision = await self._budget.reserve_upstream(
+                        endpoint=endpoint,
+                        priority=priority,
+                        cache_status=cache_status,
+                        caller=budget_caller,
+                        reservation_credits=reservation_credits,
+                        attempt_no=attempt_no,
+                        idempotency_key=reservation_key,
+                    )
+                except asyncio.CancelledError:
+                    try:
+                        await asyncio.shield(
+                            self._budget.mark_unanswered_reservation(
+                                idempotency_key=reservation_key,
+                                error_category="transient_error",
+                                endpoint=endpoint,
+                                cache_status=cache_status,
+                                caller=budget_caller,
+                                attempt_no=attempt_no,
+                            )
+                        )
+                    except Exception:
+                        logging.getLogger("cointrac").warning(
+                            "budget hold after a lost reservation response remains under its key"
+                        )
+                    raise
+                if not decision.allowed or decision.idempotency_key != reservation_key:
+                    raise CMCBudgetDeniedError(
+                        decision.reason or "CMC credit ledger denied the upstream call."
+                    )
+                reservation_credits = decision.reservation_credits or reservation_credits
             try:
                 response = await client.get(
                     endpoint,
                     params=params,
                     headers={CMC_KEY_HEADER: api_key, "Accept": "application/json"},
                 )
+            except asyncio.CancelledError:
+                if reservation_key is not None:
+                    try:
+                        await asyncio.shield(
+                            self._budget.reconcile_upstream(
+                                idempotency_key=reservation_key,
+                                outcome="unknown",
+                                actual_credits=None,
+                                error_category="transient_error",
+                                reservation_credits=reservation_credits,
+                                endpoint=endpoint,
+                                cache_status=cache_status,
+                                caller=budget_caller,
+                                attempt_no=attempt_no,
+                            )
+                        )
+                    except Exception:
+                        logging.getLogger("cointrac").warning(
+                            "budget hold during cancellation failed; reservation remains open"
+                        )
+                raise
             except httpx.TransportError:
+                if reservation_key is not None:
+                    await asyncio.shield(
+                        self._budget.reconcile_upstream(
+                            idempotency_key=reservation_key,
+                            outcome="unknown",
+                            actual_credits=None,
+                            error_category="transient_error",
+                            reservation_credits=reservation_credits,
+                            endpoint=endpoint,
+                            cache_status=cache_status,
+                            caller=budget_caller,
+                            attempt_no=attempt_no,
+                        )
+                    )
                 if attempt >= len(delays):
                     raise
                 await self._sleep(delays[attempt])
                 attempt += 1
                 continue
-            if response.status_code == 429 or response.status_code >= 500:
-                if attempt >= len(delays):
-                    return response
+            observation = _observe_credit(response, held_credits=reservation_credits)
+            retryable = response.status_code == 429 or response.status_code >= 500
+            if retryable and attempt < len(delays):
+                if reservation_key is not None:
+                    await self._reconcile_attempt(
+                        reservation_key,
+                        observation,
+                        endpoint=endpoint,
+                        cache_status=cache_status,
+                        budget_caller=budget_caller,
+                        attempt_no=attempt_no,
+                        error_category=(
+                            "rate_limited" if response.status_code == 429 else "transient_error"
+                        ),
+                    )
                 await self._sleep(delays[attempt])
                 attempt += 1
                 continue
-            return response
+            if reservation_key is not None:
+                await self._reconcile_attempt(
+                    reservation_key,
+                    observation,
+                    endpoint=endpoint,
+                    cache_status=cache_status,
+                    budget_caller=budget_caller,
+                    attempt_no=attempt_no,
+                    error_category=_terminal_error_category(response),
+                )
+            return response, observation
+
+    async def _reconcile_attempt(
+        self,
+        idempotency_key: str,
+        observation: CreditObservation,
+        *,
+        endpoint: str,
+        cache_status: UsageCacheStatus,
+        budget_caller: BudgetCaller,
+        attempt_no: int,
+        error_category: str | None,
+    ) -> None:
+        await asyncio.shield(
+            self._budget.reconcile_upstream(
+                idempotency_key=idempotency_key,
+                outcome=observation.status,
+                actual_credits=observation.credits,
+                error_category=error_category,
+                reservation_credits=observation.held_credits,
+                endpoint=endpoint,
+                cache_status=cache_status,
+                caller=budget_caller,
+                attempt_no=attempt_no,
+            )
+        )
 
     async def _fallback(
         self,
@@ -516,6 +799,7 @@ def _cached_meta(item: CachedPayload) -> FetchMeta:
         credit_cost=0,
         source_timestamp=item.source_timestamp,
         retrieved_at=item.retrieved_at,
+        credit_status="none",
     )
 
 
@@ -527,6 +811,7 @@ def _cached_meta_from_snapshot(snapshot: StoredSnapshot) -> FetchMeta:
         credit_cost=0,
         source_timestamp=snapshot.source_timestamp,
         retrieved_at=snapshot.retrieved_at,
+        credit_status="none",
     )
 
 
@@ -545,18 +830,44 @@ def _error_code(payload: dict[str, object]) -> int | None:
     if not isinstance(status, dict):
         return None
     code = status.get("error_code")
-    if isinstance(code, int):
-        return code
+    if isinstance(code, int) and not isinstance(code, bool):
+        return code if code >= 0 else None
+    if isinstance(code, str):
+        cleaned = code.strip()
+        if cleaned.isdigit():
+            return int(cleaned)
     return None
 
 
-def _credit_count(status: object) -> int:
-    if not isinstance(status, dict):
-        return 0
+def _observe_credit(response: httpx.Response, *, held_credits: int) -> CreditObservation:
+    payload = _json_object(response)
+    status = payload.get("status") if isinstance(payload.get("status"), dict) else None
+    if not isinstance(status, dict) or "credit_count" not in status:
+        return CreditObservation("unknown", None, held_credits)
     credit = status.get("credit_count")
-    if isinstance(credit, int):
-        return credit
-    return 0
+    if isinstance(credit, bool) or credit is None:
+        return CreditObservation("unknown", None, held_credits)
+    if isinstance(credit, int) and credit >= 0:
+        return CreditObservation("known", credit, held_credits)
+    if isinstance(credit, float) and math.isfinite(credit) and credit >= 0 and credit.is_integer():
+        return CreditObservation("known", int(credit), held_credits)
+    return CreditObservation("unknown", None, held_credits)
+
+
+def _terminal_error_category(response: httpx.Response) -> str | None:
+    payload = _json_object(response)
+    error_code = _error_code(payload)
+    if response.status_code == 401 or error_code in _AUTH_ERROR_CODES:
+        return "auth_invalid"
+    if response.status_code == 403 or error_code == 1006:
+        return "tier_restricted"
+    if response.status_code == 429 or error_code in _RATE_LIMIT_ERROR_CODES:
+        return "rate_limited"
+    if response.status_code >= 500:
+        return "transient_error"
+    if response.status_code != 200 or error_code not in {None, 0}:
+        return "client_error"
+    return None
 
 
 def _restriction_reason(status_code: int, error_code: int | None) -> str:

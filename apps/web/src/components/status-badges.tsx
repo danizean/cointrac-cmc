@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { presentBudgetState } from "@/lib/budget-state";
 import type {
   AnomalyDirection,
   DataMode,
@@ -27,6 +28,8 @@ export type SystemStatusState =
   | "SNAPSHOT"
   | "TIER_RESTRICTED"
   | "CONNECTED"
+  | "CONNECTING"
+  | "STANDBY"
   | "DISCONNECTED"
   | "CONFIGURED"
   | "NOT_CONFIGURED"
@@ -63,6 +66,16 @@ const SYSTEM_STATUS_CONFIG: Record<
     label: "CONNECTED",
     tone: "border-positive/35 bg-positive-soft text-positive",
     dot: "bg-positive",
+  },
+  CONNECTING: {
+    label: "Connecting to Intelligence Engine...",
+    tone: "border-info/35 bg-info-soft text-info",
+    dot: "bg-info",
+  },
+  STANDBY: {
+    label: "Engine Standby",
+    tone: "border-warning/40 bg-warning-soft text-warning",
+    dot: "bg-warning",
   },
   DISCONNECTED: {
     label: "DISCONNECTED",
@@ -111,12 +124,68 @@ export function StatusIndicator({
   const cfg = SYSTEM_STATUS_CONFIG[state];
   return (
     <span className={`${BASE} ${cfg.tone}`}>
-      {state === "LOADING" ? (
+      {state === "LOADING" || state === "CONNECTING" ? (
         <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
       ) : (
         <IndicatorDot className={cfg.dot} />
       )}
       <span>{label ?? cfg.label}</span>
+    </span>
+  );
+}
+
+export function BudgetStateBadge({ state }: { state: string | null | undefined }) {
+  const presented = presentBudgetState(state);
+  const tone =
+    presented.visual === "NORMAL"
+      ? "border-positive/35 bg-positive-soft text-positive"
+      : presented.visual === "ELEVATED"
+        ? "border-info/40 bg-info-soft text-info"
+        : presented.visual === "CONSERVATION"
+          ? "border-warning/40 bg-warning-soft text-warning"
+          : presented.visual === "EMERGENCY"
+            ? "border-destructive/35 bg-destructive-soft text-destructive"
+            : presented.visual === "CUTOFF"
+              ? "border-destructive bg-destructive text-destructive-foreground"
+              : "border-border bg-muted text-muted-foreground";
+  const dot =
+    presented.visual === "NORMAL"
+      ? "bg-positive"
+      : presented.visual === "ELEVATED"
+        ? "bg-info"
+        : presented.visual === "CONSERVATION"
+          ? "bg-warning"
+          : presented.visual === "EMERGENCY" || presented.visual === "CUTOFF"
+            ? "bg-destructive"
+            : "bg-subtle-foreground";
+
+  return (
+    <span className={`${BASE} ${tone}`}>
+      <IndicatorDot className={presented.code === "UNSET" ? "bg-transparent" : dot} />
+      <span>{presented.label}</span>
+    </span>
+  );
+}
+
+export function QuotaProfileBadge({ profile }: { profile: string | null | undefined }) {
+  if (!profile) {
+    return (
+      <span className={`${BASE} border-border bg-muted text-muted-foreground`}>
+        —
+      </span>
+    );
+  }
+  const normalized = profile.toLowerCase();
+  const tone =
+    normalized === "startup"
+      ? "border-primary/35 bg-primary/12 text-link"
+      : normalized === "basic"
+        ? "border-info/35 bg-info-soft text-info"
+        : "border-border bg-muted text-foreground";
+
+  return (
+    <span className={`${BASE} ${tone}`}>
+      <span>{normalized.toUpperCase()} PROFILE</span>
     </span>
   );
 }

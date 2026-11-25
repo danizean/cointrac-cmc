@@ -35,7 +35,19 @@ class CoinTracMCPServer(MCPServer):
     """MCP server that advertises only canonical `cointrac://*` resources."""
 
 
-mcp = CoinTracMCPServer("CoinTrac Market Intelligence")
+mcp = CoinTracMCPServer(
+    "CoinTrac Market Intelligence",
+    instructions=(
+        "Pilih tool dari tugas pengguna. get_market_overview untuk snapshot makro; "
+        "analyze_market_regime untuk label regime; scan_market_movers untuk filter; "
+        "detect_market_anomalies untuk outlier; compare_assets untuk 2-8 aset; "
+        "analyze_asset untuk satu aset; analyze_momentum untuk beberapa ticker; "
+        "analyze_sector_rotation untuk sektor; get_historical_performance untuk risiko "
+        "historis; analyze_derivatives untuk derivatif. Panggil get_capabilities dulu "
+        "bila perlu tahu tier, persentase budget, dan tool yang sedang fallback. "
+        "Jangan sebut data sebagai realtime. Angka yang hilang tetap null."
+    ),
+)
 _deps: ServiceDeps | None = None
 _writer: EvidenceWriter | None = None
 
@@ -80,7 +92,8 @@ async def _tracked(name: str, awaitable: Awaitable[EvidenceEnvelope]) -> dict[st
             if callable(close):
                 close()
             raise ToolError(
-                f"Rate limit exceeded for tool '{name}'. Retry after {retry_after} seconds."
+                f"Rate limit exceeded for tool '{name}'. Retry after {retry_after} seconds. "
+                f"retry_after_seconds={retry_after} suggested_tool=get_capabilities"
             )
     started = time.perf_counter()
     status_code = 200
@@ -133,10 +146,19 @@ async def _tracked(name: str, awaitable: Awaitable[EvidenceEnvelope]) -> dict[st
 
 @mcp.tool(
     description=(
-        "Use for a macro snapshot (total market cap, BTC/ETH dominance, Fear & Greed, "
-        "top gainers/losers). Do NOT use if the user specifically asks for a regime "
-        "classification label -> use `analyze_market_regime`. Always check `status` "
-        "(OK/PARTIAL/INSUFFICIENT_DATA), `evidence.freshness`, and `limitations`."
+        "Pakai tool ini untuk melihat tier, persentase budget, dan tool yang full atau fallback. "
+        "Jangan pakai untuk harga atau analisis pasar. Tidak butuh input dan tidak memanggil CMC."
+    )
+)
+async def get_capabilities() -> dict[str, object]:
+    """Budget and tool mode. Zero CoinMarketCap credits."""
+    return await _tracked("get_capabilities", workflows.get_capabilities(deps=_deps))
+
+
+@mcp.tool(
+    description=(
+        "Pakai tool ini untuk snapshot makro (market cap, dominasi, Fear and Greed). "
+        "Jangan pakai untuk label regime. Butuh input quote_currency opsional."
     )
 )
 async def get_market_overview(
@@ -161,10 +183,8 @@ async def get_market_overview(
 
 @mcp.tool(
     description=(
-        "Use to classify the current market regime (`RISK_ON_ALTSEASON`, "
-        "`BTC_LED_EXPANSION`, `RISK_OFF_STRESS`, `RANGE_CONSOLIDATION`) "
-        "with deterministic indicator scores and rationale. Check `limitations` and "
-        "`evidence.freshness` before citing."
+        "Pakai tool ini untuk label regime deterministik. "
+        "Jangan pakai untuk daftar koin yang naik. Butuh input quote_currency opsional."
     )
 )
 async def analyze_market_regime(
@@ -191,10 +211,8 @@ async def analyze_market_regime(
 
 @mcp.tool(
     description=(
-        "Use for rule-based screening/filtering (e.g., high momentum, minimum liquidity, "
-        "anti-chase max 24h gain). Do NOT use for statistical outlier detection -> "
-        "use `detect_market_anomalies`. Missing filter metrics exclude candidates; "
-        "returns INSUFFICIENT_DATA if zero assets match."
+        "Pakai tool ini untuk menyaring mover dengan aturan likuiditas dan momentum. "
+        "Jangan pakai untuk outlier statistik. Butuh input filter opsional dan universe_size."
     )
 )
 async def scan_market_movers(
@@ -291,6 +309,15 @@ async def scan_market_movers(
             le=200,
         ),
     ] = 150,
+    deep_scan: Annotated[
+        bool,
+        Field(
+            description=(
+                "Optional. Page listings up to 1000 only when the effective profile is startup "
+                "and the budget is NORMAL. Otherwise the request stays on universe_size."
+            ),
+        ),
+    ] = False,
 ) -> dict[str, object]:
     """Rule-based mover screen."""
     params = _build_input(
@@ -306,14 +333,15 @@ async def scan_market_movers(
         rank_by=rank_by,
         limit=limit,
         universe_size=universe_size,
+        deep_scan=deep_scan,
     )
     return await _tracked("scan_market_movers", workflows.scan_market_movers(params, deps=_deps))
 
 
 @mcp.tool(
     description=(
-        "Use to discover statistical outliers (volume-to-mcap Z-score/MAD spikes "
-        "and strong >=8% opposite-sign 24h BTC divergences) across top listings."
+        "Pakai tool ini untuk outlier volume dan divergensi terhadap BTC. "
+        "Jangan pakai untuk filter momentum biasa. Butuh input universe_size opsional."
     )
 )
 async def detect_market_anomalies(
@@ -333,6 +361,15 @@ async def detect_market_anomalies(
             le=200,
         ),
     ] = 150,
+    deep_scan: Annotated[
+        bool,
+        Field(
+            description=(
+                "Optional. Page listings up to 1000 only when the effective profile is startup "
+                "and the budget is NORMAL. Otherwise the request stays on universe_size."
+            ),
+        ),
+    ] = False,
 ) -> dict[str, object]:
     """Statistical outlier scan."""
     params = _build_input(
@@ -340,6 +377,7 @@ async def detect_market_anomalies(
         "detect_market_anomalies",
         quote_currency=quote_currency,
         universe_size=universe_size,
+        deep_scan=deep_scan,
     )
     return await _tracked(
         "detect_market_anomalies",
@@ -349,9 +387,8 @@ async def detect_market_anomalies(
 
 @mcp.tool(
     description=(
-        "Use to compare 2–8 cryptocurrencies side-by-side on liquidity, FDV ratio, "
-        "momentum, relative strength vs BTC, and 365d volatility when OHLCV is available. "
-        "Check `limitations` for tier-restricted historical metrics."
+        "Pakai tool ini untuk membandingkan 2 sampai 8 aset. "
+        "Jangan pakai untuk satu aset saja. Butuh input symbols."
     )
 )
 async def compare_assets(
@@ -387,9 +424,8 @@ async def compare_assets(
 
 @mcp.tool(
     description=(
-        "Use for deep single-asset market fundamentals, canonical CMC ID, supply dynamics, "
-        "tags/sector, relative strength vs BTC, and historical risk when plan permits. "
-        "Check `status` and `limitations` when OHLCV or price-performance endpoints are restricted."
+        "Pakai tool ini untuk profil satu aset dan CMC ID kanonik. "
+        "Jangan pakai untuk perbandingan banyak aset. Butuh input symbol."
     )
 )
 async def analyze_asset(
@@ -427,8 +463,8 @@ async def analyze_asset(
 
 @mcp.tool(
     description=(
-        "Use for multi-timeframe momentum decomposition (1h, 24h, 7d, 30d, 60d, 90d), "
-        "RS vs BTC, and 7d-vs-30d acceleration across 1–20 specific tickers."
+        "Pakai tool ini untuk momentum multi-horizon pada ticker yang disebut. "
+        "Jangan pakai untuk menyaring seluruh pasar. Butuh input symbols."
     )
 )
 async def analyze_momentum(
@@ -464,9 +500,8 @@ async def analyze_momentum(
 
 @mcp.tool(
     description=(
-        "Use to compare aggregate performance, breadth, and volume rotation across "
-        "canonical crypto sectors (defi, ai-big-data, layer-1, layer-2, gaming, rwa, memes). "
-        "Inspect constituent_count and limitations for thin-sample sectors."
+        "Pakai tool ini untuk rotasi dan breadth sektor. "
+        "Jangan pakai untuk profil satu koin. Butuh input sectors opsional."
     )
 )
 async def analyze_sector_rotation(
@@ -505,9 +540,8 @@ async def analyze_sector_rotation(
 
 @mcp.tool(
     description=(
-        "Use for daily time-series return statistics, 365-day annualized volatility, "
-        "max drawdown, beta, and Pearson correlation vs BTC. Returns TIER_RESTRICTED "
-        "with null risk metrics if the active CMC key lacks historical OHLCV access."
+        "Pakai tool ini untuk volatilitas, drawdown, dan beta historis. "
+        "Jangan pakai bila yang diminta hanya harga terkini. Butuh input symbol."
     )
 )
 async def get_historical_performance(
@@ -554,10 +588,8 @@ async def get_historical_performance(
 
 @mcp.tool(
     description=(
-        "Use to inspect CMC v5 derivatives market pairs (per-pair open interest, funding "
-        "rates, exclusions, outlier flags, and sampled non-outlier open interest sum), or "
-        "transparent spot-stress proxy when derivatives endpoints are unavailable. Returns "
-        "PARTIAL when only a top-N pair subset or unaggregated funding rates are available."
+        "Pakai tool ini untuk open interest dan funding derivatif, atau proxy spot yang jujur. "
+        "Jangan pakai untuk market cap spot saja. Butuh input symbol."
     )
 )
 async def analyze_derivatives(
@@ -682,37 +714,36 @@ async def evidence_resource(evidence_id: str) -> str:
 
 @mcp.prompt(name="daily-market-briefing")
 def daily_market_briefing() -> str:
-    """Ask the client to brief the market and cite every evidence record."""
+    """Morning market briefing workflow."""
     return (
-        "Call get_market_overview, analyze_market_regime, and analyze_sector_rotation. "
-        "Present a structured, factual briefing and cite every evidence_id with its UTC timestamp. "
-        "Keep missing numbers null, include all limitations, explicitly highlight any regime "
-        "signal_conflict or low-sample sector INSUFFICIENT_DATA flags, and do NOT give "
-        "buy/sell investment advice or unsupported trade recommendations."
+        "Workflow briefing pasar pagi: 1) get_capabilities. 2) get_market_overview. "
+        "3) analyze_market_regime. 4) analyze_sector_rotation. "
+        "Sebut setiap evidence_id. Jika sebuah tool berstatus fallback, tulis itu dan "
+        "jangan mengisi angka yang hilang dengan 0. Do not give investment advice, "
+        "recommendations, or price targets."
     )
 
 
 @mcp.prompt(name="asset-due-diligence")
 def asset_due_diligence(symbol: str, peers: str) -> str:
-    """Ask the client to research one asset against named peers."""
+    """Single-asset due diligence workflow."""
     return (
-        f"Call analyze_asset for {symbol}, compare_assets for {symbol} and {peers}, "
-        "and get_historical_performance for the same symbol. "
-        "Highlight liquidity, FDV overhang, timeframe coverage, and every data limitation with "
-        "its evidence_id. Remain descriptive and factual; do NOT invent buy/sell recommendations "
-        "or price targets."
+        f"Workflow due diligence {symbol}: 1) get_capabilities. 2) analyze_asset untuk {symbol}. "
+        f"3) compare_assets untuk {symbol} dan {peers}. "
+        f"4) get_historical_performance untuk {symbol}. "
+        "Sebut evidence_id dan batasan data. Do not give investment advice, "
+        "recommendations, or price targets."
     )
 
 
 @mcp.prompt(name="market-risk-review")
 def market_risk_review(symbols: str) -> str:
-    """Ask the client for a risk-first review of the named symbols."""
+    """Weekly sector rotation workflow. The prompt name stays stable for existing clients."""
     return (
-        "Call analyze_market_regime, detect_market_anomalies, and "
-        f"analyze_derivatives for {symbols}. "
-        "Lead with risks, cite every evidence_id, explicitly note regime conflicts, partial "
-        "pair sampling, unaggregated funding rates, or spot-proxy fallbacks, and do NOT give "
-        "personalized trading or financial advice."
+        "Workflow rotasi sektor mingguan: 1) get_capabilities. 2) analyze_sector_rotation. "
+        "3) scan_market_movers. 4) detect_market_anomalies. "
+        f"Jika pengguna menyebut aset, tambahkan analyze_derivatives untuk {symbols}. "
+        "Sebut evidence_id. Do not give investment advice, recommendations, or price targets."
     )
 
 

@@ -1,14 +1,29 @@
 "use client";
 
-import { ArrowRight, Search, X } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  Coins,
+  LayoutDashboard,
+  LineChart,
+  Search,
+  X,
+} from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useAppPreferences } from "@/components/app-preferences";
 import {
   buildWorkspaceCommands,
   filterWorkspaceCommands,
   type CommandItem,
 } from "@/lib/workspace-navigation";
+
+const SECTION_ICON: Record<CommandItem["section"], ComponentType<{ className?: string }>> = {
+  Workspace: LayoutDashboard,
+  "Market Intelligence": LineChart,
+  "Crypto Assets": Coins,
+  "Tools & Documentation": BookOpen,
+};
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -148,19 +163,19 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/65 px-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 pt-[10vh] backdrop-blur-[2px]"
       onClick={closePalette}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={locale === "id" ? "Pencarian cepat ruang kerja" : "Workspace quick search"}
+        aria-label={locale === "id" ? "Pencarian cepat CoinTrac" : "CoinTrac command palette"}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[72vh] w-full max-w-xl flex-col overflow-hidden rounded-[18px] border border-border-strong bg-card shadow-lg"
+        className="flex max-h-[76vh] w-full max-w-xl flex-col overflow-hidden rounded-[18px] border border-border-strong bg-card shadow-lg"
       >
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-          <Search className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden="true" />
+        <div className="flex items-center gap-2.5 border-b border-border bg-input-bg px-4 py-3">
+          <Search className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
           <input
             ref={inputRef}
             type="search"
@@ -189,8 +204,8 @@ export function CommandPalette({
             }}
             placeholder={
               locale === "id"
-                ? "Cari halaman, API Keys, MCP, Evidence, atau Market Intelligence..."
-                : "Jump to Overview, Market Intelligence, API Keys, MCP, Usage, Evidence..."
+                ? "Cari aset (BTC, SOL, ONDO), desk analisis, API Keys, atau dokumentasi..."
+                : "Search crypto assets (BTC, SOL, ONDO), analysis desks, API keys, or docs..."
             }
             aria-label={locale === "id" ? "Cari perintah" : "Search commands"}
             aria-controls="workspace-command-list"
@@ -199,13 +214,13 @@ export function CommandPalette({
                 ? `cmd-${filtered[clampedIndex].id}`
                 : undefined
             }
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-subtle-foreground focus:outline-none"
+            className="min-h-9 min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-subtle-foreground focus:outline-none"
           />
           <button
             type="button"
             onClick={closePalette}
             aria-label="Close search"
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[6px] text-subtle-foreground hover:bg-muted hover:text-foreground"
+            className="flex h-11 w-11 sm:h-8 sm:w-8 cursor-pointer items-center justify-center rounded-[6px] text-subtle-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -214,78 +229,88 @@ export function CommandPalette({
         <div
           id="workspace-command-list"
           role="listbox"
-          aria-label="Workspace destinations"
+          aria-label="CoinTrac destinations"
           className="flex-1 overflow-y-auto p-2"
         >
           {filtered.length === 0 ? (
             <div className="px-4 py-10 text-center">
               <p className="text-sm font-semibold text-foreground">
-                {locale === "id" ? "Tidak ada tujuan yang cocok" : "No matching destinations"}
+                {locale === "id" ? "Tidak ada hasil yang cocok" : "No matching destinations"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {locale === "id"
-                  ? "Coba kata kunci seperti keys, mcp, usage, evidence, atau market."
-                  : "Try searching for keys, mcp, usage, evidence, anomalies, or settings."}
+                  ? "Coba ketik BTC, SOL, ONDO, movers, derivatives, keys, mcp, atau docs."
+                  : "Try searching BTC, SOL, ONDO, movers, derivatives, keys, mcp, or docs."}
               </p>
             </div>
           ) : (
-            grouped.map((group) => (
-              <div key={group.section} className="mb-2 last:mb-0">
-                <p className="px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
-                  {group.section}
-                </p>
-                {group.items.map((item) => {
-                  flatCursor += 1;
-                  const idx = flatCursor;
-                  const active = idx === clampedIndex;
-                  const isCurrentRoute = pathname === item.href;
-                  return (
-                    <button
-                      key={item.id}
-                      id={`cmd-${item.id}`}
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      onMouseEnter={() => setActiveIndex(idx)}
-                      onClick={() => navigateTo(item)}
-                      className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors ${
-                        active
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-medium text-foreground">
-                            {item.title}
-                          </p>
-                          {isCurrentRoute ? (
-                            <span className="rounded-full border border-primary/35 bg-primary/12 px-2 py-0.5 font-mono text-[10px] font-semibold text-link">
-                              {locale === "id" ? "Aktif" : "Current"}
-                            </span>
-                          ) : null}
+            grouped.map((group) => {
+              const SectionIcon = SECTION_ICON[group.section];
+              return (
+                <div key={group.section} className="mb-2.5 last:mb-0">
+                  <p className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
+                    <SectionIcon className="h-3 w-3 text-link" aria-hidden="true" />
+                    <span>{group.section}</span>
+                  </p>
+                  {group.items.map((item) => {
+                    flatCursor += 1;
+                    const idx = flatCursor;
+                    const active = idx === clampedIndex;
+                    const isCurrentRoute = pathname === item.href;
+                    return (
+                      <button
+                        key={item.id}
+                        id={`cmd-${item.id}`}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        onMouseEnter={() => setActiveIndex(idx)}
+                        onClick={() => navigateTo(item)}
+                        className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-[10px] border px-3 py-2.5 text-left transition-colors ${
+                          active
+                            ? "border-primary/45 bg-primary/10 text-foreground"
+                            : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p
+                              className={`truncate text-sm font-medium ${
+                                item.section === "Crypto Assets"
+                                  ? "font-mono font-semibold text-foreground"
+                                  : "text-foreground"
+                              }`}
+                            >
+                              {item.title}
+                            </p>
+                            {isCurrentRoute ? (
+                              <span className="rounded-full border border-primary/35 bg-primary/12 px-2 py-0.5 font-mono text-[10px] font-semibold text-link">
+                                {locale === "id" ? "Aktif" : "Current"}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="truncate text-xs text-muted-foreground">{item.subtitle}</p>
                         </div>
-                        <p className="truncate text-xs text-muted-foreground">{item.subtitle}</p>
-                      </div>
-                      <ArrowRight
-                        className={`h-3.5 w-3.5 shrink-0 ${active ? "text-link" : "text-subtle-foreground"}`}
-                        aria-hidden="true"
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            ))
+                        <ArrowRight
+                          className={`h-3.5 w-3.5 shrink-0 ${active ? "text-link" : "text-subtle-foreground"}`}
+                          aria-hidden="true"
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-card-elevated/60 px-4 py-2 text-[11px] text-subtle-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-card-elevated/60 px-4 py-2.5 text-[11px] text-subtle-foreground">
           <div className="flex items-center gap-3 font-mono">
             <span>↑↓ Navigate</span>
             <span>↵ Open</span>
             <span>Esc Close</span>
           </div>
-          <span className="font-mono">⌘K / Ctrl+K</span>
+          <span className="font-mono">⌘K · Ctrl+K · /</span>
         </div>
       </div>
     </div>

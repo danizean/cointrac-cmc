@@ -45,6 +45,12 @@ class EvidenceMeta(StrictModel):
     cache_hit: bool
 
 
+class AgentAction(StrictModel):
+    reason: str
+    retry_after_seconds: int | None = Field(default=None, ge=0)
+    suggested_tool: str | None = None
+
+
 class EvidenceEnvelope[T](StrictModel):
     tool: str
     engine_version: str
@@ -54,3 +60,4 @@ class EvidenceEnvelope[T](StrictModel):
     methodology: MethodologyMeta
     evidence: EvidenceMeta
     limitations: list[str] = Field(default_factory=list)
+    agent_actions: list[AgentAction] = Field(default_factory=list)

@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { DeskSkeleton } from "@/components/ui/primitives";
 import { AssetDesk } from "@/components/workspace/asset-desk";
 
 export const metadata: Metadata = {
@@ -7,5 +9,9 @@ export const metadata: Metadata = {
 };
 
 export default function AssetsPage() {
-  return <AssetDesk />;
+  return (
+    <Suspense fallback={<DeskSkeleton />}>
+      <AssetDesk />
+    </Suspense>
+  );
 }

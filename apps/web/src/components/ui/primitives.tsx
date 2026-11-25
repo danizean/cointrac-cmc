@@ -34,8 +34,8 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
-  sm: "min-h-9 px-3 text-xs rounded-[8px]",
-  md: "min-h-10 px-4 text-sm rounded-[10px]",
+  sm: "min-h-11 sm:min-h-9 px-3 text-xs rounded-[8px]",
+  md: "min-h-11 sm:min-h-10 px-4 text-sm rounded-[10px]",
   lg: "min-h-11 px-5 text-sm rounded-[10px]",
 };
 
@@ -78,7 +78,7 @@ export function IconButton({
       type={type}
       aria-label={label}
       title={label}
-      className={`inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-[10px] border border-border bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      className={`inline-flex h-11 w-11 sm:h-10 sm:w-10 cursor-pointer items-center justify-center rounded-[10px] border border-border bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
       {...rest}
     >
       {children}
@@ -281,25 +281,61 @@ export function ErrorNotice({
 }) {
   const isRateLimit = status === 429;
   const isAuth = status === 401;
+  const isStandby = status === 0 || status === 502 || status === 503 || status === 504;
   const heading =
     title ??
     (isRateLimit
-      ? "Rate limit reached"
+      ? "Too many requests"
       : isAuth
-        ? "Authentication required"
-        : status === 503
+        ? "Sign in required"
+        : isStandby
           ? "Service temporarily unavailable"
           : "Request could not be completed");
 
   const hint = isRateLimit
     ? retryAfterSeconds
-      ? `Wait ${retryAfterSeconds} seconds before retrying.`
-      : "Wait briefly before retrying."
+      ? `Please wait ${retryAfterSeconds} seconds before trying again.`
+      : "Please wait a moment before trying again."
     : isAuth
-      ? "Sign in again with your verified account."
-      : status === 503
-        ? "The CoinTrac intelligence backend could not be reached."
+      ? "Please sign in again to continue."
+      : isStandby
+        ? "The CoinTrac backend could not be reached right now. Please wait a moment and try again."
         : null;
+
+  if (isStandby) {
+    return (
+      <div
+        role="status"
+        className="rounded-[14px] border border-warning/40 bg-warning-soft p-4 text-foreground"
+      >
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-warning/35 bg-background/60 text-warning">
+            <Clock className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-semibold text-warning">{heading}</p>
+              {status && status > 0 ? (
+                <span className="rounded-full border border-border bg-background/60 px-2 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+                  HTTP {status}
+                </span>
+              ) : null}
+            </div>
+            <p className="text-sm text-foreground">{message}</p>
+            {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+            {onRetry ? (
+              <div className="pt-2">
+                <Button variant="secondary" size="sm" onClick={onRetry}>
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Retry connection</span>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -341,6 +377,20 @@ export function ErrorNotice({
   );
 }
 
+export function DeskSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Loading market intelligence">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-24 w-full rounded-[14px]" />
+        <Skeleton className="h-24 w-full rounded-[14px]" />
+        <Skeleton className="h-24 w-full rounded-[14px]" />
+        <Skeleton className="h-24 w-full rounded-[14px]" />
+      </div>
+      <Skeleton className="h-64 w-full rounded-[14px]" />
+    </div>
+  );
+}
+
 export function InfoTip({
   label,
   text,
@@ -370,7 +420,7 @@ export function InfoTip({
         aria-controls={tipId}
         onClick={() => setOpen((prev) => !prev)}
         onBlur={() => setOpen(false)}
-        className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-subtle-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex h-11 w-11 -m-2.5 sm:m-0 sm:h-6 sm:w-6 cursor-pointer items-center justify-center rounded-full text-subtle-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <Info className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
@@ -455,7 +505,7 @@ export function Input({
         id={fieldId}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? errId : helper ? helpId : undefined}
-        className={`h-10 w-full rounded-[10px] border bg-input-bg px-3 text-sm text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`min-h-11 sm:h-10 w-full rounded-[10px] border bg-input-bg px-3 text-sm text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
           error ? "border-destructive" : "border-border"
         } ${className}`}
         {...rest}
@@ -500,7 +550,7 @@ export function Select({
         id={fieldId}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? errId : helper ? helpId : undefined}
-        className={`h-10 w-full rounded-[10px] border bg-input-bg px-3 text-sm text-foreground focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`min-h-11 sm:h-10 w-full rounded-[10px] border bg-input-bg px-3 text-sm text-foreground focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
           error ? "border-destructive" : "border-border"
         } ${className}`}
         {...rest}

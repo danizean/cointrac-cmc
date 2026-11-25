@@ -41,4 +41,4 @@ The research guide mentions Next.js 15. This app is Next.js 16 with App Router u
 - Server Components are the default. Add `"use client"` only on a leaf that needs browser state.
 - Live market data renders inside `<Suspense>`. Do not block the static shell on it, and do not replace a missing value with `0`.
 - The browser calls `/api/tg/*` only. That route may reach `health` and `v1` on the intelligence API, attaches `SANDBOX_API_KEY` on the server, and forwards `x-cmc-api-key` only in memory. Never read `CMC_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY` in `apps/web`, and do not create `NEXT_PUBLIC_SANDBOX_API_KEY`.
-- Visual rules live in `design-system/tradeguard/MASTER.md`. Use the semantic tokens in `apps/web/src/app/globals.css`. Do not add a second palette or a Tailwind v3 config.
+- Use the semantic tokens in `apps/web/src/app/globals.css`. Do not add a second palette or a Tailwind v3 config.

@@ -1,14 +1,15 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useAppPreferences } from "./app-preferences";
+import { EngineStatusPill } from "./engine-status-pill";
+import { CoinTracMark } from "./site-header";
 
 export function SiteFooter() {
   const { t } = useAppPreferences();
 
   const product = [
-    { href: "/capabilities", label: t.footer.capabilities },
+    { href: "/product", label: t.footer.capabilities },
     { href: "/integrations", label: t.footer.integrations },
     { href: "/docs", label: t.footer.docs },
     { href: "/#pricing", label: t.nav.pricing },
@@ -22,28 +23,29 @@ export function SiteFooter() {
   ];
 
   return (
-    <footer className="mt-20 border-t border-border">
-      <div className="mx-auto grid max-w-[1120px] gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.7fr))] lg:px-8">
-        <div className="max-w-sm">
-          <div className="flex items-center">
-            <span className="inline-flex items-center rounded-[10px] bg-[#080B12] px-2.5 py-1.5">
-              <Image
-                src="/brand/cointrac-wordmark.png"
-                alt="CoinTrac"
-                width={150}
-                height={28}
-                className="h-7 w-auto object-contain"
-              />
-            </span>
+    <footer className="mt-20 border-t border-border bg-card/30">
+      <div className="mx-auto grid max-w-[1240px] gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.7fr))] lg:px-8">
+        <div className="max-w-sm space-y-4">
+          <Link href="/" className="inline-flex items-center gap-2.5 text-foreground">
+            <CoinTracMark className="h-6 w-6 shrink-0" />
+            <span className="text-base font-semibold tracking-[-0.02em]">CoinTrac</span>
+          </Link>
+          <p className="text-sm leading-relaxed text-muted-foreground">{t.footer.tagline}</p>
+          <div className="pt-1">
+            <EngineStatusPill compact />
           </div>
-          <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{t.footer.tagline}</p>
         </div>
         <nav aria-label={t.footer.product}>
-          <h2 className="text-sm font-semibold text-foreground">{t.footer.product}</h2>
-          <ul className="mt-3 space-y-2">
+          <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-foreground">
+            {t.footer.product}
+          </h2>
+          <ul className="mt-3 space-y-1">
             {product.map((item) => (
               <li key={item.href}>
-                <Link href={item.href} className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground">
+                <Link
+                  href={item.href}
+                  className="inline-flex min-h-10 items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
                   {item.label}
                 </Link>
               </li>
@@ -51,11 +53,16 @@ export function SiteFooter() {
           </ul>
         </nav>
         <nav aria-label={t.footer.developers}>
-          <h2 className="text-sm font-semibold text-foreground">{t.footer.developers}</h2>
-          <ul className="mt-3 space-y-2">
+          <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-foreground">
+            {t.footer.developers}
+          </h2>
+          <ul className="mt-3 space-y-1">
             {developers.map((item) => (
               <li key={item.href}>
-                <Link href={item.href} className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground">
+                <Link
+                  href={item.href}
+                  className="inline-flex min-h-10 items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
                   {item.label}
                 </Link>
               </li>
@@ -64,9 +71,12 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="border-t border-border">
-        <p className="mx-auto max-w-[1120px] px-4 py-4 text-xs leading-relaxed text-muted-foreground sm:px-6 lg:px-8">
-          {t.footer.note}
-        </p>
+        <div className="mx-auto flex max-w-[1240px] flex-col gap-2 px-4 py-4 text-xs leading-relaxed text-subtle-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <p>{t.footer.note}</p>
+          <p className="font-mono text-[11px]">
+            Signal over noise · 365d Quant Basis · cointrac.xyz
+          </p>
+        </div>
       </div>
     </footer>
   );

@@ -525,10 +525,7 @@ def test_multi_horizon_anti_chase_covers_all_required_scenarios() -> None:
         == "INSUFFICIENT_HISTORY"
     )
     # 6. Normal non-parabolic asset (mild drawdown) -> NEUTRAL
-    assert (
-        assess_multi_horizon_risk(change_24h=-1.5, change_7d=-3.0, change_30d=-10.0)
-        == "NEUTRAL"
-    )
+    assert assess_multi_horizon_risk(change_24h=-1.5, change_7d=-3.0, change_30d=-10.0) == "NEUTRAL"
 
 
 def test_volume_anomaly_direction_separates_positive_negative_and_unclear_tails() -> None:

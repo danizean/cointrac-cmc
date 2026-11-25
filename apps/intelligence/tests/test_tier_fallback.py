@@ -196,9 +196,7 @@ def _seeded_store() -> MemorySnapshotStore:
                 "5426": {
                     "periods": {
                         "30d": {
-                            "quote": {
-                                "USD": {"high": 195.0, "low": 140.0, "percent_change": 24.0}
-                            }
+                            "quote": {"USD": {"high": 195.0, "low": 140.0, "percent_change": 24.0}}
                         }
                     }
                 }
@@ -237,9 +235,9 @@ def _mock_basic_routes(router: respx.MockRouter) -> dict[str, respx.Route]:
         "perf": router.get(f"{BASE}/v2/cryptocurrency/price-performance-stats/latest").mock(
             return_value=httpx.Response(403, json={"status": {"error_code": 1006}})
         ),
-        "derivs": router.get(
-            f"{BASE}/v5/cryptocurrency/derivatives/market-pairs/list/latest"
-        ).mock(return_value=httpx.Response(403, json={"status": {"error_code": 1006}})),
+        "derivs": router.get(f"{BASE}/v5/cryptocurrency/derivatives/market-pairs/list/latest").mock(
+            return_value=httpx.Response(403, json={"status": {"error_code": 1006}})
+        ),
     }
     return routes
 

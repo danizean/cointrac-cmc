@@ -1,13 +1,23 @@
 "use client";
 
+import { ArrowRight, Layers, Play } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import { StatusBadge } from "@/components/status-badges";
 import { TOOL_CATALOG, type ToolCatalogEntry } from "@/lib/catalog";
 import { MARKETING } from "@/lib/marketing-copy";
 import type { ToolName } from "@/lib/types";
 import { useAppPreferences } from "../app-preferences";
 
+type GroupId = "all" | "market" | "risk" | "history";
+
 const GROUPS: Record<"market" | "risk" | "history", ToolName[]> = {
-  market: ["get_market_overview", "analyze_market_regime", "analyze_asset", "analyze_sector_rotation"],
+  market: [
+    "get_market_overview",
+    "analyze_market_regime",
+    "analyze_asset",
+    "analyze_sector_rotation",
+  ],
   risk: [
     "scan_market_movers",
     "compare_assets",
@@ -29,63 +39,196 @@ function entry(name: ToolName): ToolCatalogEntry {
 export function CapabilitiesView() {
   const { locale } = useAppPreferences();
   const copy = MARKETING[locale].capabilities;
+  const [filter, setFilter] = useState<GroupId>("all");
+
+  const visibleGroups =
+    filter === "all" ? copy.groups : copy.groups.filter((group) => group.id === filter);
+
+  const filterTabs: { id: GroupId; label: string; count: number }[] = [
+    { id: "all", label: locale === "id" ? "Semua" : "All", count: TOOL_CATALOG.length },
+    { id: "market", label: locale === "id" ? "Pasar & Aset" : "Market", count: GROUPS.market.length },
+    { id: "risk", label: locale === "id" ? "Risiko & Screener" : "Risk", count: GROUPS.risk.length },
+    { id: "history", label: locale === "id" ? "Historis" : "History", count: GROUPS.history.length },
+  ];
 
   return (
-    <main id="content" className="mx-auto w-full max-w-[1200px] px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-link">{copy.eyebrow}</p>
-      <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">{copy.title}</h1>
-      <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">{copy.lede}</p>
-      <p className="mt-3 max-w-3xl text-sm text-muted-foreground">{copy.catalogNote}</p>
+    <main id="content" className="relative overflow-x-clip">
+      {/* Hero Header */}
+      <div className="ct-hero-glow relative border-b border-border/80">
+        <div
+          aria-hidden="true"
+          className="ct-grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[360px]"
+        />
+        <div className="relative mx-auto w-full max-w-[1240px] px-4 pb-12 pt-12 sm:px-6 lg:px-8 lg:pb-16 lg:pt-16">
+          <div className="ct-enter inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-link">
+            <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{copy.eyebrow}</span>
+          </div>
 
-      <div className="mt-14 space-y-16">
-        {copy.groups.map((group) => (
-          <section key={group.id}>
-            <h2 className="text-2xl font-semibold tracking-tight">{group.title}</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground">{group.body}</p>
-            <ul className="mt-6 divide-y divide-border border-y border-border">
-              {GROUPS[group.id].map((name) => {
-                const tool = entry(name);
+          <h1 className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl">
+            {copy.title}
+          </h1>
+
+          <p className="ct-enter-delay-2 mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-[17px]">
+            {copy.lede}
+          </p>
+
+          <div className="ct-enter-delay-3 mt-7 flex flex-wrap items-center justify-between gap-4">
+            {/* Category Filter Pills */}
+            <div
+              role="tablist"
+              aria-label={locale === "id" ? "Filter kategori tool" : "Filter tool category"}
+              className="inline-flex flex-wrap gap-1.5 rounded-[12px] border border-border bg-card/80 p-1"
+            >
+              {filterTabs.map((tab) => {
+                const active = filter === tab.id;
                 return (
-                  <li key={tool.name} className="grid gap-3 py-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-                    <div className="min-w-0">
-                      <p className="font-mono text-sm break-all text-foreground">{tool.name}</p>
-                      <p className="mt-1 font-mono text-xs break-all text-muted-foreground">
-                        {tool.method} {tool.restPath}
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{tool.label}</p>
-                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{tool.summary}</p>
-                      <p className="mt-2 text-sm leading-relaxed text-foreground">{tool.routingNote}</p>
-                    </div>
-                  </li>
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setFilter(tab.id)}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "bg-primary text-white shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`font-mono text-[10.5px] ${
+                        active ? "text-white/85" : "text-subtle-foreground"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
                 );
               })}
-            </ul>
-          </section>
-        ))}
+            </div>
+
+            <Link
+              href="/playground"
+              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-border-strong bg-card px-4 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+            >
+              <Play className="h-3.5 w-3.5 text-link" aria-hidden="true" />
+              <span>{locale === "id" ? "Coba di Playground" : "Try in Playground"}</span>
+            </Link>
+          </div>
+        </div>
       </div>
 
-      <section className="mt-16 border-t border-border pt-12">
-        <h2 className="text-2xl font-semibold tracking-tight">{copy.availabilityTitle}</h2>
-        <dl className="mt-6 grid gap-6 md:grid-cols-2">
-          {copy.availability.map((item) => (
-            <div key={item.label}>
-              <dt className="font-mono text-sm text-link">{item.label}</dt>
-              <dd className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.body}</dd>
-            </div>
+      {/* Tool Catalog Groups */}
+      <div className="mx-auto w-full max-w-[1240px] px-4 py-14 sm:px-6 lg:px-8">
+        <p className="font-mono text-xs text-subtle-foreground">{copy.catalogNote}</p>
+
+        <div className="mt-8 space-y-14">
+          {visibleGroups.map((group) => (
+            <section key={group.id} className="space-y-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+                    {group.title}
+                  </h2>
+                  <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+                    {group.body}
+                  </p>
+                </div>
+                <span className="font-mono text-xs text-subtle-foreground">
+                  {GROUPS[group.id].length} {GROUPS[group.id].length === 1 ? "tool" : "tools"}
+                </span>
+              </div>
+
+              <div className="ct-surface-featured overflow-hidden rounded-[16px]">
+                <ul className="divide-y divide-border">
+                  {GROUPS[group.id].map((name) => {
+                    const tool = entry(name);
+                    return (
+                      <li
+                        key={tool.name}
+                        className="grid gap-4 p-5 transition-colors hover:bg-card-elevated/50 lg:grid-cols-[24.5rem_minmax(0,1fr)_auto] lg:items-center"
+                      >
+                        <div className="min-w-0 space-y-2">
+                          <p className="font-mono text-sm font-semibold text-link">
+                            {tool.name}
+                          </p>
+                          <p className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-border bg-background/70 px-2.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                            <span
+                              className={`shrink-0 ${
+                                tool.method === "GET"
+                                  ? "font-semibold text-positive"
+                                  : "font-semibold text-link"
+                              }`}
+                            >
+                              {tool.method}
+                            </span>
+                            <span className="truncate">{tool.restPath}</span>
+                          </p>
+                        </div>
+
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-semibold text-foreground">{tool.label}</p>
+                          <p className="text-sm leading-relaxed text-muted-foreground">
+                            {tool.summary}
+                          </p>
+                          <p className="text-xs leading-relaxed text-subtle-foreground">
+                            {tool.routingNote}
+                          </p>
+                        </div>
+
+                        <div className="lg:justify-self-end">
+                          <Link
+                            href="/playground"
+                            className="inline-flex min-h-9 items-center gap-1.5 rounded-[8px] border border-border bg-background/60 px-3 font-mono text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+                          >
+                            <span>{locale === "id" ? "Uji" : "Test"}</span>
+                            <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                          </Link>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </section>
           ))}
-        </dl>
-        <p className="mt-8 max-w-3xl text-sm leading-relaxed text-foreground">{copy.modesTitle}</p>
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <Link href="/integrations" className="tg-btn tg-btn-primary inline-flex">
-            {copy.nextIntegrations}
-          </Link>
-          <Link href="/docs" className="tg-btn tg-btn-secondary inline-flex">
-            {copy.nextDocs}
-          </Link>
         </div>
-      </section>
+
+        {/* Status & Data Mode Section */}
+        <section className="mt-20 border-t border-border pt-14">
+          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+            {copy.availabilityTitle}
+          </h2>
+          <dl className="mt-6 grid gap-4 md:grid-cols-2">
+            {copy.availability.map((item) => (
+              <div
+                key={item.label}
+                className="ct-surface-card rounded-[16px] p-5 transition-colors hover:border-border-strong"
+              >
+                <dt>
+                  <StatusBadge status={item.label} />
+                </dt>
+                <dd className="mt-3 text-sm leading-relaxed text-muted-foreground">{item.body}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="ct-surface-card mt-6 rounded-[14px] p-5">
+            <p className="text-sm leading-relaxed text-muted-foreground">{copy.modesTitle}</p>
+          </div>
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <Link href="/integrations" className="tg-btn tg-btn-primary ct-btn-glow inline-flex">
+              <span>{copy.nextIntegrations}</span>
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+            <Link href="/docs" className="tg-btn tg-btn-secondary inline-flex">
+              {copy.nextDocs}
+            </Link>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

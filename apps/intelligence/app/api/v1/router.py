@@ -1,6 +1,9 @@
+import asyncio
+import json
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import AuthContext, require_api_key
 from app.schemas.envelope import EvidenceEnvelope
@@ -293,3 +296,42 @@ async def _call[T](
                 evidence_id=evidence_id,
             ),
         )
+
+
+@router.get(
+    "/stream",
+    summary="Snapshot freshness stream",
+    description=(
+        "Authenticated stream of warmer snapshot notices. A notice does not call CoinMarketCap."
+    ),
+)
+async def snapshot_stream(auth: AuthContext = Depends(require_api_key)) -> StreamingResponse:
+    del auth
+    from app.services.market_events import get_market_event_bus
+
+    queue = get_market_event_bus().subscribe()
+
+    async def _events():
+        try:
+            yield "retry: 5000\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
+                payload = {
+                    "endpoint": event.endpoint,
+                    "retrieved_at_utc": event.retrieved_at_utc.isoformat(),
+                    "cadence_seconds": event.cadence_seconds,
+                    "effective_tier": event.effective_tier,
+                }
+                yield f"event: snapshot\ndata: {json.dumps(payload)}\n\n"
+        finally:
+            get_market_event_bus().unsubscribe(queue)
+
+    return StreamingResponse(
+        _events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )

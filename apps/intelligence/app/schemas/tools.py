@@ -57,6 +57,14 @@ class MarketOverviewData(StrictModel):
     fear_greed_value: FiniteFloat | None = None
     fear_greed_classification: str | None = None
     top50_breadth_positive_pct: FiniteFloat | None = None
+    total_market_cap_change_7d_pct: FiniteFloat | None = None
+    total_market_cap_change_30d_pct: FiniteFloat | None = None
+    btc_dominance_change_7d: FiniteFloat | None = None
+    btc_dominance_change_30d: FiniteFloat | None = None
+    fear_greed_avg_7d: FiniteFloat | None = None
+    fear_greed_avg_30d: FiniteFloat | None = None
+    fear_greed_change_7d: FiniteFloat | None = None
+    fear_greed_change_30d: FiniteFloat | None = None
     btc: QuoteBrief | None = None
     eth: QuoteBrief | None = None
     sol: QuoteBrief | None = None
@@ -100,6 +108,7 @@ class ScanMoversInput(StrictModel):
     rank_by: RankBy = "composite_momentum_score"
     limit: int = Field(default=20, ge=1, le=50)
     universe_size: int = Field(default=150, ge=10, le=200)
+    deep_scan: bool = False
 
 
 class MoverRow(StrictModel):
@@ -292,6 +301,7 @@ class DetectAnomaliesInput(StrictModel):
 
     quote_currency: str = "USD"
     universe_size: int = Field(default=150, ge=10, le=200)
+    deep_scan: bool = False
 
 
 class AnomalyHit(StrictModel):
@@ -333,6 +343,14 @@ class MarketRegimeData(StrictModel):
     top50_breadth_positive_pct: FiniteFloat | None = None
     fear_greed_value: FiniteFloat | None = None
     btc_outperforming_median_alt: bool | None = None
+    total_market_cap_change_7d_pct: FiniteFloat | None = None
+    total_market_cap_change_30d_pct: FiniteFloat | None = None
+    btc_dominance_change_7d: FiniteFloat | None = None
+    btc_dominance_change_30d: FiniteFloat | None = None
+    fear_greed_avg_7d: FiniteFloat | None = None
+    fear_greed_avg_30d: FiniteFloat | None = None
+    fear_greed_change_7d: FiniteFloat | None = None
+    fear_greed_change_30d: FiniteFloat | None = None
     signal_conflict: bool = False
     confidence: RegimeConfidence | None = None
     dominant_signals: list[str] = Field(default_factory=list)
@@ -397,11 +415,39 @@ class SectorSnapshot(StrictModel):
     sample_sufficient: bool | None = None
 
 
+class RwaAssetBrief(StrictModel):
+    rwa_id: int | None = None
+    symbol: str | None = None
+    name: str | None = None
+    asset_type: str | None = None
+    rwa_rank: int | None = Field(default=None, ge=1)
+    has_tokens: bool | None = None
+    price: FiniteFloat | None = None
+    market_cap: FiniteFloat | None = None
+    volume_24h: FiniteFloat | None = None
+    percent_change_24h: FiniteFloat | None = None
+    percent_change_7d: FiniteFloat | None = None
+    last_updated: str | None = None
+
+
+class RwaUniverseContext(StrictModel):
+    scope: Literal["underlying_rwa_universe"] = "underlying_rwa_universe"
+    separated_from_crypto_sectors: bool = True
+    total_rwa_assets: int | None = Field(default=None, ge=0)
+    sampled_rwa_assets: int = Field(default=0, ge=0)
+    asset_type_counts: dict[str, int] = Field(default_factory=dict)
+    total_tokenized_market_cap: FiniteFloat | None = None
+    total_tokenized_volume_24h: FiniteFloat | None = None
+    top_rwa_assets: list[RwaAssetBrief] = Field(default_factory=list)
+    source_endpoints: list[str] = Field(default_factory=list)
+
+
 class SectorRotationData(StrictModel):
     quote_currency: str
     sectors: list[SectorSnapshot]
     unique_constituent_count: int | None = Field(default=None, ge=0)
     overlapping_asset_count: int | None = Field(default=None, ge=0)
+    rwa_universe: RwaUniverseContext | None = None
 
 
 class HistoricalPerformanceInput(StrictModel):
@@ -458,6 +504,61 @@ class DerivativePairObservation(StrictModel):
     last_updated: str | None = None
 
 
+class MarketWideLiquidationsContext(StrictModel):
+    scope: Literal["market_wide"] = "market_wide"
+    attribution: Literal["not_asset_specific"] = "not_asset_specific"
+    data_kind: Literal["observed_exchange_aggregate"] = "observed_exchange_aggregate"
+    quote_currency: str = "USD"
+    total_24h: FiniteFloat | None = None
+    long_24h: FiniteFloat | None = None
+    short_24h: FiniteFloat | None = None
+    total_1h: FiniteFloat | None = None
+    total_4h: FiniteFloat | None = None
+    last_updated: str | None = None
+    source_endpoint: str = "/v5/derivatives/liquidations/quotes/latest"
+
+
+class DerivativeVenueBrief(StrictModel):
+    exchange_id: int | None = None
+    name: str | None = None
+    slug: str | None = None
+    rank: int | None = Field(default=None, ge=1)
+    num_market_pairs: int | None = Field(default=None, ge=0)
+    exchange_score: FiniteFloat | None = None
+    liquidity_score: FiniteFloat | None = None
+    volume_24h: FiniteFloat | None = None
+    volume_24h_adjusted: FiniteFloat | None = None
+    open_interest: FiniteFloat | None = None
+    last_updated: str | None = None
+
+
+class DerivativesVenuesContext(StrictModel):
+    scope: Literal["market_wide_venues"] = "market_wide_venues"
+    attribution: Literal["not_asset_specific"] = "not_asset_specific"
+    quote_currency: str = "USD"
+    total_exchanges: int | None = Field(default=None, ge=0)
+    sampled_exchanges: int = Field(default=0, ge=0)
+    total_open_interest: FiniteFloat | None = None
+    total_volume_24h: FiniteFloat | None = None
+    venues: list[DerivativeVenueBrief] = Field(default_factory=list)
+    source_endpoint: str = "/v5/exchange/derivatives/list"
+
+
+class ToolAvailability(StrictModel):
+    name: str
+    mode: Literal["full", "fallback"]
+    reason: str | None = None
+
+
+class CapabilitiesData(StrictModel):
+    quota_profile: str
+    budget_state: str
+    utilization_pct: float | None = None
+    ledger_status: str
+    data_mode: Literal["CACHED", "VERIFIED_SNAPSHOT_FALLBACK"]
+    tools: list[ToolAvailability]
+
+
 class DerivativesAnalysisData(StrictModel):
     symbol: str
     cmc_id: int | None = None
@@ -471,5 +572,7 @@ class DerivativesAnalysisData(StrictModel):
     open_interest_pairs_included: int | None = Field(default=None, ge=0)
     outlier_pairs_excluded: int | None = Field(default=None, ge=0)
     market_pairs: list[DerivativePairObservation] = Field(default_factory=list)
+    market_wide_liquidations: MarketWideLiquidationsContext | None = None
+    derivatives_venues: DerivativesVenuesContext | None = None
     spot_volume_24h: FiniteFloat | None = None
     annualized_volatility: FiniteFloat | None = None

@@ -1058,9 +1058,7 @@ async def test_sector_book_db_loading_threshold_and_overlap_disclosure() -> None
     assert l1.category_id == "cat_layer1_123"
     _ = CATEGORIES
 
-    defi_coins = [
-        coin(200 + i, f"D{i}", 6.0, change_7d=9.0, tags=["defi"]) for i in range(5)
-    ]
+    defi_coins = [coin(200 + i, f"D{i}", 6.0, change_7d=9.0, tags=["defi"]) for i in range(5)]
     overlap_coin = coin(299, "OVER", 5.0, change_7d=8.0, tags=["defi", "real-world-assets"])
     rwa_only = coin(300, "RWA1", 4.0, change_7d=6.0, tags=["real-world-assets"])
     l1_coins = [coin(400 + i, f"L{i}", 3.0, change_7d=7.0, tags=["layer-1"]) for i in range(5)]
@@ -1547,9 +1545,7 @@ async def test_sector_excess_returns_benchmark_missing_and_mixed_timestamps() ->
         coin(10, "D5", 5.0, change_7d=1.0, tags=["defi"]),
     ]
     # Add 6 negative-24h non-stables so benchmark median differs cleanly from DeFi (5.0 / 1.0)
-    extra_market = [
-        coin(20 + i, f"M{i}", -1.0, change_7d=-5.0, tags=["gaming"]) for i in range(6)
-    ]
+    extra_market = [coin(20 + i, f"M{i}", -1.0, change_7d=-5.0, tags=["gaming"]) for i in range(6)]
     all_rows = [*market_rows, *extra_market]
     # 14 non-stables: 24h median = 1.5; 7d median = -4.5
 
@@ -1672,9 +1668,7 @@ async def test_six_verified_sector_mappings_migration_and_rwa_unmapped() -> None
     repo_root = Path(__file__).resolve().parents[3]
     migration_path = repo_root / "supabase" / "migrations" / "002_verified_sector_mappings.sql"
     raw_sql = migration_path.read_text(encoding="utf-8")
-    sql = "\n".join(
-        line for line in raw_sql.splitlines() if not line.lstrip().startswith("--")
-    )
+    sql = "\n".join(line for line in raw_sql.splitlines() if not line.lstrip().startswith("--"))
     for slug, cat_id in verified_six.items():
         assert f"'{slug}'" in sql
         assert f"'{cat_id}'" in sql

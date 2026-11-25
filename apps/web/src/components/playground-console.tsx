@@ -4,11 +4,13 @@ import {
   Activity,
   ChevronDown,
   ChevronUp,
+  Code2,
   GitCompareArrows,
   KeyRound,
   Layers,
   Loader2,
   Play,
+  RotateCcw,
   Trash2,
   TrendingUp,
 } from "lucide-react";
@@ -17,9 +19,10 @@ import { useEffect, useState } from "react";
 import { runIntelligenceTool } from "@/lib/api";
 import {
   PLAYGROUND_PRESETS,
-  RESOURCE_CATALOG,
   SECTOR_OPTIONS,
   TOOL_CATALOG,
+  publicMcpUrl,
+  publicOpenApiDocsUrl,
   type PlaygroundPreset,
 } from "@/lib/catalog";
 import { probeSession, type SessionProbe } from "@/lib/session-probe";
@@ -29,13 +32,17 @@ import { formatDurationMs } from "@/lib/format";
 import type { EvidenceEnvelope, RankBy, SectorSlug, ToolName } from "@/lib/types";
 import { ApiNotice } from "./api-notice";
 import { useAppPreferences } from "./app-preferences";
+import { CopyButton } from "./copy-button";
 import {
   EnvelopeEvidenceView,
   EnvelopeFormattedReport,
 } from "./envelope-report";
 import { JsonViewer } from "./json-viewer";
 
-type OutputTab = "report" | "json" | "evidence";
+type OutputTab = "report" | "json" | "evidence" | "request";
+
+const QUICK_SYMBOLS = ["BTC", "ETH", "SOL", "AVAX", "LINK"] as const;
+const QUICK_SYMBOL_SETS = ["SOL, AVAX, NEAR", "BTC, ETH, SOL"] as const;
 
 interface RunOutcome {
   label: string;
@@ -81,7 +88,7 @@ function parseOptionalNumber(raw: string): number | null {
 }
 
 const INPUT_CLASS =
-  "mt-1.5 w-full rounded-xl border border-border bg-background/80 px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 transition-colors focus:border-primary";
+  "mt-1.5 min-h-11 sm:min-h-10 w-full rounded-[10px] border border-border bg-input-bg px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle-foreground transition-colors focus:border-primary focus:outline-none";
 
 export function PlaygroundConsole() {
   const { t, locale } = useAppPreferences();
@@ -301,6 +308,24 @@ export function PlaygroundConsole() {
     });
   }
 
+  function resetDefaults() {
+    setQuoteCurrency("USD");
+    setSymbol("SOL");
+    setSymbolsInput("SOL, AVAX, NEAR");
+    setCount("30");
+    setUniverseSize("150");
+    setLimit("15");
+    setRankBy("composite_momentum_score");
+    setMinMarketCap("250000000");
+    setMinVolume24h("15000000");
+    setMinVolToMcap("");
+    setMinRs7d("");
+    setMax24hGain("18");
+    setMax7dGain("");
+    setSelectedSectors(SECTOR_OPTIONS.map((s) => s.slug));
+    setActivePresetId(null);
+  }
+
   async function handleFormSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setActivePresetId(null);
@@ -320,55 +345,66 @@ export function PlaygroundConsole() {
     await executeSingleTool(selectedTool, params, currentToolMeta.label);
   }
 
+  const liveParams = buildParamsForTool(selectedTool);
+  const apiBase = publicOpenApiDocsUrl().replace(/\/docs$/, "");
+  const mcpEndpoint = publicMcpUrl();
+  const liveCurl =
+    currentToolMeta.method === "GET"
+      ? `curl -sf -H "x-cointrac-key: <YOUR_COINTRAC_API_KEY>" \\\n  "${apiBase}${currentToolMeta.restPath.replace("{symbol}", encodeURIComponent(symbol.trim().toUpperCase() || "SOL"))}"`
+      : `curl -sf -X POST \\\n  -H "x-cointrac-key: <YOUR_COINTRAC_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(liveParams)}' \\\n  "${apiBase}${currentToolMeta.restPath}"`;
+  const liveMcpPayload = JSON.stringify(
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: selectedTool,
+        arguments: liveParams,
+      },
+    },
+    null,
+    2,
+  );
+
   return (
     <div className="space-y-6">
-      <section className="grid gap-4 border-b border-border pb-6 lg:grid-cols-3">
-        <p className="text-sm leading-relaxed text-muted-foreground lg:col-span-2">{copy.mcpNote}</p>
-        <dl className="grid grid-cols-3 gap-3 font-mono text-[11px] text-muted-foreground">
-          <div>
-            <dt>Tools</dt>
-            <dd className="text-sm font-semibold text-foreground">{TOOL_CATALOG.length}</dd>
-          </div>
-          <div>
-            <dt>Presets</dt>
-            <dd className="text-sm font-semibold text-foreground">{PLAYGROUND_PRESETS.length}</dd>
-          </div>
-          <div>
-            <dt>Resources</dt>
-            <dd className="text-sm font-semibold text-foreground">{RESOURCE_CATALOG.length}</dd>
-          </div>
-        </dl>
-      </section>
       {session === "anonymous" ? (
-        <div className="rounded-xl border border-border bg-card px-4 py-4">
-          <p className="text-sm font-semibold text-foreground">{copy.signIn}</p>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{copy.signInBody}</p>
-          <Link href="/login?next=/playground" className="tg-btn tg-btn-primary mt-3 inline-flex">
+        <div className="ct-surface-featured flex flex-col justify-between gap-4 rounded-[16px] px-5 py-4 sm:flex-row sm:items-center">
+          <div>
+            <p className="text-sm font-semibold text-foreground">{copy.signIn}</p>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+              {copy.signInBody}
+            </p>
+          </div>
+          <Link
+            href="/login?next=/playground"
+            className="tg-btn tg-btn-primary ct-btn-glow inline-flex shrink-0"
+          >
             {copy.signIn}
           </Link>
         </div>
       ) : null}
-      <section aria-labelledby="presets-heading" className="space-y-3">
+      <section aria-labelledby="presets-heading" className="space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2
             id="presets-heading"
-            className="font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
           >
             {t.playground.presetsHeading}
           </h2>
-          <span className="font-mono text-[11px] text-muted-foreground">
-            {t.playground.presetsHint}
+          <span className="font-mono text-[11px] text-subtle-foreground">
+            {locale === "id" ? "Klik untuk langsung menjalankan" : "Click any preset to run"}
           </span>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {PLAYGROUND_PRESETS.map((preset) => {
             const active = activePresetId === preset.id;
             const Icon =
               PRESET_ICONS[preset.id as keyof typeof PRESET_ICONS] ?? Activity;
             const iconAccent =
               PRESET_ACCENTS[preset.id as keyof typeof PRESET_ACCENTS] ??
-              "bg-primary/15 text-primary";
+              "bg-primary/15 text-link";
 
             return (
               <button
@@ -376,42 +412,29 @@ export function PlaygroundConsole() {
                 type="button"
                 disabled={running}
                 onClick={() => handleRunPreset(preset)}
-                className={`tg-panel-interactive group flex cursor-pointer flex-col justify-between rounded-2xl p-4 text-left disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`ct-surface-card group flex cursor-pointer flex-col justify-between rounded-[14px] p-3.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-60 ${
                   active
-                    ? "border-primary bg-card-elevated ring-1 ring-primary/60"
+                    ? "border-primary/60 bg-card-elevated ring-1 ring-primary/40"
                     : ""
                 }`}
               >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
                     <span
-                      className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${iconAccent}`}
+                      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] ${iconAccent}`}
                     >
-                      <Icon className="h-4 w-4" aria-hidden="true" />
+                      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                     </span>
-                    <span className="rounded-full border border-border bg-background/70 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-muted-foreground">
-                      {preset.badge}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-bold text-foreground">
+                    <p className="text-[13px] font-semibold leading-snug text-foreground">
                       {preset.title}
                     </p>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {preset.subtitle}
-                    </p>
                   </div>
+                  <Play className="mt-1 h-3 w-3 shrink-0 text-subtle-foreground transition-colors group-hover:text-link" aria-hidden="true" />
                 </div>
 
-                <div className="mt-4 flex items-center justify-between border-t border-border pt-3 font-mono text-[11px]">
-                  <span className="truncate text-primary">
-                    {preset.primaryTool}
-                  </span>
-                  <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-accent">
-                    {t.common.run}
-                    <Play className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                </div>
+                <p className="mt-2 line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
+                  {preset.subtitle}
+                </p>
               </button>
             );
           })}
@@ -427,16 +450,26 @@ export function PlaygroundConsole() {
         >
           <form
             onSubmit={handleFormSubmit}
-            className="tg-panel space-y-5 rounded-2xl p-5"
+            className="ct-surface-featured space-y-5 rounded-[18px] p-5"
           >
-            <div className="space-y-2">
-              <label
-                htmlFor="tool-select"
-                id="tool-runner-heading"
-                className="block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
-              >
-                {t.playground.toolRunnerLabel}
-              </label>
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="tool-select"
+                  id="tool-runner-heading"
+                  className="block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                >
+                  {t.playground.toolRunnerLabel}
+                </label>
+                <button
+                  type="button"
+                  onClick={resetDefaults}
+                  className="inline-flex cursor-pointer items-center gap-1 font-mono text-[11px] text-subtle-foreground transition-colors hover:text-foreground"
+                >
+                  <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                  <span>{locale === "id" ? "Reset" : "Reset"}</span>
+                </button>
+              </div>
               <select
                 id="tool-select"
                 value={selectedTool}
@@ -444,7 +477,7 @@ export function PlaygroundConsole() {
                   setSelectedTool(e.target.value as ToolName);
                   setActivePresetId(null);
                 }}
-                className="w-full cursor-pointer rounded-xl border border-border bg-background/80 px-3 py-2.5 font-mono text-xs font-semibold text-foreground"
+                className="w-full cursor-pointer rounded-[10px] border border-border bg-input-bg px-3 py-2.5 font-mono text-xs font-semibold text-foreground transition-colors focus:border-primary focus:outline-none"
               >
                 {TOOL_CATALOG.map((tool) => (
                   <option key={tool.name} value={tool.name}>
@@ -455,13 +488,13 @@ export function PlaygroundConsole() {
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {currentToolMeta.summary}
               </p>
-              <p className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
+              <p className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-border bg-background/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
                 <span
-                  className={
+                  className={`shrink-0 ${
                     currentToolMeta.method === "GET"
                       ? "font-bold text-positive"
-                      : "font-bold text-primary"
-                  }
+                      : "font-bold text-link"
+                  }`}
                 >
                   {currentToolMeta.method}
                 </span>
@@ -504,6 +537,18 @@ export function PlaygroundConsole() {
                     placeholder="SOL, AVAX, NEAR"
                     className={INPUT_CLASS}
                   />
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {QUICK_SYMBOL_SETS.map((presetSet) => (
+                      <button
+                        key={presetSet}
+                        type="button"
+                        onClick={() => setSymbolsInput(presetSet)}
+                        className="cursor-pointer rounded-[6px] border border-border bg-background/60 px-2 py-0.5 font-mono text-[10.5px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+                      >
+                        {presetSet}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -525,6 +570,22 @@ export function PlaygroundConsole() {
                     placeholder="SOL"
                     className={INPUT_CLASS}
                   />
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {QUICK_SYMBOLS.map((sym) => (
+                      <button
+                        key={sym}
+                        type="button"
+                        onClick={() => setSymbol(sym)}
+                        className={`cursor-pointer rounded-[6px] border px-2 py-0.5 font-mono text-[10.5px] transition-colors ${
+                          symbol.trim().toUpperCase() === sym
+                            ? "border-primary/50 bg-primary/12 text-link"
+                            : "border-border bg-background/60 text-muted-foreground hover:border-border-strong hover:text-foreground"
+                        }`}
+                      >
+                        {sym}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -742,7 +803,7 @@ export function PlaygroundConsole() {
             <button
               type="submit"
               disabled={running}
-              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-xs font-bold text-accent-foreground shadow-sm transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              className="tg-btn tg-btn-primary flex min-h-11 w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
             >
               {running ? (
                 <>
@@ -834,17 +895,18 @@ export function PlaygroundConsole() {
           aria-labelledby="output-heading"
           className="space-y-4 lg:col-span-8"
         >
-          <div className="tg-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
+          <div className="ct-surface-featured flex flex-wrap items-center justify-between gap-3 rounded-[16px] px-4 py-3">
             <div
               role="tablist"
               aria-label="Playground output views"
-              className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border bg-card-elevated p-1"
+              className="inline-flex flex-wrap items-center gap-1 rounded-[10px] border border-border bg-background/70 p-1"
             >
               {(
                 [
                   { id: "report", label: t.playground.tabReport },
                   { id: "json", label: t.playground.tabJson },
                   { id: "evidence", label: t.playground.tabEvidence },
+                  { id: "request", label: locale === "id" ? "Request" : "Request" },
                 ] as const
               ).map((tab) => {
                 const active = outputTab === tab.id;
@@ -855,9 +917,9 @@ export function PlaygroundConsole() {
                     role="tab"
                     aria-selected={active}
                     onClick={() => setOutputTab(tab.id)}
-                    className={`cursor-pointer whitespace-nowrap rounded-full px-3.5 py-1.5 font-mono text-xs font-semibold transition-all duration-200 ${
+                    className={`cursor-pointer whitespace-nowrap rounded-[7px] px-3 py-1.5 font-mono text-xs font-medium transition-colors ${
                       active
-                        ? "bg-foreground text-background shadow-xs"
+                        ? "bg-primary text-white shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
@@ -875,7 +937,7 @@ export function PlaygroundConsole() {
               className="font-mono text-xs text-muted-foreground"
             >
               {running ? (
-                <span className="inline-flex items-center gap-1.5 text-primary">
+                <span className="inline-flex items-center gap-1.5 text-link">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   {t.common.running}
                 </span>
@@ -890,31 +952,77 @@ export function PlaygroundConsole() {
             </div>
           </div>
 
-          {running && (
-            <div className="tg-panel flex items-center gap-3 rounded-2xl p-8 font-mono text-xs text-muted-foreground">
-              <Loader2
-                className="h-5 w-5 animate-spin text-primary"
-                aria-hidden="true"
-              />
-              {t.playground.runningBanner}
+          {outputTab === "request" && (
+            <div className="ct-code-swap space-y-4">
+              <div className="ct-surface-featured overflow-hidden rounded-[16px]">
+                <div className="flex items-center justify-between border-b border-border bg-[#080B12] px-4 py-2.5">
+                  <span className="inline-flex items-center gap-2 font-mono text-xs font-semibold text-link">
+                    <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>REST cURL · {selectedTool}</span>
+                  </span>
+                  <CopyButton text={liveCurl} label={locale === "id" ? "Salin" : "Copy"} />
+                </div>
+                <pre className="overflow-x-auto bg-code-bg p-4 font-mono text-xs leading-6 text-foreground">
+                  <code>{liveCurl}</code>
+                </pre>
+              </div>
+
+              <div className="ct-surface-featured overflow-hidden rounded-[16px]">
+                <div className="flex items-center justify-between border-b border-border bg-[#080B12] px-4 py-2.5">
+                  <span className="font-mono text-xs font-semibold text-link">
+                    MCP tools/call · {mcpEndpoint}
+                  </span>
+                  <CopyButton text={liveMcpPayload} label={locale === "id" ? "Salin" : "Copy"} />
+                </div>
+                <pre className="overflow-x-auto bg-code-bg p-4 font-mono text-xs leading-6 text-foreground">
+                  <code>{liveMcpPayload}</code>
+                </pre>
+              </div>
             </div>
           )}
 
-          {!running && !outcome && (
-            <div className="tg-panel flex flex-col items-center justify-center rounded-2xl border-dashed p-12 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+          {outputTab !== "request" && running && (
+            <div className="ct-surface-featured overflow-hidden rounded-[16px]">
+              <div className="h-[2px] w-full overflow-hidden bg-border/40">
+                <div className="ct-progress-bar h-full w-2/5 rounded-full bg-primary" />
+              </div>
+              <div className="space-y-3 p-6 font-mono text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 text-link">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <span>{t.playground.runningBanner}</span>
+                </div>
+                <div className="space-y-2 pt-1">
+                  <div className="h-3 w-3/4 animate-pulse rounded bg-muted/60" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-muted/40" />
+                  <div className="h-3 w-2/3 animate-pulse rounded bg-muted/30" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {outputTab !== "request" && !running && !outcome && (
+            <div className="ct-surface-card flex flex-col items-center justify-center rounded-[18px] border-dashed p-12 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-link">
                 <Activity className="h-6 w-6" aria-hidden="true" />
               </span>
-              <p className="mt-4 text-base font-bold text-foreground">
+              <p className="mt-4 text-base font-semibold text-foreground">
                 {t.playground.emptyTitle}
               </p>
               <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
                 {t.playground.emptyDesc}
               </p>
+              <button
+                type="button"
+                onClick={() => setOutputTab("request")}
+                className="mt-5 inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border-strong bg-card px-4 py-1.5 font-mono text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                <Code2 className="h-3.5 w-3.5 text-link" aria-hidden="true" />
+                <span>{locale === "id" ? "Lihat Request cURL / MCP" : "Preview cURL / MCP Request"}</span>
+              </button>
             </div>
           )}
 
-          {!running && outcome?.error && (
+          {outputTab !== "request" && !running && outcome?.error && (
             <ApiNotice
               status={outcome.error.status}
               message={outcome.error.message}
@@ -922,8 +1030,8 @@ export function PlaygroundConsole() {
             />
           )}
 
-          {!running && outcome && outcome.envelopes.length > 0 && (
-            <div className="space-y-4">
+          {outputTab !== "request" && !running && outcome && outcome.envelopes.length > 0 && (
+            <div className="ct-code-swap space-y-4">
               {outputTab === "report" &&
                 outcome.envelopes.map((env) => (
                   <EnvelopeFormattedReport

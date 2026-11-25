@@ -203,9 +203,7 @@ async def test_r6_rest_and_mcp_header_compatibility_and_conflict_rejection(
             # 3. REST enforces revocation (401) and suspension (403) on x-cointrac-key
             rev = await client.get(rest_url, headers={"x-cointrac-key": keys["revoked"]})
             assert rev.status_code == 401
-            susp = await client.get(
-                rest_url, headers={"x-cointrac-key": keys["suspended"]}
-            )
+            susp = await client.get(rest_url, headers={"x-cointrac-key": keys["suspended"]})
             assert susp.status_code == 403
 
             # 4. Query-string credentials never authenticate on REST (401) and return 400 on MCP
@@ -383,12 +381,12 @@ async def test_r6_engine_version_default_and_historical_evidence_readability() -
 
 
 async def test_r6_phase4b_boundaries_and_prepared_sql_migration_safety() -> None:
-    # 1. MCP census stays 10/3/2/3 with canonical cointrac://* URIs advertised
+    # MCP census is 11 tools after get_capabilities. Resources and prompts stay 3/2/3.
     tools = await mcp_server.list_tools()
     resources = await mcp_server.list_resources()
     templates = await mcp_server.list_resource_templates()
     prompts = await mcp_server.list_prompts()
-    assert len(tools) == 10
+    assert len(tools) == 11
     assert len(resources) == 3
     assert len(templates) == 2
     assert len(prompts) == 3
@@ -551,29 +549,17 @@ async def test_r6_phase4b_dual_namespace_mcp_resources_and_tenant_isolation(
                     async with ClientSession(read, write) as lim_session:
                         await lim_session.initialize()
                         r1 = json.loads(
-                            (
-                                await lim_session.read_resource(
-                                    "cointrac://evidence/ev_0123456789"
-                                )
-                            )
+                            (await lim_session.read_resource("cointrac://evidence/ev_0123456789"))
                             .contents[0]
                             .text
                         )
                         r2 = json.loads(
-                            (
-                                await lim_session.read_resource(
-                                    "cointrac://market/overview"
-                                )
-                            )
+                            (await lim_session.read_resource("cointrac://market/overview"))
                             .contents[0]
                             .text
                         )
                         r3 = json.loads(
-                            (
-                                await lim_session.read_resource(
-                                    "cointrac://evidence/ev_0123456789"
-                                )
-                            )
+                            (await lim_session.read_resource("cointrac://evidence/ev_0123456789"))
                             .contents[0]
                             .text
                         )

@@ -4,7 +4,7 @@ import { siteUrl } from "@/lib/site-url";
 
 const PUBLIC_PATHS = [
   "",
-  "/capabilities",
+  "/product",
   "/docs",
   "/integrations",
   "/connect",

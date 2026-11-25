@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useAppPreferences } from "@/components/app-preferences";
 import { CopyButton } from "@/components/copy-button";
 import { JsonViewer } from "@/components/json-viewer";
 import { DataModeBadge, FreshnessBadge } from "@/components/status-badges";
@@ -49,6 +50,8 @@ const DATE_OPTIONS: Array<{ value: DateRangeFilter; label: string }> = [
 ];
 
 export function WorkspaceEvidenceConsole() {
+  const { locale } = useAppPreferences();
+  const isId = locale === "id";
   const { pushToast } = useToast();
   const searchParams = useSearchParams();
   const initialQueryId = (searchParams.get("id") ?? "").trim();
@@ -267,29 +270,34 @@ export function WorkspaceEvidenceConsole() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Evidence"
-        description="Inspect the source, timestamp, and provenance of intelligence returned by CoinTrac."
+        title={isId ? "Riwayat Bukti" : "Evidence"}
+        description={
+          isId
+            ? "Periksa sumber data, stempel waktu, dan jejak asal setiap hasil intelijen CoinTrac."
+            : "Inspect the source, timestamp, and provenance of intelligence returned by CoinTrac."
+        }
         actions={
           <Button
-            variant="secondary"
+            variant="primary"
             size="md"
             loading={refreshing}
             onClick={() => void loadList(true)}
+            className="ct-btn-glow"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            <span>Refresh</span>
+            <span>{isId ? "Muat ulang" : "Refresh"}</span>
           </Button>
         }
       />
 
       {/* Filter & Direct ID Lookup Bar */}
-      <Card className="space-y-4 p-5">
+      <Card className="ct-surface-featured space-y-4 p-5">
         <div className="grid gap-4 lg:grid-cols-12">
           <div className="lg:col-span-4">
             <Input
               id="ws-evidence-search"
               type="search"
-              label="Filter retrieved records"
+              label={isId ? "Cari catatan bukti" : "Filter retrieved records"}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="ev_..., analyze_asset, 1, /v1/..."
@@ -299,11 +307,11 @@ export function WorkspaceEvidenceConsole() {
           <div className="lg:col-span-3">
             <Select
               id="ws-evidence-tool"
-              label="Tool"
+              label={isId ? "Alat" : "Tool"}
               value={toolFilter}
               onChange={(e) => setToolFilter(e.target.value)}
             >
-              <option value="ALL">All tools</option>
+              <option value="ALL">{isId ? "Semua alat" : "All tools"}</option>
               {toolNames.map((tool) => (
                 <option key={tool} value={tool}>
                   {tool}
@@ -317,7 +325,7 @@ export function WorkspaceEvidenceConsole() {
               <Input
                 id="ws-evidence-lookup"
                 type="text"
-                label="Direct evidence ID lookup"
+                label={isId ? "Cari ID bukti langsung" : "Direct evidence ID lookup"}
                 value={lookupId}
                 onChange={(e) => setLookupId(e.target.value)}
                 placeholder="ev_a1b2c3d4e5"
@@ -325,7 +333,7 @@ export function WorkspaceEvidenceConsole() {
             </div>
             <Button type="submit" variant="primary" size="md" className="shrink-0">
               <FileSearch className="h-4 w-4" aria-hidden="true" />
-              <span>Inspect</span>
+              <span>{isId ? "Periksa" : "Inspect"}</span>
             </Button>
           </form>
         </div>
@@ -335,7 +343,7 @@ export function WorkspaceEvidenceConsole() {
             <div
               role="group"
               aria-label="Filter by data mode"
-              className="inline-flex flex-wrap items-center gap-1 rounded-[10px] border border-border bg-background p-1"
+              className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border bg-background p-1"
             >
               {MODE_OPTIONS.map((opt) => (
                 <button
@@ -343,13 +351,13 @@ export function WorkspaceEvidenceConsole() {
                   type="button"
                   aria-pressed={modeFilter === opt.value}
                   onClick={() => setModeFilter(opt.value)}
-                  className={`min-h-8 cursor-pointer rounded-[8px] px-2.5 font-mono text-[11px] font-semibold transition-colors ${
+                  className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors ${
                     modeFilter === opt.value
-                      ? "bg-foreground text-background"
+                      ? "bg-primary text-white shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {opt.label}
+                  {opt.value === "ALL" && isId ? "Semua mode" : opt.label}
                 </button>
               ))}
             </div>
@@ -357,7 +365,7 @@ export function WorkspaceEvidenceConsole() {
             <div
               role="group"
               aria-label="Filter by date range"
-              className="inline-flex flex-wrap items-center gap-1 rounded-[10px] border border-border bg-background p-1"
+              className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border bg-background p-1"
             >
               {DATE_OPTIONS.map((opt) => (
                 <button
@@ -365,13 +373,13 @@ export function WorkspaceEvidenceConsole() {
                   type="button"
                   aria-pressed={dateFilter === opt.value}
                   onClick={() => setDateFilter(opt.value)}
-                  className={`min-h-8 cursor-pointer rounded-[8px] px-2.5 font-mono text-[11px] font-semibold transition-colors ${
+                  className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors ${
                     dateFilter === opt.value
-                      ? "bg-foreground text-background"
+                      ? "bg-primary text-white shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {opt.label}
+                  {opt.value === "all" && isId ? "Semua" : opt.label}
                 </button>
               ))}
             </div>
@@ -380,14 +388,20 @@ export function WorkspaceEvidenceConsole() {
           {loadingList || listError ? (
             <p className="font-mono text-xs text-subtle-foreground">
               {listError
-                ? "Record counts are unavailable until the evidence list loads."
-                : "Checking recent evidence records."}
+                ? isId
+                  ? "Jumlah catatan tidak tersedia sampai daftar bukti dimuat."
+                  : "Record counts are unavailable until the evidence list loads."
+                : isId
+                  ? "Memeriksa catatan bukti terbaru."
+                  : "Checking recent evidence records."}
             </p>
           ) : (
             <p className="font-mono text-xs text-subtle-foreground">
-              Showing <strong className="text-foreground">{filteredRecords.length}</strong> of{" "}
-              <strong className="text-foreground">{records.length}</strong> recent records (up to 50
-              returned by list API)
+              {isId ? "Menampilkan " : "Showing "}
+              <strong className="text-foreground">{filteredRecords.length}</strong>{" "}
+              {isId ? "dari " : "of "}
+              <strong className="text-foreground">{records.length}</strong>{" "}
+              {isId ? "catatan terbaru" : "recent records (up to 50 returned by list API)"}
             </p>
           )}
         </div>
@@ -412,12 +426,22 @@ export function WorkspaceEvidenceConsole() {
         <EmptyState
           icon={<FileCheck2 className="h-5 w-5" aria-hidden="true" />}
           title={
-            records.length === 0 ? "No evidence records yet" : "No evidence matches your filters"
+            records.length === 0
+              ? isId
+                ? "Belum ada catatan bukti"
+                : "No evidence records yet"
+              : isId
+                ? "Tidak ada bukti yang cocok dengan filter"
+                : "No evidence matches your filters"
           }
           description={
             records.length === 0
-              ? "Run any Market Intelligence tool in the workspace or via CoinTrac MCP to generate a tenant-scoped evidence record."
-              : "Adjust your search query, tool selection, data mode, or time window."
+              ? isId
+                ? "Jalankan analisis di workspace atau melalui CoinTrac MCP untuk membuat catatan bukti."
+                : "Run any Market Intelligence tool in the workspace or via CoinTrac MCP to generate a tenant-scoped evidence record."
+              : isId
+                ? "Ubah kata kunci pencarian, alat, mode data, atau rentang waktu."
+                : "Adjust your search query, tool selection, data mode, or time window."
           }
           action={
             hasActiveFilters ? (
@@ -431,7 +455,7 @@ export function WorkspaceEvidenceConsole() {
                   setDateFilter("all");
                 }}
               >
-                Reset filters
+                {isId ? "Reset filter" : "Reset filters"}
               </Button>
             ) : undefined
           }
@@ -444,13 +468,13 @@ export function WorkspaceEvidenceConsole() {
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
                   <tr className="border-b border-border font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                    <th className="px-4 py-3">Evidence ID</th>
-                    <th className="px-4 py-3">Tool</th>
-                    <th className="px-4 py-3">Assets (CMC ID)</th>
-                    <th className="px-4 py-3">Data mode</th>
-                    <th className="px-4 py-3">Freshness</th>
-                    <th className="px-4 py-3 text-right">CMC credits</th>
-                    <th className="px-4 py-3 text-right">Collected (UTC)</th>
+                    <th className="px-4 py-3">{isId ? "ID Bukti" : "Evidence ID"}</th>
+                    <th className="px-4 py-3">{isId ? "Alat" : "Tool"}</th>
+                    <th className="px-4 py-3">{isId ? "Aset (CMC ID)" : "Assets (CMC ID)"}</th>
+                    <th className="px-4 py-3">{isId ? "Mode data" : "Data mode"}</th>
+                    <th className="px-4 py-3">{isId ? "Kesegaran" : "Freshness"}</th>
+                    <th className="px-4 py-3 text-right">{isId ? "Kredit CMC" : "CMC credits"}</th>
+                    <th className="px-4 py-3 text-right">{isId ? "Diambil (UTC)" : "Collected (UTC)"}</th>
                     <th className="w-8 px-2 py-3">
                       <span className="sr-only">Inspect</span>
                     </th>
@@ -478,7 +502,7 @@ export function WorkspaceEvidenceConsole() {
                         <td className="px-4 py-3 font-semibold text-link">{row.evidence_id}</td>
                         <td className="px-4 py-3 text-foreground">{row.tool_name}</td>
                         <td className="max-w-[160px] truncate px-4 py-3 text-muted-foreground">
-                          {ids.length > 0 ? ids.join(", ") : "Not provided"}
+                          {ids.length > 0 ? ids.join(", ") : "—"}
                         </td>
                         <td className="px-4 py-3">
                           <DataModeBadge mode={row.data_mode} />

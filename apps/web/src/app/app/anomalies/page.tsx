@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { AnalysisDesk } from "@/components/workspace/analysis-desk";
+import { Suspense } from "react";
+import { DeskSkeleton } from "@/components/ui/primitives";
+import { AnomaliesDesk } from "@/components/workspace/anomalies-desk";
 
 export const metadata: Metadata = {
   title: "Anomalies",
-  description: "Statistical outlier scan using detect_market_anomalies.",
+  description: "Statistical outlier scan for unusual volume spikes, price moves, and BTC divergences.",
 };
 
 export default function AnomaliesPage() {
-  return <AnalysisDesk pageKey="anomalies" tools={["detect_market_anomalies"]} fields={["quote", "universe"]} />;
+  return (
+    <Suspense fallback={<DeskSkeleton />}>
+      <AnomaliesDesk />
+    </Suspense>
+  );
 }

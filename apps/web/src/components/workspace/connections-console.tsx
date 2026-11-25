@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useAppPreferences } from "@/components/app-preferences";
 import { StatusIndicator } from "@/components/status-badges";
 import {
   Badge,
@@ -33,7 +34,7 @@ import {
 } from "@/lib/control-plane-api";
 
 type VerificationTier =
-  | "Live connection verified"
+  | "Example configuration"
   | "Implementation supported"
   | "Configuration available";
 
@@ -56,10 +57,10 @@ function buildLocalGuides(localHttpUrl: string): ClientGuide[] {
       id: "local-antigravity",
       name: "Google Antigravity IDE",
       transport: "Local Streamable HTTP",
-      status: "Live connection verified",
+      status: "Example configuration",
       authMethod: "Authorization: Bearer YOUR_COINTRAC_API_KEY",
       notes:
-        "Verified live against local FastAPI on port 8000 (10 tools, 3 static resources, and evidence template reads).",
+        "Example for a local FastAPI process. This page does not prove that process is running. The MCP server registers 11 tools, 3 static resources, and evidence template reads.",
       setupSteps: [
         "Start the local CoinTrac Intelligence API on http://127.0.0.1:8000.",
         "Create a personal CoinTrac API key in API Keys (/app/keys).",
@@ -204,6 +205,113 @@ function buildLocalGuides(localHttpUrl: string): ClientGuide[] {
 function buildRemoteGuides(remoteUrl: string): ClientGuide[] {
   return [
     {
+      id: "remote-chatgpt",
+      name: "ChatGPT",
+      transport: "Remote Streamable HTTP (HTTPS)",
+      status: "Implementation supported",
+      authMethod: "Authorization: Bearer YOUR_COINTRAC_API_KEY / x-cointrac-key",
+      notes:
+        "Connects to CoinTrac MCP over Streamable HTTP (HTTPS) with your personal CoinTrac API key or Bearer token for all 11 tools, 5 resources, and 3 prompts.",
+      setupSteps: [
+        "Create a personal CoinTrac API key in API Keys (/app/keys).",
+        "Add the CoinTrac MCP URL below in ChatGPT Developer / MCP settings and supply your Bearer token.",
+      ],
+      snippet: JSON.stringify(
+        {
+          name: "CoinTrac Market Intelligence",
+          url: remoteUrl,
+          transport: "streamable-http",
+          headers: {
+            Authorization: "Bearer YOUR_COINTRAC_API_KEY",
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      id: "remote-claude",
+      name: "Claude",
+      transport: "Remote Streamable HTTP (HTTPS)",
+      status: "Implementation supported",
+      authMethod: "Authorization: Bearer YOUR_COINTRAC_API_KEY",
+      notes:
+        "Works with Claude remote MCP over HTTPS (or Claude Code / Claude Desktop locally) using your personal CoinTrac API key.",
+      setupSteps: [
+        "Create a personal CoinTrac API key in API Keys (/app/keys).",
+        "Add the remote MCP server configuration below and replace YOUR_COINTRAC_API_KEY.",
+      ],
+      snippet: JSON.stringify(
+        {
+          mcpServers: {
+            cointrac: {
+              url: remoteUrl,
+              headers: {
+                Authorization: "Bearer YOUR_COINTRAC_API_KEY",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      id: "remote-gemini",
+      name: "Gemini",
+      transport: "Remote Streamable HTTP (HTTPS)",
+      status: "Implementation supported",
+      authMethod: "OAuth 2.1 + PKCE / Authorization: Bearer",
+      notes:
+        "Designed for Gemini remote MCP via HTTPS with OAuth 2.1 Authorization Code + PKCE and refresh token rotation, or API key Bearer auth.",
+      setupSteps: [
+        "Register CoinTrac as a remote Streamable HTTP MCP server using the HTTPS URL below.",
+        "Authorize via OAuth 2.1 PKCE or pass Authorization: Bearer YOUR_COINTRAC_API_KEY.",
+      ],
+      snippet: JSON.stringify(
+        {
+          mcpServers: {
+            cointrac: {
+              httpUrl: remoteUrl,
+              auth: {
+                type: "oauth2-pkce",
+                fallbackHeader: "Authorization: Bearer YOUR_COINTRAC_API_KEY",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      id: "remote-hermes",
+      name: "Hermes",
+      transport: "Remote Streamable HTTP (HTTPS)",
+      status: "Implementation supported",
+      authMethod: "x-cointrac-key / Authorization: Bearer YOUR_COINTRAC_API_KEY",
+      notes:
+        "Connects directly to CoinTrac MCP over Streamable HTTP using x-cointrac-key or Bearer auth for all 11 MCP tools.",
+      setupSteps: [
+        "Create a personal CoinTrac API key in API Keys (/app/keys).",
+        "Configure Hermes with the endpoint and header below.",
+      ],
+      snippet: JSON.stringify(
+        {
+          mcpServers: {
+            cointrac: {
+              url: remoteUrl,
+              headers: {
+                "x-cointrac-key": "YOUR_COINTRAC_API_KEY",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    {
       id: "remote-antigravity",
       name: "Google Antigravity IDE",
       transport: "Remote Streamable HTTP (HTTPS)",
@@ -274,7 +382,7 @@ function buildRemoteGuides(remoteUrl: string): ClientGuide[] {
 }
 
 function tierTone(status: VerificationTier): "positive" | "brand" | "neutral" {
-  if (status === "Live connection verified") return "positive";
+  if (status === "Example configuration") return "neutral";
   if (status === "Implementation supported") return "brand";
   return "neutral";
 }
@@ -286,6 +394,7 @@ function GuidePanel({
   copiedKey,
   onCopy,
   ariaLabel,
+  isId,
 }: {
   guides: ClientGuide[];
   selectedId: string;
@@ -293,6 +402,7 @@ function GuidePanel({
   copiedKey: string | null;
   onCopy: (id: string, value: string, label: string) => void;
   ariaLabel: string;
+  isId: boolean;
 }) {
   const selected = guides.find((g) => g.id === selectedId) ?? guides[0];
 
@@ -310,7 +420,7 @@ function GuidePanel({
               onClick={() => onSelect(guide.id)}
               className={`flex min-h-12 cursor-pointer flex-col items-start gap-0.5 rounded-[10px] border px-3.5 py-2.5 text-left transition-colors ${
                 active
-                  ? "border-primary/50 bg-card text-foreground"
+                  ? "border-primary/50 bg-card text-foreground shadow-[0_0_20px_-10px_rgba(6,182,212,0.4)]"
                   : "border-border bg-card/50 text-muted-foreground hover:bg-card hover:text-foreground"
               }`}
             >
@@ -342,13 +452,13 @@ function GuidePanel({
         <dl className="grid gap-3 text-xs sm:grid-cols-2">
           <div className="rounded-[10px] border border-border bg-background/60 p-3">
             <dt className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-              Authentication
+              {isId ? "Autentikasi" : "Authentication"}
             </dt>
             <dd className="mt-1 break-words font-mono text-foreground">{selected.authMethod}</dd>
           </div>
           <div className="rounded-[10px] border border-border bg-background/60 p-3">
             <dt className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-              Notes
+              {isId ? "Catatan" : "Notes"}
             </dt>
             <dd className="mt-1 leading-relaxed text-muted-foreground">{selected.notes}</dd>
           </div>
@@ -356,7 +466,7 @@ function GuidePanel({
 
         <div className="space-y-2">
           <h4 className="font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
-            Setup steps
+            {isId ? "Langkah penyiapan" : "Setup steps"}
           </h4>
           <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
             {selected.setupSteps.map((step) => (
@@ -368,7 +478,7 @@ function GuidePanel({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
-              Configuration snippet
+              {isId ? "Cuplikan konfigurasi" : "Configuration snippet"}
             </h4>
             <Button
               variant="secondary"
@@ -378,12 +488,12 @@ function GuidePanel({
               {copiedKey === selected.id ? (
                 <>
                   <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
-                  <span>Copied</span>
+                  <span>{isId ? "Disalin" : "Copied"}</span>
                 </>
               ) : (
                 <>
                   <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>Copy snippet</span>
+                  <span>{isId ? "Salin konfigurasi" : "Copy snippet"}</span>
                 </>
               )}
             </Button>
@@ -398,11 +508,11 @@ function GuidePanel({
 }
 
 export function ConnectionsConsole() {
+  const { locale } = useAppPreferences();
+  const isId = locale === "id";
   const { pushToast } = useToast();
   const configuredLocalUrl = publicMcpUrl();
-  const localHttpUrl = configuredLocalUrl.includes("localhost")
-    ? LOCAL_DEV_ENDPOINT
-    : configuredLocalUrl;
+  const localHttpUrl = LOCAL_DEV_ENDPOINT;
   const localGuides = buildLocalGuides(localHttpUrl);
 
   const [mcpStatus, setMcpStatus] = useState<McpStatusPayload | null>(null);
@@ -414,7 +524,7 @@ export function ConnectionsConsole() {
   const [keysError, setKeysError] = useState<{ status: number; message: string } | null>(null);
 
   const [selectedLocalId, setSelectedLocalId] = useState(localGuides[0].id);
-  const [selectedRemoteId, setSelectedRemoteId] = useState("remote-antigravity");
+  const [selectedRemoteId, setSelectedRemoteId] = useState("remote-chatgpt");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const loadAll = useCallback(
@@ -490,23 +600,29 @@ export function ConnectionsConsole() {
 
   const activeKeys = keys.filter((k) => k.is_active);
   const remoteDeployed = Boolean(mcpStatus?.remote_deployed && mcpStatus.remote_url);
-  const remoteGuides =
-    remoteDeployed && mcpStatus?.remote_url ? buildRemoteGuides(mcpStatus.remote_url) : [];
+  const remoteGuides = buildRemoteGuides(
+    remoteDeployed && mcpStatus?.remote_url ? mcpStatus.remote_url : configuredLocalUrl,
+  );
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="MCP Connections"
-        description="Connect CoinTrac Market Intelligence to compatible AI agents and MCP clients."
+        title={isId ? "Koneksi MCP" : "MCP Connections"}
+        description={
+          isId
+            ? "Hubungkan agen AI dan klien MCP (Antigravity, Cursor, Claude, VS Code) ke CoinTrac Market Intelligence."
+            : "Connect CoinTrac Market Intelligence to compatible AI agents and MCP clients."
+        }
         actions={
           <Button
-            variant="secondary"
+            variant="primary"
             size="md"
             loading={refreshing}
             onClick={() => void loadAll(true)}
+            className="ct-btn-glow"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            <span>Refresh status</span>
+            <span>{isId ? "Perbarui status" : "Refresh status"}</span>
           </Button>
         }
       />
@@ -521,7 +637,7 @@ export function ConnectionsConsole() {
 
       {/* Live Infrastructure & Key Readiness Summary */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="flex flex-col justify-between gap-2.5 p-4">
+        <Card className="ct-surface-featured flex flex-col justify-between gap-2.5 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-semibold text-muted-foreground">MCP Server</span>
             {loading ? (
@@ -546,7 +662,9 @@ export function ConnectionsConsole() {
               </p>
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">Unavailable</p>
+            <p className="text-xs text-muted-foreground">
+              {isId ? "Tidak tersedia" : "Unavailable"}
+            </p>
           )}
         </Card>
 
@@ -568,12 +686,20 @@ export function ConnectionsConsole() {
           ) : (
             <div>
               <p className="truncate font-mono text-sm font-semibold text-foreground">
-                {remoteDeployed && mcpStatus?.remote_url ? mcpStatus.remote_url : "Not deployed"}
+                {remoteDeployed && mcpStatus?.remote_url
+                  ? mcpStatus.remote_url
+                  : isId
+                    ? "Belum di-deploy"
+                    : "Not deployed"}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {remoteDeployed
-                  ? "Public HTTPS endpoint active."
-                  : "No public HTTPS host provisioned yet."}
+                  ? isId
+                    ? "Endpoint HTTPS publik aktif."
+                    : "Public HTTPS endpoint active."
+                  : isId
+                    ? "Belum ada host HTTPS publik yang disediakan."
+                    : "No public HTTPS host provisioned yet."}
               </p>
             </div>
           )}
@@ -583,7 +709,7 @@ export function ConnectionsConsole() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
               <KeyRound className="h-3.5 w-3.5 text-link" aria-hidden="true" />
-              <span>CoinTrac API Keys</span>
+              <span>{isId ? "Kunci API CoinTrac" : "CoinTrac API Keys"}</span>
             </span>
             {loading ? (
               <StatusIndicator state="LOADING" />
@@ -602,7 +728,10 @@ export function ConnectionsConsole() {
           ) : (
             <div>
               <p className="font-mono text-sm font-semibold tabular-nums text-foreground">
-                {activeKeyCount ?? 0} active key{activeKeyCount === 1 ? "" : "s"}
+                {activeKeyCount ?? 0}{" "}
+                {isId
+                  ? "kunci aktif"
+                  : `active key${activeKeyCount === 1 ? "" : "s"}`}
               </p>
               {activeKeys.length > 0 ? (
                 <p className="mt-0.5 truncate font-mono text-[11px] text-subtle-foreground">
@@ -616,7 +745,7 @@ export function ConnectionsConsole() {
                   href="/app/keys"
                   className="mt-1 inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-link hover:underline"
                 >
-                  <span>Create a CoinTrac API Key</span>
+                  <span>{isId ? "Buat Kunci API CoinTrac" : "Create a CoinTrac API Key"}</span>
                   <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </Link>
               )}
@@ -629,12 +758,16 @@ export function ConnectionsConsole() {
       <section aria-labelledby="local-mcp-heading" className="space-y-4">
         <SectionHeader
           id="local-mcp-heading"
-          title="1. Local MCP (Developer Workstation)"
-          description="Runs inside your own environment via the local CoinTrac Intelligence API or Python stdio entrypoint. Not publicly hosted."
+          title={isId ? "1. Local MCP (Komputer Lokal)" : "1. Local MCP (Developer Workstation)"}
+          description={
+            isId
+              ? "Berjalan di lingkungan lokal Anda melalui CoinTrac Intelligence API atau Python stdio. Tidak di-host secara publik."
+              : "Runs inside your own environment via the local CoinTrac Intelligence API or Python stdio entrypoint. Not publicly hosted."
+          }
           action={<Badge tone="brand">LOCAL DEVELOPMENT</Badge>}
         />
 
-        <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <Card className="ct-surface-featured flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border bg-background text-link">
               <Laptop className="h-4 w-4" aria-hidden="true" />
@@ -642,7 +775,7 @@ export function ConnectionsConsole() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                  Local development endpoint
+                  {isId ? "Endpoint pengembangan lokal" : "Local development endpoint"}
                 </p>
                 <Badge tone="neutral">NOT PUBLICLY HOSTED</Badge>
               </div>
@@ -650,11 +783,13 @@ export function ConnectionsConsole() {
                 {localHttpUrl}
               </code>
               <p className="mt-1 text-xs text-muted-foreground">
-                Authenticate HTTP requests with{" "}
+                {isId ? "Gunakan header " : "Authenticate HTTP requests with "}
                 <code className="font-mono text-foreground">
                   Authorization: Bearer YOUR_COINTRAC_API_KEY
                 </code>
-                . Existing API keys remain compatible.
+                {isId
+                  ? ". Kunci API yang sudah ada tetap kompatibel."
+                  : ". Existing API keys remain compatible."}
               </p>
             </div>
           </div>
@@ -667,12 +802,12 @@ export function ConnectionsConsole() {
             {copiedKey === "local-url" ? (
               <>
                 <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
-                <span>Copied URL</span>
+                <span>{isId ? "Disalin" : "Copied URL"}</span>
               </>
             ) : (
               <>
                 <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Copy endpoint</span>
+                <span>{isId ? "Salin endpoint" : "Copy endpoint"}</span>
               </>
             )}
           </Button>
@@ -685,6 +820,7 @@ export function ConnectionsConsole() {
           copiedKey={copiedKey}
           onCopy={(id, value, label) => void copyText(id, value, label)}
           ariaLabel="Local MCP client setup guides"
+          isId={isId}
         />
       </section>
 
@@ -692,13 +828,17 @@ export function ConnectionsConsole() {
       <section aria-labelledby="remote-mcp-heading" className="space-y-4">
         <SectionHeader
           id="remote-mcp-heading"
-          title="2. Remote MCP (Hosted Network Endpoint)"
-          description="Connect cloud or remote MCP clients over HTTPS once a public CoinTrac MCP deployment is provisioned."
+          title={isId ? "2. Remote MCP (Endpoint Publik)" : "2. Remote MCP (Hosted Network Endpoint)"}
+          description={
+            isId
+              ? "Hubungkan klien MCP cloud atau jarak jauh melalui HTTPS setelah deployment publik tersedia."
+              : "Connect cloud or remote MCP clients over HTTPS once a public CoinTrac MCP deployment is provisioned."
+          }
           action={
             remoteDeployed ? (
               <StatusIndicator state="CONNECTED" label="DEPLOYED" />
             ) : (
-              <StatusIndicator state="NOT_DEPLOYED" label="Not deployed" />
+              <StatusIndicator state="NOT_DEPLOYED" label={isId ? "Belum di-deploy" : "Not deployed"} />
             )
           }
         />
@@ -712,7 +852,7 @@ export function ConnectionsConsole() {
                 </span>
                 <div className="min-w-0">
                   <p className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                    Hosted HTTPS endpoint
+                    {isId ? "Endpoint HTTPS publik" : "Hosted HTTPS endpoint"}
                   </p>
                   <code className="mt-1 block break-all font-mono text-sm font-semibold text-foreground">
                     {mcpStatus.remote_url}
@@ -730,12 +870,12 @@ export function ConnectionsConsole() {
                 {copiedKey === "remote-url" ? (
                   <>
                     <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
-                    <span>Copied URL</span>
+                    <span>{isId ? "Disalin" : "Copied URL"}</span>
                   </>
                 ) : (
                   <>
                     <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Copy endpoint</span>
+                    <span>{isId ? "Salin endpoint" : "Copy endpoint"}</span>
                   </>
                 )}
               </Button>
@@ -747,6 +887,7 @@ export function ConnectionsConsole() {
               copiedKey={copiedKey}
               onCopy={(id, value, label) => void copyText(id, value, label)}
               ariaLabel="Remote MCP client setup guides"
+              isId={isId}
             />
           </>
         ) : (
@@ -757,11 +898,12 @@ export function ConnectionsConsole() {
               </span>
               <div className="min-w-0 space-y-1.5">
                 <h3 className="text-sm font-semibold text-foreground">
-                  Hosted Remote MCP: Not deployed
+                  {isId ? "Hosted Remote MCP: Belum di-deploy" : "Hosted Remote MCP: Not deployed"}
                 </h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  No public HTTPS Remote MCP host is deployed in this environment. CoinTrac does not
-                  display a fabricated public URL until a real hosted deployment is configured via{" "}
+                  {isId
+                    ? "Belum ada host HTTPS Remote MCP publik di lingkungan ini. CoinTrac tidak menampilkan URL palsu sampai deployment publik dikonfigurasi melalui "
+                    : "No public HTTPS Remote MCP host is deployed in this environment. CoinTrac does not display a fabricated public URL until a real hosted deployment is configured via "}
                   <code className="font-mono text-foreground">REMOTE_MCP_PUBLIC_URL</code>.
                 </p>
               </div>
@@ -770,28 +912,49 @@ export function ConnectionsConsole() {
             <div className="grid gap-3 text-xs sm:grid-cols-2">
               <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
                 <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
-                  Backend protocol readiness
+                  {isId ? "Kesiapan protokol backend" : "Backend protocol readiness"}
                 </p>
                 <ul className="mt-2 list-disc space-y-1 pl-4 text-muted-foreground">
-                  <li>Stateless Streamable HTTP transport at /mcp</li>
-                  <li>SHA-256 API key validation and per-account isolation</li>
-                  <li>DNS-rebinding Host/Origin allowlist enforcement</li>
+                  <li>Stateless Streamable HTTP transport at /mcp (11 tools, 5 resources, 3 prompts)</li>
+                  <li>OAuth 2.1 Authorization Code + PKCE &amp; SHA-256 API key validation</li>
+                  <li>DNS-rebinding Host/Origin allowlist &amp; per-account isolation</li>
                 </ul>
               </div>
               <div className="rounded-[10px] border border-border bg-background/60 p-3.5">
                 <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
-                  Required before public remote access
+                  {isId ? "Klien yang didukung & akses" : "Supported clients & access"}
                 </p>
                 <ul className="mt-2 list-disc space-y-1 pl-4 text-muted-foreground">
-                  <li>Provision an HTTPS host with streaming enabled and set allowlists</li>
+                  <li>ChatGPT, Claude, Gemini, and Hermes over Streamable HTTP</li>
                   <li>
-                    Cloud MCP clients may require OAuth 2.1 Dynamic Client Registration (future
-                    deployment requirement; not currently enabled)
+                    {isId
+                      ? "Lihat katalog lengkap di halaman "
+                      : "View the full catalog on "}
+                    <Link href="/integrations" className="font-semibold text-link hover:underline">
+                      /integrations
+                    </Link>{" "}
+                    {isId ? "atau panduan di " : "or setup snippets at "}
+                    <Link href="/connect" className="font-semibold text-link hover:underline">
+                      /connect
+                    </Link>
                   </li>
-                  <li>Use Local MCP above for workstation development today</li>
+                  <li>
+                    {isId
+                      ? "Gunakan Local MCP di atas untuk pengembangan lokal saat ini"
+                      : "Use Local MCP above for workstation development today"}
+                  </li>
                 </ul>
               </div>
             </div>
+            <GuidePanel
+              guides={remoteGuides}
+              selectedId={selectedRemoteId}
+              onSelect={setSelectedRemoteId}
+              copiedKey={copiedKey}
+              onCopy={(id, value, label) => void copyText(id, value, label)}
+              ariaLabel="Remote MCP client setup guides"
+              isId={isId}
+            />
           </Card>
         )}
       </section>

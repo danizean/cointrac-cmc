@@ -5,6 +5,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
 
+import jwt
 from fastapi import Header, HTTPException, Security
 from fastapi.security import APIKeyHeader
 
@@ -263,6 +264,15 @@ _cmc_byok_scheme = APIKeyHeader(
 )
 
 
+def _cointrac_oauth_access_token(token: str) -> bool:
+    """True when the bearer is a CoinTrac MCP access token, which REST must reject."""
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError:
+        return False
+    return str(header.get("kid") or "").startswith("cointrac-mcp-")
+
+
 def retired_api_key(raw_key: str) -> bool:
     """True when the raw key still uses a retired TradeGuard prefix."""
     return raw_key.startswith(_RETIRED_KEY_PREFIXES)
@@ -278,9 +288,7 @@ def resolve_api_key_headers(
     Returns ``(resolved_key, conflict_detected)``.
     """
     candidates = [
-        value.strip()
-        for value in (cointrac_key, bearer_key)
-        if value is not None and value.strip()
+        value.strip() for value in (cointrac_key, bearer_key) if value is not None and value.strip()
     ]
     if not candidates:
         return None, False
@@ -374,6 +382,8 @@ async def require_api_key(
     key_record: ApiKeyRecord | None = None
     bearer_api_key: str | None = None
     if bearer and bearer.count(".") == 2:
+        if _cointrac_oauth_access_token(bearer):
+            raise HTTPException(status_code=401, detail="Unauthorized")
         jwt_subject = await _resolve_jwt(bearer)
     elif bearer:
         bearer_api_key = bearer

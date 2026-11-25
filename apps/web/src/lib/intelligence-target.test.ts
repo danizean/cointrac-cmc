@@ -38,5 +38,15 @@ describe("resolveIntelligenceTarget", () => {
     const remote = resolveIntelligenceTarget("https://api.example.com", ["health"], "");
     assert.equal(remote.ok, true);
     if (remote.ok) assert.equal(remote.url.origin, "https://api.example.com");
+
+    const prodVps = resolveIntelligenceTarget(
+      "https://api.cointrac.xyz",
+      ["v1", "intelligence", "stream"],
+      "",
+    );
+    assert.equal(prodVps.ok, true);
+    if (prodVps.ok) {
+      assert.equal(prodVps.url.href, "https://api.cointrac.xyz/v1/intelligence/stream");
+    }
   });
 });

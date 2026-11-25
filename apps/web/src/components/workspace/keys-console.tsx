@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useAppPreferences } from "@/components/app-preferences";
 import { StatusIndicator } from "@/components/status-badges";
 import {
   Button,
@@ -41,10 +42,22 @@ function formatTimestamp(iso: string | null): string {
   return parsed.toISOString().replace("T", " ").slice(0, 19) + " UTC";
 }
 
+const QUICK_KEY_NAMES = [
+  "Antigravity Local",
+  "Cursor Workstation",
+  "Claude Desktop",
+  "Backend Service",
+] as const;
+
+type KeyFilter = "all" | "active" | "revoked";
+
 export function KeysConsole() {
+  const { locale } = useAppPreferences();
+  const isId = locale === "id";
   const { pushToast } = useToast();
 
   const [keys, setKeys] = useState<ApiKeySummary[]>([]);
+  const [keyFilter, setKeyFilter] = useState<KeyFilter>("all");
   const [activeCount, setActiveCount] = useState(0);
   const [maxKeys, setMaxKeys] = useState(5);
   const [loading, setLoading] = useState(true);
@@ -119,6 +132,12 @@ export function KeysConsole() {
     () => keys.filter((k) => !k.is_active || k.revoked_at !== null).length,
     [keys],
   );
+
+  const filteredKeys = useMemo(() => {
+    if (keyFilter === "active") return keys.filter((k) => k.is_active);
+    if (keyFilter === "revoked") return keys.filter((k) => !k.is_active);
+    return keys;
+  }, [keyFilter, keys]);
 
   const rateLimitPerMin = useMemo(() => {
     const active = keys.find((k) => k.is_active);
@@ -218,8 +237,12 @@ export function KeysConsole() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="API Keys"
-        description="Create, inspect, and revoke personal CoinTrac API keys for MCP clients and REST integrations. Keys are SHA-256 hashed on the server and shown in plaintext strictly once upon creation."
+        title={isId ? "Kunci API" : "API Keys"}
+        description={
+          isId
+            ? "Buat dan kelola kunci API pribadi untuk klien MCP dan integrasi REST. Kunci di-hash di server dan hanya ditampilkan sekali saat dibuat."
+            : "Create and manage personal CoinTrac API keys for MCP clients and REST integrations. Secrets are hashed on the server and shown only once upon creation."
+        }
         actions={
           <>
             <Button
@@ -229,12 +252,13 @@ export function KeysConsole() {
               onClick={() => void loadKeys(true)}
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              <span>Refresh</span>
+              <span>{isId ? "Muat ulang" : "Refresh"}</span>
             </Button>
             <Button
               variant="primary"
               size="md"
               disabled={loading || limitReached}
+              className="ct-btn-glow"
               onClick={() => {
                 setCreateError(null);
                 setLabel("");
@@ -242,7 +266,7 @@ export function KeysConsole() {
               }}
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
-              <span>Create API Key</span>
+              <span>{isId ? "Buat Kunci API" : "Create API Key"}</span>
             </Button>
           </>
         }
@@ -250,11 +274,11 @@ export function KeysConsole() {
 
       {/* Compact Account Key Summary */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="flex flex-col justify-between gap-2 p-4">
+        <Card className="ct-surface-featured flex flex-col justify-between gap-2 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
               <KeyRound className="h-4 w-4 text-link" aria-hidden="true" />
-              <span>Active keys</span>
+              <span>{isId ? "Kunci aktif" : "Active keys"}</span>
             </span>
             {loading ? (
               <StatusIndicator state="LOADING" />
@@ -270,17 +294,23 @@ export function KeysConsole() {
             <Skeleton className="h-8 w-32" />
           ) : loadError ? (
             <p className="text-sm text-muted-foreground">
-              Active and revoked counts are unavailable until the key list loads.
+              {isId
+                ? "Jumlah kunci tidak tersedia sampai daftar selesai dimuat."
+                : "Active and revoked counts are unavailable until the key list loads."}
             </p>
           ) : (
             <div>
               <p className="font-mono text-lg font-semibold tabular-nums text-foreground">
-                {activeCount} / {maxKeys} active
+                {activeCount} / {maxKeys} {isId ? "aktif" : "active"}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {revokedCount > 0
-                  ? `${revokedCount} revoked key${revokedCount === 1 ? "" : "s"} retained for audit history.`
-                  : "No revoked keys on this account."}
+                  ? isId
+                    ? `${revokedCount} kunci dicabut disimpan untuk riwayat audit.`
+                    : `${revokedCount} revoked key${revokedCount === 1 ? "" : "s"} retained for audit history.`
+                  : isId
+                    ? "Belum ada kunci yang dicabut di akun ini."
+                    : "No revoked keys on this account."}
               </p>
             </div>
           )}
@@ -290,7 +320,7 @@ export function KeysConsole() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
               <ShieldCheck className="h-4 w-4 text-link" aria-hidden="true" />
-              <span>Permissions &amp; rate window</span>
+              <span>{isId ? "Izin & batas kecepatan" : "Permissions & rate window"}</span>
               <InfoTip
                 label="About API key identity, permissions, and usage"
                 text="Each key identifies a client or machine under your account and inherits your account-level access. All keys share one per-account rate window; creating extra keys does not multiply quota. Key presence alone does not verify that a client has authenticated."
@@ -300,28 +330,34 @@ export function KeysConsole() {
           <div>
             <p className="font-mono text-sm font-semibold tabular-nums text-foreground">
               {rateLimitPerMin !== null
-                ? `${rateLimitPerMin} req / min (shared)`
-                : "Shared per-account window"}
+                ? `${rateLimitPerMin} req / min (${isId ? "bersama" : "shared"})`
+                : isId
+                  ? "Kuota bersama per akun"
+                  : "Shared per-account window"}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Account-scoped MCP &amp; REST access; extra keys share your account limit.
+              {isId
+                ? "Akses MCP & REST untuk akun Anda; semua kunci berbagi batas yang sama."
+                : "Account-scoped MCP & REST access; extra keys share your account limit."}
             </p>
           </div>
         </Card>
 
         <Card className="flex flex-col justify-between gap-2 p-4 sm:col-span-2 lg:col-span-1">
-          <p className="text-xs font-semibold text-muted-foreground">Next step</p>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {isId ? "Langkah berikutnya" : "Next step"}
+          </p>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Authenticate requests with{" "}
-            <code className="font-mono text-foreground">Authorization: Bearer</code> in your MCP
-            client or scripts.
+            {isId ? "Gunakan header " : "Authenticate requests with "}
+            <code className="font-mono text-foreground">Authorization: Bearer</code>{" "}
+            {isId ? "di klien MCP atau skrip Anda." : "in your MCP client or scripts."}
           </p>
           <div>
             <Link
               href="/app/connections"
               className="inline-flex min-h-8 items-center gap-1 rounded-[8px] px-1 text-xs font-semibold text-link hover:bg-muted/60 hover:underline"
             >
-              <span>Open MCP Connections</span>
+              <span>{isId ? "Buka Koneksi MCP" : "Open MCP Connections"}</span>
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             </Link>
           </div>
@@ -333,8 +369,9 @@ export function KeysConsole() {
           role="status"
           className="rounded-[12px] border border-warning/40 bg-warning-soft px-4 py-3 text-xs text-foreground"
         >
-          Active API key limit reached ({activeCount} / {maxKeys}). Revoke an unused key before
-          creating a new one.
+          {isId
+            ? `Batas kunci aktif tercapai (${activeCount} / ${maxKeys}). Cabut kunci yang tidak dipakai sebelum membuat kunci baru.`
+            : `Active API key limit reached (${activeCount} / ${maxKeys}). Revoke an unused key before creating a new one.`}
         </div>
       ) : null}
 
@@ -348,11 +385,49 @@ export function KeysConsole() {
 
       {/* Key Inventory */}
       <section aria-labelledby="keys-list-heading" className="space-y-4">
-        <SectionHeader
-          id="keys-list-heading"
-          title="Your API keys"
-          description="Raw secrets are never retrievable after creation. Revoked keys remain visible as immutable audit records."
-        />
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <SectionHeader
+            id="keys-list-heading"
+            title={isId ? "Daftar Kunci API Anda" : "Your API keys"}
+            description={
+              isId
+                ? "Kunci rahasia tidak dapat dilihat kembali setelah dibuat. Kunci yang dicabut tetap tersimpan sebagai catatan audit."
+                : "Raw secrets are never retrievable after creation. Revoked keys remain visible as immutable audit records."
+            }
+          />
+
+          {keys.length > 0 ? (
+            <div
+              role="group"
+              aria-label={isId ? "Filter kunci" : "Filter keys"}
+              className="inline-flex h-9 items-center rounded-full border border-border bg-card/80 p-0.5"
+            >
+              {(
+                [
+                  { id: "all", en: `All (${keys.length})`, idLabel: `Semua (${keys.length})` },
+                  { id: "active", en: `Active (${activeCount})`, idLabel: `Aktif (${activeCount})` },
+                  { id: "revoked", en: `Revoked (${revokedCount})`, idLabel: `Dicabut (${revokedCount})` },
+                ] as const
+              ).map((tab) => {
+                const active = keyFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setKeyFilter(tab.id)}
+                    className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors ${
+                      active
+                        ? "bg-primary text-white shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {isId ? tab.idLabel : tab.en}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
 
         {loading ? (
           <Card className="space-y-3 p-4">
@@ -363,12 +438,17 @@ export function KeysConsole() {
         ) : !loadError && keys.length === 0 ? (
           <EmptyState
             icon={<KeyRound className="h-5 w-5" aria-hidden="true" />}
-            title="No API keys yet"
-            description="Create a personal CoinTrac API key to authenticate local MCP clients or REST API requests under your account."
+            title={isId ? "Belum ada kunci API" : "No API keys yet"}
+            description={
+              isId
+                ? "Buat kunci API CoinTrac pribadi untuk menghubungkan klien MCP lokal atau request REST API."
+                : "Create a personal CoinTrac API key to authenticate local MCP clients or REST API requests under your account."
+            }
             action={
               <Button
                 variant="primary"
                 size="md"
+                className="ct-btn-glow"
                 onClick={() => {
                   setCreateError(null);
                   setLabel("");
@@ -376,11 +456,17 @@ export function KeysConsole() {
                 }}
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                <span>Create API Key</span>
+                <span>{isId ? "Buat Kunci API" : "Create API Key"}</span>
               </Button>
             }
           />
-        ) : keys.length > 0 ? (
+        ) : keys.length > 0 && filteredKeys.length === 0 ? (
+          <Card className="p-6 text-center text-xs text-muted-foreground">
+            {isId
+              ? "Tidak ada kunci pada filter ini."
+              : "No API keys match this filter."}
+          </Card>
+        ) : filteredKeys.length > 0 ? (
           <>
             {/* Desktop Table */}
             <Card className="hidden overflow-hidden md:block">
@@ -388,17 +474,17 @@ export function KeysConsole() {
                 <table className="w-full border-collapse text-left text-xs">
                   <thead>
                     <tr className="border-b border-border font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
-                      <th className="px-4 py-3">Key name</th>
-                      <th className="px-4 py-3">Identifier</th>
+                      <th className="px-4 py-3">{isId ? "Nama kunci" : "Key name"}</th>
+                      <th className="px-4 py-3">{isId ? "Identitas" : "Identifier"}</th>
                       <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Rate limit</th>
-                      <th className="px-4 py-3">Created</th>
-                      <th className="px-4 py-3">Last used</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
+                      <th className="px-4 py-3">{isId ? "Batas laju" : "Rate limit"}</th>
+                      <th className="px-4 py-3">{isId ? "Dibuat" : "Created"}</th>
+                      <th className="px-4 py-3">{isId ? "Terakhir dipakai" : "Last used"}</th>
+                      <th className="px-4 py-3 text-right">{isId ? "Aksi" : "Actions"}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {keys.map((item) => (
+                    {filteredKeys.map((item) => (
                       <tr key={item.id} className="hover:bg-muted/40">
                         <td className="px-4 py-3.5 text-sm font-medium text-foreground">
                           {item.label}
@@ -420,7 +506,11 @@ export function KeysConsole() {
                           {formatTimestamp(item.created_at)}
                         </td>
                         <td className="px-4 py-3.5 font-mono text-subtle-foreground">
-                          {item.last_used_at ? formatTimestamp(item.last_used_at) : "Unavailable"}
+                          {item.last_used_at
+                            ? formatTimestamp(item.last_used_at)
+                            : isId
+                              ? "Belum pernah"
+                              : "Never used"}
                         </td>
                         <td className="px-4 py-3.5 text-right">
                           {item.is_active ? (
@@ -433,13 +523,15 @@ export function KeysConsole() {
                               }}
                             >
                               <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                              <span>Revoke</span>
+                              <span>{isId ? "Cabut" : "Revoke"}</span>
                             </Button>
                           ) : (
                             <span className="font-mono text-[11px] text-subtle-foreground">
                               {item.revoked_at
-                                ? `Revoked ${formatTimestamp(item.revoked_at)}`
-                                : "Revoked"}
+                                ? `${isId ? "Dicabut" : "Revoked"} ${formatTimestamp(item.revoked_at)}`
+                                : isId
+                                  ? "Dicabut"
+                                  : "Revoked"}
                             </span>
                           )}
                         </td>
@@ -452,7 +544,7 @@ export function KeysConsole() {
 
             {/* Mobile Card List */}
             <div className="space-y-3 md:hidden">
-              {keys.map((item) => (
+              {filteredKeys.map((item) => (
                 <Card key={item.id} className="space-y-3 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -469,26 +561,38 @@ export function KeysConsole() {
                   </div>
                   <dl className="grid grid-cols-2 gap-2 border-t border-border pt-3 text-xs">
                     <div>
-                      <dt className="text-[11px] text-subtle-foreground">Created</dt>
+                      <dt className="text-[11px] text-subtle-foreground">
+                        {isId ? "Dibuat" : "Created"}
+                      </dt>
                       <dd className="mt-0.5 font-mono text-[11px] text-foreground">
                         {formatTimestamp(item.created_at)}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-[11px] text-subtle-foreground">Last used</dt>
+                      <dt className="text-[11px] text-subtle-foreground">
+                        {isId ? "Terakhir dipakai" : "Last used"}
+                      </dt>
                       <dd className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                        {item.last_used_at ? formatTimestamp(item.last_used_at) : "Unavailable"}
+                        {item.last_used_at
+                          ? formatTimestamp(item.last_used_at)
+                          : isId
+                            ? "Belum pernah"
+                            : "Never used"}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-[11px] text-subtle-foreground">Rate window</dt>
+                      <dt className="text-[11px] text-subtle-foreground">
+                        {isId ? "Batas laju" : "Rate window"}
+                      </dt>
                       <dd className="mt-0.5 font-mono text-[11px] text-foreground">
                         {item.rate_limit_per_min} req/min
                       </dd>
                     </div>
                     {item.revoked_at ? (
                       <div>
-                        <dt className="text-[11px] text-subtle-foreground">Revoked at</dt>
+                        <dt className="text-[11px] text-subtle-foreground">
+                          {isId ? "Dicabut pada" : "Revoked at"}
+                        </dt>
                         <dd className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                           {formatTimestamp(item.revoked_at)}
                         </dd>
@@ -507,7 +611,7 @@ export function KeysConsole() {
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span>Revoke key</span>
+                        <span>{isId ? "Cabut kunci" : "Revoke key"}</span>
                       </Button>
                     </div>
                   ) : null}
@@ -524,13 +628,39 @@ export function KeysConsole() {
         onClose={() => {
           if (!creating) setCreateOpen(false);
         }}
-        title="Create CoinTrac API Key"
-        description="Name this key after the client or machine that will use it. All keys inherit your account permissions and share your account rate window."
+        title={isId ? "Buat Kunci API CoinTrac" : "Create CoinTrac API Key"}
+        description={
+          isId
+            ? "Beri nama sesuai klien atau perangkat yang akan menggunakannya. Semua kunci mewarisi izin akun dan berbagi batas kuota akun."
+            : "Name this key after the client or machine that will use it. All keys inherit your account permissions and share your account rate window."
+        }
       >
         <form onSubmit={handleCreate} className="space-y-4" noValidate>
+          <div className="space-y-1.5">
+            <span className="font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+              {isId ? "Nama cepat:" : "Quick presets:"}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_KEY_NAMES.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  disabled={creating}
+                  onClick={() => {
+                    setLabel(preset);
+                    if (createError) setCreateError(null);
+                  }}
+                  className="cursor-pointer rounded-full border border-border bg-background px-2.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground disabled:opacity-50"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Input
             id="create-key-label"
-            label="API key name"
+            label={isId ? "Nama kunci API" : "API key name"}
             maxLength={64}
             required
             autoFocus
@@ -540,8 +670,12 @@ export function KeysConsole() {
               setLabel(e.target.value);
               if (createError) setCreateError(null);
             }}
-            placeholder="e.g. Antigravity Local or Cursor Workstation"
-            helper="1 to 64 characters. Identifies this credential in your key list."
+            placeholder={isId ? "mis. Antigravity Local atau Cursor" : "e.g. Antigravity Local or Cursor Workstation"}
+            helper={
+              isId
+                ? "1 hingga 64 karakter untuk mengenali kunci ini."
+                : "1 to 64 characters. Identifies this credential in your key list."
+            }
             error={createError}
           />
           <div className="flex flex-wrap justify-end gap-2 pt-2">
@@ -551,10 +685,18 @@ export function KeysConsole() {
               disabled={creating}
               onClick={() => setCreateOpen(false)}
             >
-              Cancel
+              {isId ? "Batal" : "Cancel"}
             </Button>
-            <Button type="submit" variant="primary" size="md" loading={creating}>
-              <span>{creating ? "Generating..." : "Generate API Key"}</span>
+            <Button type="submit" variant="primary" size="md" loading={creating} className="ct-btn-glow">
+              <span>
+                {creating
+                  ? isId
+                    ? "Membuat..."
+                    : "Generating..."
+                  : isId
+                    ? "Buat Kunci API"
+                    : "Generate API Key"}
+              </span>
             </Button>
           </div>
         </form>

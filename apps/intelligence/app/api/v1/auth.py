@@ -54,8 +54,9 @@ class UpdateProfileRequest(BaseModel):
 
 
 class ProfileUpdater(Protocol):
-    async def update_display_name(self, user_id: str, display_name: str) -> dict[str, Any] | None:
-        ...
+    async def update_display_name(
+        self, user_id: str, display_name: str
+    ) -> dict[str, Any] | None: ...
 
 
 class SupabaseProfileUpdater:

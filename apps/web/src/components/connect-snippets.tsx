@@ -1,5 +1,6 @@
 "use client";
 
+import { Terminal } from "lucide-react";
 import { useState } from "react";
 import { useAppPreferences } from "./app-preferences";
 import { CopyButton } from "./copy-button";
@@ -9,25 +10,29 @@ interface ConnectSnippetsProps {
   apiBaseUrl: string;
 }
 
-type SnippetTab = "cursor" | "claude" | "python" | "curl";
+type SnippetTab = "chatgpt" | "claude" | "gemini" | "hermes" | "python" | "curl";
 
 export function ConnectSnippets({ mcpUrl, apiBaseUrl }: ConnectSnippetsProps) {
-  const { t } = useAppPreferences();
-  const [activeTab, setActiveTab] = useState<SnippetTab>("cursor");
+  const { locale, t } = useAppPreferences();
+  const [activeTab, setActiveTab] = useState<SnippetTab>("chatgpt");
 
   const snippets: Record<
     SnippetTab,
     { label: string; filename: string; note: string; code: string }
   > = {
-    cursor: {
-      label: "Cursor MCP",
-      filename: "examples/cursor_mcp_config.json",
-      note: "Connect Cursor over authenticated Streamable HTTP MCP transport using a personal CoinTrac API key from /app/keys.",
+    chatgpt: {
+      label: "ChatGPT",
+      filename: "remote-mcp-https.json",
+      note:
+        locale === "id"
+          ? "Hubungkan ChatGPT via Streamable HTTP MCP menggunakan API key CoinTrac dari /app/keys."
+          : "Connect ChatGPT over Streamable HTTP MCP using a CoinTrac API key from /app/keys.",
       code: JSON.stringify(
         {
           mcpServers: {
             cointrac: {
               url: mcpUrl,
+              transport: "streamable_http",
               headers: {
                 Authorization: "Bearer <YOUR_COINTRAC_API_KEY>",
               },
@@ -39,18 +44,19 @@ export function ConnectSnippets({ mcpUrl, apiBaseUrl }: ConnectSnippetsProps) {
       ),
     },
     claude: {
-      label: "Claude Desktop",
-      filename: "examples/claude_desktop_config.json",
-      note: "Run CoinTrac locally over stdio for Claude Desktop (replace /ABSOLUTE/PATH/TO/REPO with your repo path).",
+      label: "Claude",
+      filename: "claude_mcp_config.json",
+      note:
+        locale === "id"
+          ? "Konfigurasi remote Streamable HTTP MCP untuk Claude dengan header x-cointrac-key."
+          : "Remote Streamable HTTP MCP configuration for Claude using x-cointrac-key.",
       code: JSON.stringify(
         {
           mcpServers: {
             cointrac: {
-              command: "/ABSOLUTE/PATH/TO/REPO/apps/intelligence/.venv/bin/python",
-              args: ["-m", "app.mcp.stdio_entry"],
-              cwd: "/ABSOLUTE/PATH/TO/REPO/apps/intelligence",
-              env: {
-                PYTHONPATH: "/ABSOLUTE/PATH/TO/REPO/apps/intelligence",
+              url: mcpUrl,
+              headers: {
+                "x-cointrac-key": "<YOUR_COINTRAC_API_KEY>",
               },
             },
           },
@@ -59,10 +65,56 @@ export function ConnectSnippets({ mcpUrl, apiBaseUrl }: ConnectSnippetsProps) {
         2,
       ),
     },
+    gemini: {
+      label: "Gemini",
+      filename: "oauth-pkce-mcp.json",
+      note:
+        locale === "id"
+          ? "Gemini remote MCP memakai HTTPS dengan OAuth 2.1 + PKCE (discovery di api.cointrac.xyz)."
+          : "Gemini remote MCP uses HTTPS with OAuth 2.1 + PKCE (discovery on api.cointrac.xyz).",
+      code: JSON.stringify(
+        {
+          mcpServerUrl: mcpUrl,
+          transport: "streamable_http",
+          auth: {
+            type: "oauth2",
+            authorizationServerMetadata: `${apiBaseUrl}/.well-known/oauth-authorization-server`,
+            protectedResourceMetadata: `${mcpUrl.replace(/\/mcp$/, "")}/.well-known/oauth-protected-resource/mcp`,
+            pkce: "S256",
+            scope: "mcp:tools",
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    hermes: {
+      label: "Hermes",
+      filename: "hermes_mcp.json",
+      note:
+        locale === "id"
+          ? "Hubungkan Hermes langsung ke endpoint HTTPS /mcp dengan x-cointrac-key atau Bearer token."
+          : "Connect Hermes directly to the HTTPS /mcp endpoint with x-cointrac-key or Bearer auth.",
+      code: JSON.stringify(
+        {
+          name: "cointrac",
+          url: mcpUrl,
+          transport: "streamable-http",
+          headers: {
+            "x-cointrac-key": "<YOUR_COINTRAC_API_KEY>",
+          },
+        },
+        null,
+        2,
+      ),
+    },
     python: {
-      label: "Python Bot",
-      filename: "examples/python_rest_client.py",
-      note: "Zero-dependency stdlib client calling the unified CoinTrac intelligence workflows with your personal API key.",
+      label: "Python",
+      filename: "cointrac_rest_client.py",
+      note:
+        locale === "id"
+          ? "Contoh klien Python tanpa library tambahan untuk memanggil REST API CoinTrac."
+          : "Zero-dependency stdlib Python client calling the CoinTrac REST API.",
       code: `import json
 import os
 import urllib.request
@@ -77,7 +129,7 @@ def post(path: str, payload: dict[str, object]) -> dict[str, object]:
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {API_KEY}",
+            "x-cointrac-key": API_KEY,
         },
         method="POST",
     )
@@ -98,9 +150,12 @@ if __name__ == "__main__":
     curl: {
       label: "cURL",
       filename: "terminal",
-      note: "Pass Authorization: Bearer <YOUR_COINTRAC_API_KEY> and optional x-cmc-api-key (BYOK).",
+      note:
+        locale === "id"
+          ? "Kirim header x-cointrac-key (atau Authorization: Bearer) serta opsional x-cmc-api-key (BYOK)."
+          : "Pass x-cointrac-key (or Authorization: Bearer) and optional x-cmc-api-key (BYOK).",
       code: `curl -sf \\
-  -H "Authorization: Bearer <YOUR_COINTRAC_API_KEY>" \\
+  -H "x-cointrac-key: <YOUR_COINTRAC_API_KEY>" \\
   -H "Content-Type: application/json" \\
   -d '{"symbols": ["SOL", "AVAX", "NEAR"]}' \\
   "${apiBaseUrl}/v1/intelligence/compare-assets" | python -m json.tool`,
@@ -110,19 +165,14 @@ if __name__ == "__main__":
   const current = snippets[activeTab];
 
   return (
-    <div className="tg-panel overflow-hidden rounded-2xl">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card-elevated/80 px-4 py-3">
+    <div className="ct-surface-featured overflow-hidden rounded-[18px]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-[#080B12] px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="hidden items-center gap-1.5 sm:flex" aria-hidden="true">
-            <span className="h-2.5 w-2.5 rounded-full bg-destructive/65" />
-            <span className="h-2.5 w-2.5 rounded-full bg-accent/65" />
-            <span className="h-2.5 w-2.5 rounded-full bg-positive/65" />
-          </div>
-
+          <Terminal className="hidden h-4 w-4 text-link sm:block" aria-hidden="true" />
           <div
             role="tablist"
             aria-label="Client integration snippets"
-            className="inline-flex flex-wrap gap-1 rounded-full border border-border bg-background/70 p-1"
+            className="inline-flex flex-wrap gap-1 rounded-[10px] border border-[#202A3A] bg-[#0D111B] p-1"
           >
             {(Object.keys(snippets) as SnippetTab[]).map((tab) => {
               const active = activeTab === tab;
@@ -133,10 +183,10 @@ if __name__ == "__main__":
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(tab)}
-                  className={`cursor-pointer whitespace-nowrap rounded-full px-3.5 py-1 font-mono text-xs font-semibold transition-all duration-150 ${
+                  className={`cursor-pointer whitespace-nowrap rounded-[7px] px-3 py-1 font-mono text-xs font-medium transition-colors ${
                     active
-                      ? "bg-foreground text-background shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
+                      ? "bg-primary text-white"
+                      : "text-[#A6B1C2] hover:text-white"
                   }`}
                 >
                   {snippets[tab].label}
@@ -150,12 +200,13 @@ if __name__ == "__main__":
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card-elevated/45 px-5 py-2.5 text-xs text-muted-foreground">
         <span>{current.note}</span>
-        <span className="font-mono text-[11px] text-primary">
-          {current.filename}
-        </span>
+        <span className="font-mono text-[11px] text-link">{current.filename}</span>
       </div>
 
-      <pre className="overflow-x-auto bg-code-bg p-5 font-mono text-xs leading-6 text-foreground">
+      <pre
+        key={activeTab}
+        className="ct-code-swap overflow-x-auto bg-code-bg p-5 font-mono text-xs leading-6 text-foreground"
+      >
         <code>{current.code}</code>
       </pre>
     </div>

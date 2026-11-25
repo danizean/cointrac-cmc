@@ -66,6 +66,7 @@ async def test_mcp_registers_tools_resources_and_prompts() -> None:
         "analyze_sector_rotation",
         "get_historical_performance",
         "analyze_derivatives",
+        "get_capabilities",
     }
     resource_uris = {resource.uri for resource in resources}
     template_uris = {template.uri_template for template in templates}
@@ -122,10 +123,14 @@ async def test_mcp_tool_schemas_have_parameter_descriptions_and_clear_validation
     from mcp.server.mcpserver.exceptions import ToolError
 
     tools = await mcp.list_tools()
-    assert len(tools) == 10
+    assert len(tools) == 11
     for tool in tools:
         schema = tool.input_schema or {}
         props = schema.get("properties") or {}
+        if tool.name == "get_capabilities":
+            assert props == {}
+            assert "Pakai tool ini untuk" in (tool.description or "")
+            continue
         assert props, f"{tool.name} should declare parameters"
         for param_name, param_schema in props.items():
             assert param_schema.get("description"), (

@@ -16,7 +16,7 @@ import type {
   TelemetrySummary,
 } from "./types";
 
-const SERVER_TIMEOUT_MS = 8000;
+const SERVER_TIMEOUT_MS = 20_000;
 const OVERVIEW_MEMO_TTL_MS = 15_000;
 
 interface MemoEntry<T> {
@@ -115,9 +115,10 @@ async function serverRequest<T>(
   }
 
   const headers = new Headers();
+  const isPublicHealth = pathSegments.length === 1 && pathSegments[0] === "health";
   if (options?.sessionAuthorization) {
     headers.set("authorization", options.sessionAuthorization);
-  } else {
+  } else if (!isPublicHealth) {
     const key = sandboxApiKey();
     if (key) {
       headers.set("x-cointrac-key", key);

@@ -72,6 +72,13 @@ export interface UsagePayload {
     evidence_id: string | null;
     created_at: string;
   }>;
+  server_mode?: {
+    effective_profile: string | null;
+    detected_tier: string | null;
+    budget_state: string | null;
+    deep_scan_available: boolean | null;
+    deep_scan_reason: string | null;
+  };
 }
 
 export interface CapabilityProbeRow {

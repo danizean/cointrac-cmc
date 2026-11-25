@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, Copy, LogOut, RefreshCw, ShieldCheck, User } from "lucide-react";
+import { Check, Copy, Globe, LogOut, RefreshCw, ShieldCheck, User } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useAppPreferences } from "@/components/app-preferences";
 import { StatusIndicator } from "@/components/status-badges";
 import {
   Button,
@@ -26,6 +27,8 @@ function formatUtcTimestamp(iso: string | null | undefined): string {
 }
 
 export function SettingsConsole() {
+  const { locale, setLocale } = useAppPreferences();
+  const isId = locale === "id";
   const { pushToast } = useToast();
 
   const [profile, setProfile] = useState<AuthProfilePayload | null>(null);
@@ -128,8 +131,12 @@ export function SettingsConsole() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Settings"
-        description="Manage your CoinTrac account and profile."
+        title={isId ? "Pengaturan Akun" : "Settings"}
+        description={
+          isId
+            ? "Kelola profil akun, preferensi bahasa, dan sesi login CoinTrac Anda."
+            : "Manage your CoinTrac account, profile, and language preferences."
+        }
         actions={
           <Button
             variant="secondary"
@@ -138,7 +145,7 @@ export function SettingsConsole() {
             onClick={() => void loadProfile(true)}
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            <span>Refresh</span>
+            <span>{isId ? "Muat ulang" : "Refresh"}</span>
           </Button>
         }
       />
@@ -152,71 +159,140 @@ export function SettingsConsole() {
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Profile Form */}
-        <Card className="space-y-5 p-5 lg:col-span-2">
-          <div className="flex items-center gap-2 border-b border-border pb-3.5">
-            <User className="h-4 w-4 text-link" aria-hidden="true" />
-            <h2 className="text-base font-semibold text-foreground">Profile</h2>
-          </div>
-
-          {loading ? (
-            <div className="space-y-4">
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-10 w-36" />
+        {/* Profile & Preferences Column */}
+        <div className="space-y-6 lg:col-span-2">
+          <Card className="ct-surface-featured space-y-5 p-5">
+            <div className="flex items-center gap-2 border-b border-border pb-3.5">
+              <User className="h-4 w-4 text-link" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-foreground">
+                {isId ? "Profil" : "Profile"}
+              </h2>
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-              <Input
-                id="settings-email"
-                type="email"
-                label="Verified email address"
-                value={profile?.email ?? "Unavailable"}
-                readOnly
-                disabled
-                helper="Email address is managed by your authentication provider."
-              />
 
-              <Input
-                id="settings-display-name"
-                type="text"
-                label="Display name"
-                maxLength={80}
-                disabled={saving || Boolean(loadError)}
-                value={displayName}
-                onChange={(e) => {
-                  setDisplayName(e.target.value);
-                  if (saveError) setSaveError(null);
-                }}
-                placeholder="Your name or handle"
-                helper="1 to 80 characters. Updates only your editable display name via PATCH /v1/auth/profile."
-                error={saveError}
-              />
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <p className="text-xs text-subtle-foreground">
-                  Account tier, role, and verification status are server-managed.
-                </p>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="md"
-                  loading={saving}
-                  disabled={Boolean(loadError) || unchanged}
-                >
-                  <span>{saving ? "Saving..." : "Save changes"}</span>
-                </Button>
+            {loading ? (
+              <div className="space-y-4">
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-10 w-36" />
               </div>
-            </form>
-          )}
-        </Card>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                <Input
+                  id="settings-email"
+                  type="email"
+                  label={isId ? "Alamat email terverifikasi" : "Verified email address"}
+                  value={profile?.email ?? (isId ? "Tidak tersedia" : "Unavailable")}
+                  readOnly
+                  disabled
+                  helper={
+                    isId
+                      ? "Alamat email dikelola oleh penyedia autentikasi Anda."
+                      : "Email address is managed by your authentication provider."
+                  }
+                />
+
+                <Input
+                  id="settings-display-name"
+                  type="text"
+                  label={isId ? "Nama tampilan" : "Display name"}
+                  maxLength={80}
+                  disabled={saving || Boolean(loadError)}
+                  value={displayName}
+                  onChange={(e) => {
+                    setDisplayName(e.target.value);
+                    if (saveError) setSaveError(null);
+                  }}
+                  placeholder={isId ? "Nama atau panggilan Anda" : "Your name or handle"}
+                  helper={
+                    isId
+                      ? "1 hingga 80 karakter untuk nama tampilan akun Anda."
+                      : "1 to 80 characters for your account display name."
+                  }
+                  error={saveError}
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <p className="text-xs text-subtle-foreground">
+                    {isId
+                      ? "Tier paket, peran, dan status verifikasi dikelola oleh server."
+                      : "Account tier, role, and verification status are server-managed."}
+                  </p>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="md"
+                    loading={saving}
+                    disabled={Boolean(loadError) || unchanged}
+                    className="ct-btn-glow"
+                  >
+                    <span>
+                      {saving
+                        ? isId
+                          ? "Menyimpan..."
+                          : "Saving..."
+                        : isId
+                          ? "Simpan perubahan"
+                          : "Save changes"}
+                    </span>
+                  </Button>
+                </div>
+              </form>
+            )}
+          </Card>
+
+          <Card className="space-y-4 p-5">
+            <div className="flex items-center gap-2 border-b border-border pb-3.5">
+              <Globe className="h-4 w-4 text-link" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-foreground">
+                {isId ? "Preferensi Bahasa" : "Language Preference"}
+              </h2>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {isId
+                  ? "Pilih bahasa tampilan untuk seluruh workspace dan alat analisis."
+                  : "Choose the display language across the workspace and intelligence desks."}
+              </p>
+              <div
+                role="group"
+                aria-label={isId ? "Bahasa antarmuka" : "Interface language"}
+                className="inline-flex h-9 items-center rounded-full border border-border bg-card/80 p-0.5"
+              >
+                {(
+                  [
+                    { id: "en", label: "English" },
+                    { id: "id", label: "Bahasa Indonesia" },
+                  ] as const
+                ).map((opt) => {
+                  const active = locale === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setLocale(opt.id)}
+                      className={`min-h-7 cursor-pointer rounded-full px-3.5 font-mono text-[11px] font-semibold transition-colors ${
+                        active
+                          ? "bg-primary text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </Card>
+        </div>
 
         {/* Account Information & Session */}
         <div className="space-y-6">
           <Card className="space-y-4 p-5">
             <div className="flex items-center gap-2 border-b border-border pb-3">
               <ShieldCheck className="h-4 w-4 text-link" aria-hidden="true" />
-              <h2 className="text-base font-semibold text-foreground">Account information</h2>
+              <h2 className="text-base font-semibold text-foreground">
+                {isId ? "Informasi Akun" : "Account information"}
+              </h2>
             </div>
 
             {loading ? (
@@ -228,7 +304,9 @@ export function SettingsConsole() {
             ) : (
               <dl className="space-y-3 text-xs">
                 <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
-                  <dt className="text-muted-foreground">Email status</dt>
+                  <dt className="text-muted-foreground">
+                    {isId ? "Status email" : "Email status"}
+                  </dt>
                   <dd>
                     {profile ? (
                       profile.email_verified ? (
@@ -237,24 +315,30 @@ export function SettingsConsole() {
                         <StatusIndicator state="UNVERIFIED" />
                       )
                     ) : (
-                      <span className="font-mono text-subtle-foreground">Unavailable</span>
+                      <span className="font-mono text-subtle-foreground">—</span>
                     )}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
-                  <dt className="text-muted-foreground">Plan tier</dt>
+                  <dt className="text-muted-foreground">
+                    {isId ? "Tier paket" : "Plan tier"}
+                  </dt>
                   <dd className="font-mono font-semibold uppercase text-foreground">
-                    {profile?.base_plan_code ?? "Unavailable"}
+                    {profile?.base_plan_code ?? "—"}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
-                  <dt className="text-muted-foreground">Account status</dt>
+                  <dt className="text-muted-foreground">
+                    {isId ? "Status akun" : "Account status"}
+                  </dt>
                   <dd className="font-mono font-semibold text-foreground">
-                    {profile?.account_status ?? "Unavailable"}
+                    {profile?.account_status ?? "—"}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-2 border-b border-border pb-2.5">
-                  <dt className="text-muted-foreground">Account created</dt>
+                  <dt className="text-muted-foreground">
+                    {isId ? "Akun dibuat" : "Account created"}
+                  </dt>
                   <dd className="font-mono text-muted-foreground">
                     {formatUtcTimestamp(profile?.created_at)}
                   </dd>
@@ -263,7 +347,7 @@ export function SettingsConsole() {
                   <dt className="text-muted-foreground">User ID</dt>
                   <dd className="flex items-center justify-between gap-2 rounded-[8px] border border-border bg-background/60 px-2.5 py-1.5">
                     <span className="min-w-0 truncate font-mono text-[11px] text-foreground">
-                      {profile?.user_id ?? "Unavailable"}
+                      {profile?.user_id ?? "—"}
                     </span>
                     {profile?.user_id ? (
                       <button
@@ -286,18 +370,22 @@ export function SettingsConsole() {
           </Card>
 
           <Card className="space-y-3 p-5">
-            <h2 className="text-base font-semibold text-foreground">Session</h2>
+            <h2 className="text-base font-semibold text-foreground">
+              {isId ? "Sesi Login" : "Session"}
+            </h2>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Signed in as{" "}
+              {isId ? "Masuk sebagai " : "Signed in as "}
               <span className="break-all font-mono text-foreground">
-                {profile?.email ?? "verified account"}
+                {profile?.email ?? (isId ? "akun terverifikasi" : "verified account")}
               </span>
-              . Signing out clears your browser session cookies immediately.
+              {isId
+                ? ". Keluar akan langsung menghapus cookie sesi browser Anda."
+                : ". Signing out clears your browser session cookies immediately."}
             </p>
             <form action="/auth/signout" method="post" className="pt-1">
-              <Button type="submit" variant="secondary" size="md" className="w-full">
+              <Button type="submit" variant="danger" size="md" className="w-full">
                 <LogOut className="h-4 w-4" aria-hidden="true" />
-                <span>Sign out</span>
+                <span>{isId ? "Keluar" : "Sign out"}</span>
               </Button>
             </form>
           </Card>

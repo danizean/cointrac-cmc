@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
-import { AnalysisDesk } from "@/components/workspace/analysis-desk";
+import { Suspense } from "react";
+import { DeskSkeleton } from "@/components/ui/primitives";
+import { HistoricalDesk } from "@/components/workspace/historical-desk";
 
 export const metadata: Metadata = {
   title: "Historical performance",
-  description: "Historical return statistics when the data plan provides them.",
+  description: "Review daily closing returns, 365d volatility, beta vs BTC, and max drawdown.",
 };
 
 export default function HistoricalPage() {
   return (
-    <AnalysisDesk
-      pageKey="historical"
-      tools={["get_historical_performance"]}
-      fields={["quote", "symbol", "count"]}
-    />
+    <Suspense fallback={<DeskSkeleton />}>
+      <HistoricalDesk />
+    </Suspense>
   );
 }

@@ -13,7 +13,9 @@ _KEY_PATTERNS = (
     re.compile(r"(?i)(x-cointrac-key\s*[:=]\s*)[^\s,\"';&]+"),
     re.compile(r"(?i)(x-tradeguard-key\s*[:=]\s*)[^\s,\"';&]+"),
     re.compile(r"(?i)(x-cmc-api-key\s*[:=]\s*)[^\s,\"';&]+"),
-    re.compile(r"(?i)([?&](?:api_key|key|token|access_token|x-cointrac-key|x-tradeguard-key)=)[^&\s\"']+"),
+    re.compile(
+        r"(?i)([?&](?:api_key|key|token|access_token|x-cointrac-key|x-tradeguard-key)=)[^&\s\"']+"
+    ),
 )
 
 

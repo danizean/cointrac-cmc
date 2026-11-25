@@ -2,23 +2,34 @@
 
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
+  BarChart3,
   CheckCircle2,
   Circle,
   Cpu,
   FileCheck2,
+  Flame,
   HelpCircle,
+  History,
   KeyRound,
+  Layers,
   LineChart,
   Loader2,
   Plug,
   RefreshCw,
   ShieldCheck,
-  Terminal,
+  TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { DataModeBadge, FreshnessBadge, StatusIndicator } from "@/components/status-badges";
+import {
+  BudgetStateBadge,
+  DataModeBadge,
+  FreshnessBadge,
+  QuotaProfileBadge,
+  StatusIndicator,
+} from "@/components/status-badges";
 import {
   Badge,
   Button,
@@ -31,6 +42,8 @@ import {
   SectionHeader,
   Skeleton,
 } from "@/components/ui/primitives";
+import { useAppPreferences } from "@/components/app-preferences";
+import { SnapshotFreshness } from "@/components/workspace/snapshot-freshness";
 import { useToast } from "@/components/ui/toast";
 import { fetchEvidenceList } from "@/lib/api";
 import {
@@ -84,104 +97,148 @@ function initialLoadable<T>(): Loadable<T> {
   return { loading: true, data: null, error: null };
 }
 
+function isStandbyStatus(status: number | undefined): boolean {
+  return status === 0 || status === 502 || status === 503 || status === 504;
+}
+
 const STEP_COPY: Record<
-  OnboardingStep["id"],
-  { title: string; summary: string; whyItMatters: string }
+  "en" | "id",
+  Record<OnboardingStep["id"], { title: string; summary: string; whyItMatters: string }>
 > = {
-  api_key: {
-    title: "Create a personal CoinTrac API key",
-    summary:
-      "Mint a hashed personal key (ct_live_*) from API Keys. Secrets are displayed once and never stored in plaintext.",
-    whyItMatters:
-      "Required to authenticate REST API requests and AI agent MCP connections under your account.",
+  en: {
+    api_key: {
+      title: "Create your CoinTrac API key",
+      summary: "Generate a personal key (ct_live_*) from API Keys. The secret is shown once.",
+      whyItMatters: "Used to authenticate REST API requests and MCP client connections.",
+    },
+    connect_mcp: {
+      title: "Connect an AI client or script",
+      summary: "Copy a ready-to-use config in MCP Connections for ChatGPT, Claude, Gemini, or Hermes.",
+      whyItMatters: "Lets your AI assistant or code call CoinTrac tools over HTTPS.",
+    },
+    first_query: {
+      title: "Run your first market query",
+      summary: "Open Market Intelligence to run a market overview, asset check, or movers scan.",
+      whyItMatters: "Saves a timestamped evidence record under your account.",
+    },
   },
-  connect_mcp: {
-    title: "Connect an AI client via MCP or REST",
-    summary:
-      "Copy a client configuration in MCP Connections using your CoinTrac API key (Authorization: Bearer).",
-    whyItMatters:
-      "Gives Antigravity, Cursor, Claude Code, or scripts direct access to 10 verified CoinTrac tools.",
-  },
-  first_query: {
-    title: "Run your first Market Intelligence query",
-    summary:
-      "Open Market Intelligence to run a live market overview, regime classification, asset profile, or mover screener.",
-    whyItMatters:
-      "Produces a timestamped Evidence record (ev_*) logged exclusively to your account for auditability.",
+  id: {
+    api_key: {
+      title: "Buat API key CoinTrac Anda",
+      summary: "Buat key pribadi (ct_live_*) di halaman API Keys. Rahasia hanya tampil sekali.",
+      whyItMatters: "Dipakai untuk autentikasi request REST API dan koneksi klien MCP.",
+    },
+    connect_mcp: {
+      title: "Hubungkan klien AI atau skrip",
+      summary: "Salin konfigurasi di Koneksi MCP untuk ChatGPT, Claude, Gemini, atau Hermes.",
+      whyItMatters: "Memungkinkan asisten AI atau kode Anda memanggil tool CoinTrac via HTTPS.",
+    },
+    first_query: {
+      title: "Jalankan analisis pasar pertama",
+      summary: "Buka Intelijen Pasar untuk cek ringkasan pasar, aset, atau penyaring movers.",
+      whyItMatters: "Menyimpan catatan bukti berstempel waktu di akun Anda.",
+    },
   },
 };
+
+const ANALYSIS_DESKS = [
+  {
+    href: "/app/market",
+    title: { en: "Market & Regime", id: "Pasar & Rezim" },
+    description: {
+      en: "Total market cap, BTC/ETH dominance, Fear & Greed, and 4-signal regime.",
+      id: "Kapitalisasi pasar, dominasi BTC/ETH, Fear & Greed, dan rezim 4-sinyal.",
+    },
+    icon: LineChart,
+  },
+  {
+    href: "/app/assets",
+    title: { en: "Assets & Compare", id: "Aset & Bandingkan" },
+    description: {
+      en: "Single-asset fundamentals, FDV overhang, momentum, and peer comparison.",
+      id: "Fundamental aset, FDV overhang, momentum, dan perbandingan antaraset.",
+    },
+    icon: BarChart3,
+  },
+  {
+    href: "/app/movers",
+    title: { en: "Movers Screener", id: "Penyaring Movers" },
+    description: {
+      en: "Momentum screening with liquidity floors, RS vs BTC, and 24h gain caps.",
+      id: "Screening momentum dengan batas likuiditas, RS vs BTC, dan cap kenaikan 24j.",
+    },
+    icon: TrendingUp,
+  },
+  {
+    href: "/app/sectors",
+    title: { en: "Sector Rotation", id: "Rotasi Sektor" },
+    description: {
+      en: "Median and cap-weighted returns across DeFi, AI, L1, L2, Gaming, RWA, and Memes.",
+      id: "Return median dan cap-weighted di sektor DeFi, AI, L1, L2, Gaming, RWA, dan Memes.",
+    },
+    icon: Layers,
+  },
+  {
+    href: "/app/derivatives",
+    title: { en: "Derivatives & Stress", id: "Derivatif & Tekanan" },
+    description: {
+      en: "Open interest, funding rates, outlier flags, or spot-stress proxy.",
+      id: "Open interest, funding rate, outlier, atau proksi tekanan pasar spot.",
+    },
+    icon: Flame,
+  },
+  {
+    href: "/app/anomalies",
+    title: { en: "Outliers & History", id: "Anomali & Historis" },
+    description: {
+      en: "Volume/return outliers, BTC divergences, and 365-day risk metrics.",
+      id: "Deteksi anomali volume/return, divergensi BTC, dan metrik risiko 365 hari.",
+    },
+    icon: AlertTriangle,
+  },
+] as const;
 
 const QUICK_ACTIONS = [
   {
     href: "/app/keys",
-    title: "Manage API Keys",
-    description: "Create a ct_live_* key or revoke compromised credentials immediately.",
+    title: { en: "Manage API Keys", id: "Kelola API Key" },
+    description: {
+      en: "Create new ct_live_* keys or revoke existing credentials.",
+      id: "Buat key ct_live_* baru atau cabut kredensial lama.",
+    },
     icon: KeyRound,
   },
   {
     href: "/app/connections",
-    title: "Configure MCP Client",
-    description: "Inspect Local MCP setup and live Remote MCP deployment status.",
+    title: { en: "MCP Connections", id: "Koneksi MCP" },
+    description: {
+      en: "Set up ChatGPT, Claude, Gemini, or Hermes over HTTPS.",
+      id: "Hubungkan ChatGPT, Claude, Gemini, atau Hermes via HTTPS.",
+    },
     icon: Plug,
   },
   {
-    href: "/app/market",
-    title: "Open Market Intelligence",
-    description: "Analyze market regime, assets, movers, anomalies, sectors, and derivatives.",
-    icon: LineChart,
-  },
-  {
     href: "/app/usage",
-    title: "Review Usage & Quota",
-    description: "Track CoinTrac tool calls separately from CoinMarketCap API credits.",
+    title: { en: "Usage & Quotas", id: "Penggunaan & Kuota" },
+    description: {
+      en: "Track tool calls, rate limits, and CoinMarketCap credits.",
+      id: "Pantau jumlah panggilan tool, rate limit, dan kredit CMC.",
+    },
     icon: Activity,
   },
-] as const;
-
-const CAPABILITIES = [
   {
-    title: "Market Intelligence",
-    ctaLabel: "Open Market Intelligence",
-    description:
-      "Ten deterministic CoinMarketCap workflows covering macro overview, regime classification, asset comparison, anti-chase movers, anomalies, sector rotation, derivatives, and historical risk.",
-    href: "/app/market",
-    icon: LineChart,
-  },
-  {
-    title: "AI Agent & MCP Connectivity",
-    ctaLabel: "Open MCP Connections",
-    description:
-      "Single Streamable HTTP and local stdio MCP server exposing 10 tools, 3 static resources, 2 resource templates, and 3 guarded prompts.",
-    href: "/app/connections",
-    icon: Plug,
-  },
-  {
-    title: "REST API Access",
-    ctaLabel: "Open API Keys",
-    description:
-      "Personal SHA-256 hashed API keys (ct_live_*) sharing a predictable per-account rate window with immediate revocation.",
-    href: "/app/keys",
-    icon: Terminal,
-  },
-  {
-    title: "Evidence & Data Provenance",
-    ctaLabel: "Open Evidence",
-    description:
-      "Every intelligence call creates a tenant-scoped ev_* audit record disclosing source endpoints, UTC timestamps, data mode, freshness, and plan limitations.",
-    href: "/app/evidence",
-    icon: FileCheck2,
-  },
-  {
-    title: "Usage & Credit Transparency",
-    ctaLabel: "Open Usage",
-    description:
-      "Separates your CoinTrac tool call quota from upstream CoinMarketCap credits (cached responses consume 0 CMC credits).",
-    href: "/app/usage",
-    icon: Activity,
+    href: "/app/historical",
+    title: { en: "Historical Performance", id: "Performa Historis" },
+    description: {
+      en: "Review daily closes, volatility, beta, and max drawdown.",
+      id: "Lihat penutupan harian, volatilitas, beta, dan max drawdown.",
+    },
+    icon: History,
   },
 ] as const;
 
 export function WorkspaceOverview() {
+  const { locale } = useAppPreferences();
   const { pushToast } = useToast();
 
   const [profile, setProfile] = useState<Loadable<AuthProfilePayload>>(initialLoadable);
@@ -259,11 +316,11 @@ export function WorkspaceOverview() {
         ).length;
         if (failures > 0) {
           pushToast(
-            `Refresh completed with ${failures} failed status check${failures === 1 ? "" : "s"}.`,
-            "error",
+            `Status check completed (${failures} service${failures === 1 ? "" : "s"} in standby or unverified).`,
+            "info",
           );
         } else {
-          pushToast("Workspace status refreshed.", "success");
+          pushToast("Workspace telemetry refreshed.", "success");
         }
       }
     },
@@ -376,15 +433,18 @@ export function WorkspaceOverview() {
   );
 
   const failedEndpoints = useMemo(() => {
-    const out: string[] = [];
-    if (profile.error) out.push(`Account (${profile.error.status})`);
-    if (keys.error) out.push(`API keys (${keys.error.status})`);
-    if (mcpStatus.error) out.push(`MCP status (${mcpStatus.error.status})`);
-    if (usage.error) out.push(`Usage telemetry (${usage.error.status})`);
-    if (health.error) out.push(`Backend health (${health.error.status})`);
-    if (evidence.error) out.push(`Evidence (${evidence.error.status})`);
+    const out: Array<{ label: string; status: number }> = [];
+    if (profile.error) out.push({ label: `Account (${profile.error.status})`, status: profile.error.status });
+    if (keys.error) out.push({ label: `API keys (${keys.error.status})`, status: keys.error.status });
+    if (mcpStatus.error) out.push({ label: `MCP status (${mcpStatus.error.status})`, status: mcpStatus.error.status });
+    if (usage.error) out.push({ label: `Usage telemetry (${usage.error.status})`, status: usage.error.status });
+    if (health.error) out.push({ label: `Engine health (${health.error.status})`, status: health.error.status });
+    if (evidence.error) out.push({ label: `Evidence (${evidence.error.status})`, status: evidence.error.status });
     return out;
   }, [profile.error, keys.error, mcpStatus.error, usage.error, health.error, evidence.error]);
+
+  const allStandby =
+    failedEndpoints.length > 0 && failedEndpoints.every((item) => isStandbyStatus(item.status));
 
   const verifiedCount = onboardingSteps.filter((s) => s.status === "verified").length;
   const configuredCount = onboardingSteps.filter((s) => s.status === "configured").length;
@@ -396,10 +456,21 @@ export function WorkspaceOverview() {
     <div className="space-y-8">
       {/* A. Welcome & Workspace Context */}
       <PageHeader
-        title={greetingName ? `Welcome, ${greetingName}` : "CoinTrac Workspace"}
-        description="Operational status, setup readiness, and direct entry points for verified crypto market intelligence, API keys, and MCP connectivity."
+        title={
+          greetingName
+            ? locale === "id"
+              ? `Selamat datang, ${greetingName}`
+              : `Welcome, ${greetingName}`
+            : "CoinTrac Workspace"
+        }
+        description={
+          locale === "id"
+            ? "Pantau status API, kelola API key, hubungkan klien AI, dan jalankan analisis pasar."
+            : "Monitor API health, manage keys, connect AI clients, and run market analysis."
+        }
         actions={
           <>
+            <SnapshotFreshness onSnapshot={() => void loadAll(false)} />
             <Button
               variant="secondary"
               size="md"
@@ -407,9 +478,12 @@ export function WorkspaceOverview() {
               onClick={() => void loadAll(true)}
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              <span>Refresh</span>
+              <span>{locale === "id" ? "Muat ulang" : "Refresh"}</span>
             </Button>
-            <Link href={primaryAction.href} className="tg-btn tg-btn-primary inline-flex">
+            <Link
+              href={primaryAction.href}
+              className="tg-btn tg-btn-primary ct-btn-glow inline-flex"
+            >
               <span>{primaryAction.label}</span>
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
@@ -417,215 +491,246 @@ export function WorkspaceOverview() {
         }
       />
 
-      {/* Partial API Degradation Disclosure */}
+      {/* Graceful Degradation / Service Unavailable Disclosure */}
       {failedEndpoints.length > 0 ? (
         <ErrorNotice
-          title="Partial status check failure"
-          message={`Some workspace signals could not be verified: ${failedEndpoints.join(", ")}. Affected cards remain marked ERROR or UNVERIFIED.`}
+          status={allStandby ? 503 : failedEndpoints[0]?.status}
+          title={
+            allStandby
+              ? locale === "id"
+                ? "Layanan API belum terhubung"
+                : "API currently unreachable"
+              : locale === "id"
+                ? "Sebagian data belum termuat"
+                : "Some metrics could not load"
+          }
+          message={
+            allStandby
+              ? locale === "id"
+                ? "Metrik langsung sedang dijeda karena backend API belum merespons. Kontrol navigasi tetap dapat digunakan."
+                : "Live metrics are paused while the backend API is unreachable. Workspace navigation remains available."
+              : locale === "id"
+                ? "Beberapa metrik gagal dimuat. Klik coba lagi untuk memuat ulang."
+                : "Some workspace metrics failed to load. Click retry to refresh."
+          }
           onRetry={() => void loadAll(true)}
         />
       ) : null}
 
-      {/* B. Workspace Readiness (Real Signals Only) */}
+      {/* B. System & Account Status */}
       <section aria-labelledby="readiness-heading" className="space-y-4">
         <SectionHeader
           id="readiness-heading"
-          title="Workspace readiness"
-          description="Live status checks against your authenticated account and the local CoinTrac backend."
+          title={locale === "id" ? "Status sistem & akun" : "System & account status"}
+          description={
+            locale === "id"
+              ? "Ringkasan koneksi API, kredensial akun, dan aktivitas MCP/REST Anda."
+              : "Overview of API health, account credentials, and MCP/REST activity."
+          }
         />
 
-        <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
-          {/* 1. Account & Session */}
-          <Card className="flex min-w-0 flex-col justify-between gap-3 p-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {/* Card 1: API Health & Quota */}
+          <Card className="ct-surface-card flex min-w-0 flex-col justify-between gap-4 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
-                <span className="truncate">Account &amp; session</span>
+              <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                <Cpu className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
+                <span className="truncate">
+                  {locale === "id" ? "Status API" : "API Health"}
+                </span>
+                <InfoTip
+                  align="right"
+                  label="About API health"
+                  text="Checks connectivity to the CoinTrac backend API. Missing market fields always stay null."
+                />
               </span>
-              {profile.loading ? (
-                <StatusIndicator state="LOADING" />
-              ) : profile.error ? (
-                <StatusIndicator state="ERROR" />
-              ) : profile.data?.email_verified ? (
-                <StatusIndicator state="CONNECTED" label="VERIFIED" />
+              {health.loading ? (
+                <StatusIndicator state="CONNECTING" label="Checking..." />
+              ) : health.error ? (
+                isStandbyStatus(health.error.status) ? (
+                  <StatusIndicator state="STANDBY" label="UNAVAILABLE" />
+                ) : (
+                  <StatusIndicator state="ERROR" />
+                )
+              ) : health.data?.status === "ok" ? (
+                <StatusIndicator state="CONNECTED" label="ONLINE" />
               ) : (
                 <StatusIndicator state="UNVERIFIED" />
               )}
             </div>
-            {profile.loading ? (
-              <Skeleton className="h-10 w-full" />
-            ) : profile.error ? (
-              <p className="text-xs text-destructive">{profile.error.message}</p>
+
+            {health.loading ? (
+              <Skeleton className="h-14 w-full" />
             ) : (
-              <div>
-                <p className="truncate font-mono text-sm font-semibold text-foreground">
-                  {profile.data?.base_plan_code.toUpperCase() ?? "—"} plan
+              <div className="space-y-2.5">
+                <p className="truncate font-mono text-base font-semibold text-foreground">
+                  {health.data?.engine_version ??
+                    (health.error
+                      ? locale === "id"
+                        ? "Tidak terhubung"
+                        : "Unavailable"
+                      : "—")}
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Status:{" "}
-                  <span className="font-mono text-foreground">
-                    {profile.data?.account_status ?? "—"}
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <QuotaProfileBadge profile={usage.data?.server_mode?.effective_profile} />
+                  <BudgetStateBadge state={usage.data?.server_mode?.budget_state} />
+                </div>
+                <p className="font-mono text-xs text-muted-foreground">
+                  {usage.data
+                    ? `${usage.data.tool_quota.calls_last_24h} calls (24h) · ${usage.data.cmc_credits.credits_this_month} CMC credits (mo)`
+                    : health.error
+                      ? locale === "id"
+                        ? "Menunggu koneksi backend..."
+                        : "Waiting for backend connection..."
+                      : locale === "id"
+                        ? "Memeriksa penggunaan..."
+                        : "Checking usage..."}
                 </p>
               </div>
             )}
           </Card>
 
-          {/* 2. API Keys */}
-          <Card className="flex min-w-0 flex-col justify-between gap-3 p-4">
+          {/* Card 2: Account & API Keys */}
+          <Card className="ct-surface-card flex min-w-0 flex-col justify-between gap-4 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
-                <KeyRound className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
-                <span className="truncate">API keys</span>
+                <ShieldCheck className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
+                <span className="truncate">
+                  {locale === "id" ? "Akun & API Key" : "Account & API Keys"}
+                </span>
               </span>
-              {keys.loading ? (
+              {profile.loading || keys.loading ? (
                 <StatusIndicator state="LOADING" />
-              ) : keys.error ? (
-                <StatusIndicator state="ERROR" />
               ) : derivedMetrics.verifiedKeyCount > 0 ? (
                 <StatusIndicator state="CONNECTED" label="VERIFIED" />
               ) : (keys.data?.active_count ?? 0) > 0 ? (
                 <StatusIndicator state="CONFIGURED" />
-              ) : (
-                <StatusIndicator state="NOT_CONFIGURED" />
-              )}
-            </div>
-            {keys.loading ? (
-              <Skeleton className="h-10 w-full" />
-            ) : keys.error ? (
-              <p className="text-xs text-destructive">{keys.error.message}</p>
-            ) : (
-              <div>
-                <p className="font-mono text-sm font-semibold tabular-nums text-foreground">
-                  {keys.data?.active_count ?? 0} / {keys.data?.max_active_keys ?? 5} active
-                </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {derivedMetrics.verifiedKeyCount > 0
-                    ? `${derivedMetrics.verifiedKeyCount} active key verified via live auth.`
-                    : (keys.data?.active_count ?? 0) > 0
-                      ? "Key present; authentication unverified until first request."
-                      : derivedMetrics.revokedKeyCount > 0
-                        ? `${derivedMetrics.revokedKeyCount} revoked key(s) only; create an active key.`
-                        : "Create a ct_live_* key to connect MCP or REST."}
-                </p>
-              </div>
-            )}
-          </Card>
-
-          {/* 3. MCP Connectivity */}
-          <Card className="flex min-w-0 flex-col justify-between gap-3 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
-                <Plug className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
-                <span className="truncate">MCP transport</span>
-              </span>
-              {mcpStatus.loading ? (
-                <StatusIndicator state="LOADING" />
-              ) : mcpStatus.error ? (
-                <StatusIndicator state="ERROR" />
-              ) : mcpStatus.data?.remote_deployed ? (
-                <StatusIndicator state="CONNECTED" label="REMOTE DEPLOYED" />
-              ) : (
-                <StatusIndicator state="NOT_DEPLOYED" />
-              )}
-            </div>
-            {mcpStatus.loading ? (
-              <Skeleton className="h-10 w-full" />
-            ) : mcpStatus.error ? (
-              <p className="text-xs text-destructive">{mcpStatus.error.message}</p>
-            ) : (
-              <div>
-                <p className="text-sm font-semibold text-foreground">
-                  Local {mcpStatus.data?.stateless_http ? "Stateless" : "Stateful"} HTTP ready
-                </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {mcpStatus.data?.remote_deployed
-                    ? "Public HTTPS Remote MCP configured."
-                    : "Remote HTTPS host Not deployed."}
-                  {usage.data
-                    ? ` · ${usage.data.tool_quota.calls_by_surface.mcp} MCP call${usage.data.tool_quota.calls_by_surface.mcp === 1 ? "" : "s"} observed.`
-                    : ""}
-                </p>
-              </div>
-            )}
-          </Card>
-
-          {/* 4. Intelligence Service Availability */}
-          <Card className="flex min-w-0 flex-col justify-between gap-3 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                <Cpu className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
-                <span className="truncate">Intelligence API</span>
-                <InfoTip
-                  align="right"
-                  label="About Intelligence API health"
-                  text="Backend /health confirms the local CoinTrac server responds. Upstream CoinMarketCap endpoints still depend on your active CMC plan tier (for example, OHLCV returns TIER_RESTRICTED on Basic)."
-                />
-              </span>
-              {health.loading ? (
-                <StatusIndicator state="LOADING" />
-              ) : health.error ? (
-                <StatusIndicator state="ERROR" />
-              ) : health.data?.status === "ok" ? (
-                <StatusIndicator state="CONNECTED" label="REACHABLE" />
+              ) : profile.data?.email_verified ? (
+                <StatusIndicator state="NOT_CONFIGURED" label="KEY NEEDED" />
+              ) : isStandbyStatus(profile.error?.status) ? (
+                <StatusIndicator state="STANDBY" label="UNAVAILABLE" />
               ) : (
                 <StatusIndicator state="UNVERIFIED" />
               )}
             </div>
-            {health.loading ? (
-              <Skeleton className="h-10 w-full" />
-            ) : health.error ? (
-              <p className="text-xs text-destructive">{health.error.message}</p>
+
+            {profile.loading || keys.loading ? (
+              <Skeleton className="h-14 w-full" />
             ) : (
-              <div>
-                <p className="truncate font-mono text-sm font-semibold text-foreground">
-                  {health.data?.engine_version ?? "—"}
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="font-mono text-base font-semibold tabular-nums text-foreground">
+                    {keys.data
+                      ? `${keys.data.active_count} / ${keys.data.max_active_keys} active keys`
+                      : "—"}
+                  </p>
+                  <Badge tone="brand">
+                    {profile.data?.base_plan_code
+                      ? `${profile.data.base_plan_code.toUpperCase()} PLAN`
+                      : "SESSION"}
+                  </Badge>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {derivedMetrics.verifiedKeyCount > 0
+                    ? locale === "id"
+                      ? `${derivedMetrics.verifiedKeyCount} API key sudah dipakai dan terverifikasi.`
+                      : `${derivedMetrics.verifiedKeyCount} personal key verified via API requests.`
+                    : (keys.data?.active_count ?? 0) > 0
+                      ? locale === "id"
+                        ? "API key sudah dibuat; akan terverifikasi saat panggilan pertama."
+                        : "Key created; verifies automatically on first request."
+                      : locale === "id"
+                        ? "Buat API key ct_live_* di menu API Keys untuk mulai."
+                        : "Create an API key in API Keys to get started."}
                 </p>
-                {usage.error ? (
-                  <p className="mt-0.5 text-xs text-destructive">
-                    Usage telemetry failed (HTTP {usage.error.status}).
-                  </p>
+              </div>
+            )}
+          </Card>
+
+          {/* Card 3: MCP & REST Surfaces */}
+          <Card className="ct-surface-card flex min-w-0 flex-col justify-between gap-4 p-5 md:col-span-2 lg:col-span-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
+                <Plug className="h-4 w-4 shrink-0 text-link" aria-hidden="true" />
+                <span className="truncate">
+                  {locale === "id" ? "Koneksi MCP & REST" : "MCP & REST"}
+                </span>
+              </span>
+              {mcpStatus.loading ? (
+                <StatusIndicator state="LOADING" />
+              ) : mcpStatus.error ? (
+                isStandbyStatus(mcpStatus.error.status) ? (
+                  <StatusIndicator state="STANDBY" label="UNAVAILABLE" />
                 ) : (
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {usage.data
-                      ? `${usage.data.tool_quota.calls_last_24h} calls (24h) · ${usage.data.cmc_credits.credits_this_month} CMC credits (mo)`
-                      : "Checking account telemetry..."}
-                  </p>
-                )}
+                  <StatusIndicator state="ERROR" />
+                )
+              ) : mcpStatus.data?.remote_deployed ? (
+                <StatusIndicator state="CONNECTED" label="HTTPS READY" />
+              ) : (
+                <StatusIndicator state="CONFIGURED" label="READY" />
+              )}
+            </div>
+
+            {mcpStatus.loading ? (
+              <Skeleton className="h-14 w-full" />
+            ) : (
+              <div className="space-y-2">
+                <p className="text-base font-semibold text-foreground">
+                  Streamable HTTP MCP
+                </p>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {usage.data
+                    ? `MCP ${usage.data.tool_quota.calls_by_surface.mcp} · REST ${usage.data.tool_quota.calls_by_surface.rest} · UI ${usage.data.tool_quota.calls_by_surface.playground}`
+                    : mcpStatus.data?.remote_url ?? "https://mcp.cointrac.xyz/mcp"}
+                </p>
               </div>
             )}
           </Card>
         </div>
       </section>
 
-      {/* C. Three-Step Quickstart Onboarding (Dismissible & Reopenable) */}
+      {/* C. Three-Step Quickstart */}
       <section aria-labelledby="quickstart-heading" className="space-y-4">
         <SectionHeader
           id="quickstart-heading"
-          title="Quickstart guide"
-          description="Three practical steps to go from verified account to auditable crypto intelligence."
+          title={locale === "id" ? "Langkah mulai cepat" : "Quickstart"}
+          description={
+            locale === "id"
+              ? "Tiga langkah dari membuat API key hingga menjalankan analisis pertama."
+              : "Three steps from creating an API key to running your first market query."
+          }
           action={
             <Button variant="ghost" size="sm" onClick={toggleQuickstart}>
-              {hideQuickstart ? "Show quickstart guide" : "Hide guide"}
+              {hideQuickstart
+                ? locale === "id"
+                  ? "Tampilkan panduan"
+                  : "Show guide"
+                : locale === "id"
+                  ? "Sembunyikan"
+                  : "Hide guide"}
             </Button>
           }
         />
 
         {!hideQuickstart ? (
-          <Card className="space-y-5 p-5">
+          <Card className="ct-surface-featured space-y-5 p-5">
             <ProgressIndicator
               completed={verifiedCount}
               total={onboardingSteps.length}
               label={
                 configuredCount > 0
-                  ? `Verified milestones (${configuredCount} configured, awaiting live request verification)`
-                  : "Verified milestones based on live account telemetry"
+                  ? locale === "id"
+                    ? `Progres akun (${configuredCount} sudah dikonfigurasi)`
+                    : `Account progress (${configuredCount} configured)`
+                  : locale === "id"
+                    ? "Progres berdasarkan aktivitas akun"
+                    : "Progress based on account activity"
               }
             />
 
-            <ol className="grid gap-4 lg:grid-cols-3">
+            <ol className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               {onboardingSteps.map((step) => {
-                const copy = STEP_COPY[step.id];
+                const copy = STEP_COPY[locale][step.id];
                 const isVerified = step.status === "verified";
                 const isConfigured = step.status === "configured";
                 const isAction = step.status === "action_required";
@@ -670,17 +775,13 @@ export function WorkspaceOverview() {
                       <p className="text-xs leading-relaxed text-muted-foreground">
                         {copy.summary}
                       </p>
-                      <p className="text-xs leading-relaxed text-subtle-foreground">
-                        <strong className="font-medium text-muted-foreground">Why:</strong>{" "}
-                        {copy.whyItMatters}
-                      </p>
                     </div>
 
                     <div className="space-y-2.5 border-t border-border pt-3">
-                      <p className="text-xs text-muted-foreground">{step.statusNote}</p>
+                      <p className="text-xs text-subtle-foreground">{step.statusNote}</p>
                       <Link
                         href={step.href}
-                        className={`inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-[8px] px-3 text-xs font-semibold transition-colors ${
+                        className={`inline-flex min-h-11 sm:min-h-9 w-full items-center justify-center gap-1.5 rounded-[8px] px-3 text-xs font-semibold transition-colors ${
                           isAction
                             ? "bg-primary text-primary-foreground hover:bg-primary-hover"
                             : "border border-border-strong bg-card text-foreground hover:bg-muted"
@@ -698,13 +799,62 @@ export function WorkspaceOverview() {
         ) : null}
       </section>
 
-      {/* D. Quick Actions + E. Recent Verified Activity */}
+      {/* D. Analysis Desks Bento Grid */}
+      <section aria-labelledby="desks-heading" className="space-y-4">
+        <SectionHeader
+          id="desks-heading"
+          title={locale === "id" ? "Alat Intelijen Pasar" : "Market Intelligence desks"}
+          description={
+            locale === "id"
+              ? "Jalankan analisis pasar, aset, movers, sektor, derivatif, dan histori."
+              : "Run live market, asset, mover, sector, derivatives, and history tools."
+          }
+        />
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {ANALYSIS_DESKS.map((desk) => {
+            const Icon = desk.icon;
+            return (
+              <Link
+                key={desk.href}
+                href={desk.href}
+                className="ct-surface-card group flex flex-col justify-between gap-4 rounded-[16px] p-5 transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:bg-card-elevated"
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-border bg-background text-link">
+                      <Icon className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <ArrowRight
+                      className="h-4 w-4 text-subtle-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-link"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <h3 className="text-base font-semibold text-foreground">{desk.title[locale]}</h3>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {desk.description[locale]}
+                  </p>
+                </div>
+                <p className="border-t border-border/80 pt-3 font-mono text-[11px] font-medium text-link">
+                  {locale === "id" ? "Buka alat" : "Open desk"} →
+                </p>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* E. Control Plane Actions + Recent Evidence */}
       <div className="grid gap-6 lg:grid-cols-12">
         <section aria-labelledby="quick-actions-heading" className="space-y-4 lg:col-span-5">
           <SectionHeader
             id="quick-actions-heading"
-            title="Quick actions"
-            description="Jump directly to core workspace workflows."
+            title={locale === "id" ? "Kelola akun & akses" : "Manage access & usage"}
+            description={
+              locale === "id"
+                ? "API key, koneksi MCP, kuota, dan data historis."
+                : "API keys, MCP connections, quotas, and historical closes."
+            }
           />
           <div className="grid gap-3">
             {QUICK_ACTIONS.map((item) => {
@@ -713,16 +863,16 @@ export function WorkspaceOverview() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="group flex items-center justify-between gap-3 rounded-[14px] border border-border bg-card p-4 transition-colors hover:border-border-strong hover:bg-card-elevated"
+                  className="ct-surface-card group flex min-h-16 items-center justify-between gap-3 rounded-[14px] p-4 transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:bg-card-elevated"
                 >
                   <div className="flex min-w-0 items-start gap-3">
                     <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border bg-background text-link">
                       <Icon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                      <p className="text-sm font-semibold text-foreground">{item.title[locale]}</p>
                       <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                        {item.description}
+                        {item.description[locale]}
                       </p>
                     </div>
                   </div>
@@ -739,14 +889,18 @@ export function WorkspaceOverview() {
         <section aria-labelledby="recent-activity-heading" className="space-y-4 lg:col-span-7">
           <SectionHeader
             id="recent-activity-heading"
-            title="Recent evidence activity"
-            description="Latest tenant-scoped audit records generated by your workspace, REST, or MCP tool calls."
+            title={locale === "id" ? "Riwayat bukti terbaru" : "Recent evidence activity"}
+            description={
+              locale === "id"
+                ? "Respons terbaru yang tersimpan di akun Anda."
+                : "Latest responses saved to your account."
+            }
             action={
               <Link
                 href="/app/evidence"
-                className="inline-flex min-h-8 items-center gap-1 rounded-[8px] px-2 text-xs font-semibold text-link hover:bg-muted/60 hover:underline"
+                className="inline-flex min-h-11 sm:min-h-8 items-center gap-1 rounded-[8px] px-2 text-xs font-semibold text-link hover:bg-muted/60 hover:underline"
               >
-                <span>View all evidence</span>
+                <span>{locale === "id" ? "Lihat semua" : "View all evidence"}</span>
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
               </Link>
             }
@@ -759,11 +913,23 @@ export function WorkspaceOverview() {
               <Skeleton className="h-12 w-full" />
             </Card>
           ) : evidence.error ? (
-            <ErrorNotice
-              status={evidence.error.status}
-              message={evidence.error.message}
-              onRetry={() => void loadAll(true)}
-            />
+            allStandby ? (
+              <EmptyState
+                icon={<FileCheck2 className="h-5 w-5" aria-hidden="true" />}
+                title={locale === "id" ? "Menunggu koneksi API" : "Waiting for API connection"}
+                description={
+                  locale === "id"
+                    ? "Riwayat bukti tersimpan akan muncul di sini setelah backend API terhubung."
+                    : "Saved evidence records will appear here once the backend API is connected."
+                }
+              />
+            ) : (
+              <ErrorNotice
+                status={evidence.error.status}
+                message={evidence.error.message}
+                onRetry={() => void loadAll(true)}
+              />
+            )
           ) : recentEvidence.length === 0 ? (
             <EmptyState
               icon={<FileCheck2 className="h-5 w-5" aria-hidden="true" />}
@@ -783,7 +949,7 @@ export function WorkspaceOverview() {
                   <li key={row.evidence_id}>
                     <Link
                       href={`/app/evidence?id=${encodeURIComponent(row.evidence_id)}`}
-                      className="flex flex-col gap-2 px-4 py-3.5 transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
+                      className="flex min-h-14 flex-col gap-2 px-4 py-3.5 transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -799,7 +965,7 @@ export function WorkspaceOverview() {
                           {row.credit_cost === 1 ? "" : "s"}
                         </p>
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
                         <DataModeBadge mode={row.data_mode} />
                         <FreshnessBadge freshness={row.freshness} />
                       </div>
@@ -811,40 +977,6 @@ export function WorkspaceOverview() {
           )}
         </section>
       </div>
-
-      {/* F. Product Capabilities Context */}
-      <section aria-labelledby="capabilities-context-heading" className="space-y-4">
-        <SectionHeader
-          id="capabilities-context-heading"
-          title="What you can do in CoinTrac"
-          description="Every workspace page connects to the same deterministic intelligence engine and strict per-account isolation."
-        />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {CAPABILITIES.map((cap) => {
-            const Icon = cap.icon;
-            return (
-              <Card key={cap.title} className="flex flex-col justify-between gap-3 p-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-link" aria-hidden="true" />
-                    <h3 className="text-sm font-semibold text-foreground">{cap.title}</h3>
-                  </div>
-                  <p className="text-xs leading-relaxed text-muted-foreground">{cap.description}</p>
-                </div>
-                <div>
-                  <Link
-                    href={cap.href}
-                    className="inline-flex min-h-8 items-center gap-1 rounded-[8px] px-1 text-xs font-semibold text-link hover:bg-muted/60 hover:underline"
-                  >
-                    <span>{cap.ctaLabel}</span>
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                  </Link>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
     </div>
   );
 }

@@ -98,6 +98,12 @@ describe("R3 Command Search", () => {
       ["/app/anomalies"],
     );
 
+    const assetHits = filterWorkspaceCommands(commands, "ondo");
+    assert.ok(assetHits.some((cmd) => cmd.href === "/app/assets?symbol=ONDO"));
+
+    const btcHits = filterWorkspaceCommands(commands, "bitcoin");
+    assert.ok(btcHits.some((cmd) => cmd.href === "/app/assets?symbol=BTC"));
+
     const noHits = filterWorkspaceCommands(commands, "nonexistent-feature-xyz");
     assert.equal(noHits.length, 0);
   });

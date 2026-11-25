@@ -39,7 +39,12 @@ coverage/
 !/docs/CMC_CAPABILITY_MATRIX.json
 !/docs/deployment/
 !/docs/deployment/**
+# Keep deploy guides. Leave phase, audit, and one-off verification notes local.
 /docs/deployment/COINTRAC_VPS_INITIAL_AUDIT.md
+/docs/deployment/*PHASE*
+/docs/deployment/*AUDIT*
+/docs/deployment/*VERIFICATION_REPORT*
+/docs/deployment/*READINESS_REPORT*
 
 # misc
 .DS_Store

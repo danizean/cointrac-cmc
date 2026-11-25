@@ -1,71 +1,148 @@
 "use client";
 
+import { ArrowRight, ArrowUpRight, BookOpen, Play } from "lucide-react";
 import Link from "next/link";
-import { TOOL_CATALOG } from "@/lib/catalog";
+import { TOOL_CATALOG, publicOpenApiDocsUrl } from "@/lib/catalog";
 import { MARKETING } from "@/lib/marketing-copy";
 import { useAppPreferences } from "../app-preferences";
 
 export function DocsView() {
   const { locale } = useAppPreferences();
   const copy = MARKETING[locale].docs;
+  const openApiUrl = publicOpenApiDocsUrl();
 
   return (
-    <main id="content" className="mx-auto w-full max-w-[1200px] px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-link">{copy.eyebrow}</p>
-      <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">{copy.title}</h1>
-      <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">{copy.lede}</p>
+    <main id="content" className="relative overflow-x-clip">
+      {/* Hero Header */}
+      <div className="ct-hero-glow relative border-b border-border/80">
+        <div
+          aria-hidden="true"
+          className="ct-grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[340px]"
+        />
+        <div className="relative mx-auto w-full max-w-[1240px] px-4 pb-12 pt-12 sm:px-6 lg:px-8 lg:pb-16 lg:pt-16">
+          <div className="ct-enter inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-link">
+            <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{copy.eyebrow}</span>
+          </div>
 
-      <section id="api" className="mt-12 scroll-mt-24">
-        <h2 className="text-2xl font-semibold tracking-tight">REST</h2>
-        <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground">{copy.apiIntro}</p>
-        <div className="mt-6 overflow-x-auto rounded-[14px] border border-border">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">Method</th>
-                <th className="px-4 py-3 font-medium">Path</th>
-                <th className="px-4 py-3 font-medium">Tool</th>
-              </tr>
-            </thead>
-            <tbody>
-              {TOOL_CATALOG.map((tool) => (
-                <tr key={tool.name} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-3 font-mono text-xs text-primary">{tool.method}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{tool.restPath}</td>
-                  <td className="px-4 py-3">{tool.label}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <h1 className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl">
+            {copy.title}
+          </h1>
+
+          <p className="ct-enter-delay-2 mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-[17px]">
+            {copy.lede}
+          </p>
+
+          <div className="ct-enter-delay-3 mt-7 flex flex-wrap gap-3">
+            <a
+              href={openApiUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tg-btn tg-btn-primary ct-btn-glow inline-flex"
+            >
+              <span>{locale === "id" ? "Buka OpenAPI (Swagger)" : "Open OpenAPI Reference"}</span>
+              <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+            </a>
+            <Link href="/playground" className="tg-btn tg-btn-secondary inline-flex">
+              <Play className="h-3.5 w-3.5 text-link" aria-hidden="true" />
+              <span>{locale === "id" ? "Buka Playground" : "Open Playground"}</span>
+            </Link>
+          </div>
         </div>
-      </section>
+      </div>
 
-      <div className="mt-14 space-y-12">
-        {copy.sections.map((section) => (
-          <section key={section.title} className="border-t border-border pt-8">
-            <h2 className="text-2xl font-semibold tracking-tight">{section.title}</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground">{section.body}</p>
-            <ul className="mt-4 flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:gap-x-6">
-              {section.links.map((link) => (
-                <li key={link.href + link.label}>
-                  <Link href={link.href} className="inline-flex min-h-11 items-center text-sm font-semibold text-link">
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            <h3 className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              {copy.source}
-            </h3>
-            <ul className="mt-2 space-y-1">
-              {section.sources.map((source) => (
-                <li key={source} className="font-mono text-xs break-all text-foreground">
-                  {source}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+      <div className="mx-auto w-full max-w-[1240px] px-4 py-14 sm:px-6 lg:px-8">
+        <section id="api" className="scroll-mt-24 space-y-4">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+              REST Intelligence Endpoints
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+              {copy.apiIntro}
+            </p>
+          </div>
+
+          <div className="ct-surface-featured overflow-hidden rounded-[16px]">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[780px] border-collapse text-left text-sm">
+                <thead className="border-b border-border bg-card-elevated/60 font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Method</th>
+                    <th className="px-4 py-3 font-semibold">Endpoint path</th>
+                    <th className="px-4 py-3 font-semibold">MCP tool</th>
+                    <th className="px-4 py-3 font-semibold">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {TOOL_CATALOG.map((tool) => (
+                    <tr key={tool.name} className="transition-colors hover:bg-card-elevated/50">
+                      <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs">
+                        <span
+                          className={`inline-flex rounded-[6px] px-2 py-0.5 font-semibold ${
+                            tool.method === "GET"
+                              ? "bg-positive-soft text-positive"
+                              : "bg-primary/14 text-link"
+                          }`}
+                        >
+                          {tool.method}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-foreground">
+                        {tool.restPath}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs font-semibold text-link">
+                        {tool.name}
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground">{tool.label}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <div className="mt-14 grid gap-5 md:grid-cols-2">
+          {copy.sections.map((section) => (
+            <section
+              key={section.title}
+              className="ct-surface-card flex flex-col justify-between rounded-[16px] p-6 transition-colors hover:border-border-strong"
+            >
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight text-foreground">
+                  {section.title}
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{section.body}</p>
+                <ul className="mt-3 flex flex-wrap gap-4">
+                  {section.links.map((link) => (
+                    <li key={link.href + link.label}>
+                      <Link
+                        href={link.href}
+                        className="inline-flex min-h-10 items-center gap-1.5 text-xs font-semibold text-link hover:underline"
+                      >
+                        <span>{link.label}</span>
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mt-4 border-t border-border/80 pt-3">
+                <h3 className="font-mono text-[10.5px] font-semibold uppercase tracking-wider text-subtle-foreground">
+                  {copy.source}
+                </h3>
+                <ul className="mt-1.5 space-y-1">
+                  {section.sources.map((source) => (
+                    <li key={source} className="font-mono text-xs break-all text-muted-foreground">
+                      {source}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          ))}
+        </div>
       </div>
     </main>
   );

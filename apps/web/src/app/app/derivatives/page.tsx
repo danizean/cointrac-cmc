@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { AnalysisDesk } from "@/components/workspace/analysis-desk";
+import { Suspense } from "react";
+import { DeskSkeleton } from "@/components/ui/primitives";
+import { DerivativesDesk } from "@/components/workspace/derivatives-desk";
 
 export const metadata: Metadata = {
   title: "Derivatives",
-  description: "Derivatives context or the spot-stress proxy for one asset.",
+  description: "Inspect open interest, funding rates, liquidations, and spot-stress signals.",
 };
 
 export default function DerivativesPage() {
-  return <AnalysisDesk pageKey="derivatives" tools={["analyze_derivatives"]} fields={["quote", "symbol"]} />;
+  return (
+    <Suspense fallback={<DeskSkeleton />}>
+      <DerivativesDesk />
+    </Suspense>
+  );
 }

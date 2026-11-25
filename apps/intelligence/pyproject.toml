@@ -14,6 +14,7 @@ dependencies = [
   "cachetools",
   "supabase",
   "mcp>=1.2",
+  "psycopg[binary]>=3.2,<4.0",
 ]
 
 [project.optional-dependencies]

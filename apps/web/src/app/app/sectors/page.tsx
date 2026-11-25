@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { AnalysisDesk } from "@/components/workspace/analysis-desk";
+import { Suspense } from "react";
+import { DeskSkeleton } from "@/components/ui/primitives";
+import { SectorsDesk } from "@/components/workspace/sectors-desk";
 
 export const metadata: Metadata = {
   title: "Sector rotation",
-  description: "Sector rotation across the seven canonical sectors.",
+  description: "Compare capital rotation and performance across DeFi, AI, L1, L2, Gaming, RWA, and Memecoins.",
 };
 
 export default function SectorsPage() {
-  return <AnalysisDesk pageKey="sectors" tools={["analyze_sector_rotation"]} fields={["quote", "sectors"]} />;
+  return (
+    <Suspense fallback={<DeskSkeleton />}>
+      <SectorsDesk />
+    </Suspense>
+  );
 }

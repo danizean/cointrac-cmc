@@ -1,9 +1,22 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+QuotaProfile = Literal["startup", "basic", "adaptive"]
+PROFILE_DEFAULT_TTL_MULTIPLIER: dict[QuotaProfile, float] = {
+    "startup": 1.0,
+    "basic": 2.5,
+    "adaptive": 1.0,
+}
+PROFILE_DEFAULT_MONTHLY_BUDGET: dict[QuotaProfile, int] = {
+    "startup": 450_000,
+    "basic": 10_000,
+    "adaptive": 10_000,
+}
 
 
 def find_repo_root(start: Path) -> Path | None:
@@ -61,9 +74,19 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     trusted_hosts: str = ""
     public_api_base_url: str = ""
+    oauth_issuer: str = ""
+    oauth_resource: str = ""
+    oauth_signing_kid: str = ""
+    oauth_signing_key_path: str = ""
+    oauth_previous_public_jwks: str = ""
+    oauth_database_url: SecretStr = SecretStr("")
+    supabase_publishable_key: SecretStr = SecretStr("")
     force_simulate_basic_tier: bool = False
     mcp_require_api_key: bool = True
-    cmc_cache_ttl_multiplier: float = Field(default=1.0, ge=0.5, le=12.0)
+    cmc_quota_profile: QuotaProfile = "startup"
+    cmc_cache_ttl_multiplier: float | None = Field(default=None, ge=0.5, le=12.0)
+    cmc_monthly_credit_budget: int | None = Field(default=None, ge=1)
+    cmc_warmer_enabled: bool = False
     capability_matrix_path: Path = Field(default=_CAPABILITY_MATRIX)
 
     # Phase 5 Remote MCP transport & security configuration
@@ -130,15 +153,71 @@ class Settings(BaseSettings):
                 )
         return value
 
-    @field_validator("public_api_base_url")
+    @field_validator("public_api_base_url", "oauth_issuer", "oauth_resource")
     @classmethod
     def _validate_public_api_base_url(cls, value: str) -> str:
         return _validate_https_public_url(value)
+
+    @field_validator("cmc_quota_profile", mode="before")
+    @classmethod
+    def _validate_quota_profile(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("CMC_QUOTA_PROFILE must be one of: startup, basic, adaptive.")
+        normalized = value.strip().lower()
+        if normalized not in {"startup", "basic", "adaptive"}:
+            raise ValueError(
+                f"Invalid CMC_QUOTA_PROFILE '{value}'. Must be one of: startup, basic, adaptive."
+            )
+        return normalized
+
+    @field_validator("cmc_cache_ttl_multiplier", "cmc_monthly_credit_budget", mode="before")
+    @classmethod
+    def _empty_string_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("remote_mcp_public_url")
     @classmethod
     def _validate_remote_url(cls, value: str) -> str:
         return _validate_https_public_url(value)
+
+    def resolved_monthly_credit_budget(self) -> int:
+        if self.cmc_monthly_credit_budget is not None:
+            return self.cmc_monthly_credit_budget
+        return PROFILE_DEFAULT_MONTHLY_BUDGET[self.cmc_quota_profile]
+
+    def resolved_ttl_multiplier(
+        self,
+        budget_state: str = "NORMAL",
+        *,
+        warning_level: str = "NONE",
+    ) -> float:
+        base = (
+            float(self.cmc_cache_ttl_multiplier)
+            if self.cmc_cache_ttl_multiplier is not None
+            else PROFILE_DEFAULT_TTL_MULTIPLIER[self.cmc_quota_profile]
+        )
+        if self.cmc_quota_profile == "adaptive":
+            if budget_state == "CUTOFF":
+                mult = max(base, 12.0)
+            elif budget_state == "EMERGENCY":
+                mult = max(base, 5.0)
+            elif budget_state == "CONSERVATION":
+                mult = max(base, 2.5)
+            elif warning_level == "ELEVATED":
+                mult = max(base, 1.5)
+            else:
+                mult = base
+        elif budget_state == "CUTOFF":
+            mult = max(base, 12.0)
+        elif budget_state == "EMERGENCY":
+            mult = max(base * 2.5, 5.0)
+        elif budget_state == "CONSERVATION":
+            mult = max(base * 1.5, 2.5)
+        else:
+            mult = base
+        return max(0.5, min(12.0, float(mult)))
 
     def cors_origin_list(self) -> list[str]:
         return _parse_csv(self.cors_origins)

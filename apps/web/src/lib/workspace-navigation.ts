@@ -218,12 +218,77 @@ export function breadcrumbsForWorkspacePath(pathname: string, locale: Locale): B
 
 export interface CommandItem {
   id: string;
-  section: "Workspace" | "Market Intelligence" | "Tools & Documentation";
+  section: "Workspace" | "Market Intelligence" | "Crypto Assets" | "Tools & Documentation";
   title: string;
   subtitle: string;
   href: string;
   keywords: string[];
 }
+
+export const QUICK_JUMP_ASSETS: ReadonlyArray<{
+  symbol: string;
+  name: string;
+  cmcId: number;
+  category: { en: string; id: string };
+  keywords: string[];
+}> = [
+  {
+    symbol: "BTC",
+    name: "Bitcoin",
+    cmcId: 1,
+    category: { en: "CMC #1 · Benchmark & Dominance", id: "CMC #1 · Tolok Ukur & Dominasi" },
+    keywords: ["btc", "bitcoin", "digital gold", "benchmark", "cmc 1"],
+  },
+  {
+    symbol: "ETH",
+    name: "Ethereum",
+    cmcId: 1027,
+    category: { en: "CMC #1027 · Layer 1 Smart Contracts", id: "CMC #1027 · Kontrak Pintar Layer 1" },
+    keywords: ["eth", "ethereum", "ether", "smart contract", "cmc 1027"],
+  },
+  {
+    symbol: "SOL",
+    name: "Solana",
+    cmcId: 5426,
+    category: { en: "CMC #5426 · High-Throughput Layer 1", id: "CMC #5426 · Layer 1 Throughput Tinggi" },
+    keywords: ["sol", "solana", "spl", "cmc 5426"],
+  },
+  {
+    symbol: "AVAX",
+    name: "Avalanche",
+    cmcId: 5805,
+    category: { en: "CMC #5805 · Subnet Layer 1", id: "CMC #5805 · Subnet Layer 1" },
+    keywords: ["avax", "avalanche", "subnet", "cmc 5805"],
+  },
+  {
+    symbol: "LINK",
+    name: "Chainlink",
+    cmcId: 1975,
+    category: { en: "CMC #1975 · Oracle & RWA Infrastructure", id: "CMC #1975 · Infrastruktur Oracle & RWA" },
+    keywords: ["link", "chainlink", "oracle", "ccip", "cmc 1975"],
+  },
+  {
+    symbol: "ONDO",
+    name: "Ondo",
+    cmcId: 21159,
+    category: { en: "CMC #21159 · Real World Assets (RWA)", id: "CMC #21159 · Real World Assets (RWA)" },
+    keywords: ["ondo", "rwa", "treasury", "real world assets", "cmc 21159"],
+  },
+  {
+    symbol: "NEAR",
+    name: "NEAR Protocol",
+    cmcId: 6535,
+    category: { en: "CMC #6535 · AI & Sharded Layer 1", id: "CMC #6535 · AI & Sharded Layer 1" },
+    keywords: ["near", "near protocol", "sharding", "cmc 6535"],
+  },
+  {
+    symbol: "UNI",
+    name: "Uniswap",
+    cmcId: 7083,
+    category: { en: "CMC #7083 · DeFi Spot Liquidity", id: "CMC #7083 · Likuiditas Spot DeFi" },
+    keywords: ["uni", "uniswap", "dex", "amm", "cmc 7083"],
+  },
+];
 
 export function buildWorkspaceCommands(locale: Locale): CommandItem[] {
   const navCommands: CommandItem[] = WORKSPACE_NAV_ITEMS.map((item) => ({
@@ -244,6 +309,15 @@ export function buildWorkspaceCommands(locale: Locale): CommandItem[] {
     subtitle: route.href,
     href: route.href,
     keywords: [...route.keywords, route.label.en, route.label.id, route.href],
+  }));
+
+  const assetCommands: CommandItem[] = QUICK_JUMP_ASSETS.map((asset) => ({
+    id: `asset-${asset.symbol.toLowerCase()}`,
+    section: "Crypto Assets",
+    title: `${asset.symbol} · ${asset.name}`,
+    subtitle: asset.category[locale],
+    href: `/app/assets?symbol=${asset.symbol}`,
+    keywords: [...asset.keywords, asset.symbol, asset.name],
   }));
 
   const docCommands: CommandItem[] = [
@@ -269,14 +343,30 @@ export function buildWorkspaceCommands(locale: Locale): CommandItem[] {
     {
       id: "doc-capabilities",
       section: "Tools & Documentation",
-      title: locale === "id" ? "Katalog Kapabilitas (10 Tools)" : "Capabilities Catalog (10 Tools)",
-      subtitle: "/capabilities",
-      href: "/capabilities",
-      keywords: ["capabilities", "tools", "catalog", "resources", "prompts"],
+      title: locale === "id" ? "Katalog Produk (10 Tools)" : "Product Catalog (10 Tools)",
+      subtitle: "/product",
+      href: "/product",
+      keywords: ["product", "capabilities", "tools", "catalog", "resources", "prompts"],
+    },
+    {
+      id: "doc-integrations",
+      section: "Tools & Documentation",
+      title: locale === "id" ? "Integrasi & Klien MCP" : "MCP Client Integrations",
+      subtitle: "/integrations",
+      href: "/integrations",
+      keywords: ["integrations", "cursor", "claude", "antigravity", "mcp"],
+    },
+    {
+      id: "doc-connect",
+      section: "Tools & Documentation",
+      title: locale === "id" ? "Snippet Koneksi Cepat" : "Developer Connect Snippets",
+      subtitle: "/connect",
+      href: "/connect",
+      keywords: ["connect", "curl", "python", "snippet", "setup"],
     },
   ];
 
-  return [...navCommands, ...marketCommands, ...docCommands];
+  return [...navCommands, ...marketCommands, ...assetCommands, ...docCommands];
 }
 
 export function filterWorkspaceCommands(commands: CommandItem[], rawQuery: string): CommandItem[] {

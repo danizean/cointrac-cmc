@@ -103,7 +103,7 @@ async def summary(auth: AuthContext = Depends(require_api_key)) -> dict[str, obj
     now = time.monotonic()
     cached = _cached_summary.get(auth.user_id)
     if cached is not None and cached[0] > now:
-        return cached[1]
+        return dict(cached[1])
 
     from app.core.db import supabase_client
 
@@ -161,6 +161,47 @@ def _parse_iso(raw: object) -> datetime | None:
         return None
 
 
+async def _server_mode() -> dict[str, object]:
+    from app.services.budget import get_budget_controller
+    from app.services.tier_detection import get_tier_detector
+
+    detector = get_tier_detector()
+    detected = detector.observation.detected_tier
+    effective = detector.effective_profile()
+    try:
+        snap = await get_budget_controller().snapshot()
+    except Exception:
+        return {
+            "effective_profile": effective,
+            "detected_tier": detected,
+            "budget_state": None,
+            "deep_scan_available": False,
+            "deep_scan_reason": "Budget snapshot is unavailable.",
+        }
+    available = detector.startup_features_open(
+        state=snap.state,
+        warning_level=snap.warning_level,
+        ledger_status=snap.ledger_status,
+    )
+    if available:
+        reason = (
+            "Deep Scan is available because the effective profile is startup "
+            "and the budget state is NORMAL."
+        )
+    else:
+        reason = (
+            "Deep Scan is unavailable. "
+            f"Effective profile is {effective} and budget state is {snap.state}."
+        )
+    return {
+        "effective_profile": effective,
+        "detected_tier": detected,
+        "budget_state": snap.state,
+        "deep_scan_available": available,
+        "deep_scan_reason": reason,
+    }
+
+
 @router.get(
     "/usage",
     summary="Tenant-Scoped CoinTrac Usage & CMC Credit Telemetry",
@@ -201,6 +242,7 @@ async def usage(
             "daily_usage": [],
             "tool_breakdown": [],
             "recent_requests": [],
+            "server_mode": await _server_mode(),
         }
 
     try:
@@ -257,8 +299,7 @@ async def usage(
     avg_latency = None if total_rows == 0 else round(total_latency / total_rows, 2)
 
     daily_usage = [
-        {"date_utc": day, **stats}
-        for day, stats in sorted(daily_map.items(), reverse=True)
+        {"date_utc": day, **stats} for day, stats in sorted(daily_map.items(), reverse=True)
     ]
     tool_breakdown = [
         {"tool_name": name, **stats}
@@ -299,4 +340,5 @@ async def usage(
         "daily_usage": daily_usage,
         "tool_breakdown": tool_breakdown,
         "recent_requests": recent_requests,
+        "server_mode": await _server_mode(),
     }

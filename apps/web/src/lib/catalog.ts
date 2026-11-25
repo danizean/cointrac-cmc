@@ -235,8 +235,7 @@ export const PLAYGROUND_PRESETS: PlaygroundPreset[] = [
 export function publicMcpUrl(): string {
   const configured = process.env.NEXT_PUBLIC_MCP_PUBLIC_URL?.trim();
   if (configured) return configured.replace(/\/$/, "");
-  if (process.env.NODE_ENV === "production") return "https://mcp.cointrac.xyz/mcp";
-  return "http://localhost:8000/mcp";
+  return "https://mcp.cointrac.xyz/mcp";
 }
 
 export function publicOpenApiDocsUrl(): string {
@@ -246,6 +245,6 @@ export function publicOpenApiDocsUrl(): string {
     if (parsed.hostname === "mcp.cointrac.xyz") return "https://api.cointrac.xyz/docs";
     return `${parsed.origin}/docs`;
   } catch {
-    return "http://localhost:8000/docs";
+    return "https://api.cointrac.xyz/docs";
   }
 }

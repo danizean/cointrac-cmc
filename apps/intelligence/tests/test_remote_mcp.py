@@ -579,9 +579,7 @@ async def test_mcp_status_endpoint_reports_honest_deployment_state(
             transport=transport, base_url="http://127.0.0.1:8000"
         ) as client:
             assert (await client.get("/v1/mcp/status")).status_code == 401
-            res = await client.get(
-                "/v1/mcp/status", headers={"Authorization": f"Bearer {token}"}
-            )
+            res = await client.get("/v1/mcp/status", headers={"Authorization": f"Bearer {token}"})
             assert res.status_code == 200
             body = res.json()
             assert body["server_name"] == "CoinTrac Market Intelligence"
@@ -591,7 +589,7 @@ async def test_mcp_status_endpoint_reports_honest_deployment_state(
             assert body["remote_url"] is None
             assert body["deployment_status"] == "not_deployed"
             assert body["contracts"] == {
-                "tools": 10,
+                "tools": 11,
                 "static_resources": 3,
                 "resource_templates": 2,
                 "prompts": 3,

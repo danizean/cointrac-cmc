@@ -6,15 +6,30 @@ import { NextResponse } from "next/server";
 
 const MAX_BODY_BYTES = 32 * 1024;
 const SAFE_TOKEN = /^[A-Za-z0-9_-]{8,128}$/;
+const UPSTREAM_JSON_TIMEOUT_MS = 25_000;
 
 export type IntelligenceProxyRouteContext = {
   params: Promise<{ path: string[] }>;
 };
 
-function jsonError(status: number, summary: string) {
+const PROXY_SECURITY_HEADERS: Record<string, string> = {
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "x-accel-buffering": "no",
+};
+
+function jsonError(
+  status: number,
+  summary: string,
+  extra?: Record<string, string>,
+) {
   return NextResponse.json(
-    { status: "INSUFFICIENT_DATA", summary },
-    { status, headers: { "cache-control": "no-store" } },
+    {
+      status: "INSUFFICIENT_DATA",
+      ...(extra ?? {}),
+      summary,
+    },
+    { status, headers: PROXY_SECURITY_HEADERS },
   );
 }
 
@@ -47,8 +62,8 @@ async function readLimitedBody(request: Request): Promise<Uint8Array | "too-larg
 }
 
 /**
- * Shared server-side BFF proxy for CoinTrac Intelligence API.
- * Served only on `/api/cointrac/*`.
+ * Shared server-side BFF proxy for CoinTrac Intelligence API (VPS / FastAPI).
+ * Served exclusively on `/api/cointrac/*`.
  */
 export async function handleIntelligenceProxy(
   request: Request,
@@ -59,24 +74,43 @@ export async function handleIntelligenceProxy(
   const target = resolveIntelligenceTarget(intelligenceApiUrl(), path, incoming.search);
   if (!target.ok) return jsonError(target.status, target.summary);
 
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return jsonError(401, "Authentication is required.");
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user?.email_confirmed_at) return jsonError(401, "Authentication is required.");
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  const headers = proxyAuthHeaders(session?.access_token);
-  if (!headers) return jsonError(401, "Authentication is required.");
+  const isPublicHealthProbe =
+    request.method === "GET" && path.length === 1 && path[0] === "health";
 
-  const byok = request.headers.get("x-cmc-api-key")?.trim();
-  if (byok) {
-    if (!SAFE_TOKEN.test(byok)) {
-      return jsonError(400, "Invalid CoinMarketCap BYOK API key format.");
+  let headers: Headers;
+  if (isPublicHealthProbe) {
+    headers = new Headers({ accept: "application/json" });
+  } else {
+    const supabase = await createSupabaseServerClient();
+    if (!supabase) return jsonError(401, "Authentication is required.");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user?.email_confirmed_at) return jsonError(401, "Authentication is required.");
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const authHeaders = proxyAuthHeaders(session?.access_token);
+    if (!authHeaders) return jsonError(401, "Authentication is required.");
+    headers = authHeaders;
+  }
+
+  const acceptHeader = request.headers.get("accept") ?? "";
+  const wantsEventStream = acceptHeader.includes("text/event-stream");
+  if (wantsEventStream) {
+    headers.set("accept", "text/event-stream");
+  } else if (!headers.has("accept")) {
+    headers.set("accept", "application/json");
+  }
+
+  if (!isPublicHealthProbe) {
+    const byok = request.headers.get("x-cmc-api-key")?.trim();
+    if (byok) {
+      if (!SAFE_TOKEN.test(byok)) {
+        return jsonError(400, "Invalid CoinMarketCap BYOK API key format.");
+      }
+      headers.set("x-cmc-api-key", byok);
     }
-    headers.set("x-cmc-api-key", byok);
   }
 
   const init: RequestInit = {
@@ -84,6 +118,9 @@ export async function handleIntelligenceProxy(
     headers,
     cache: "no-store",
     redirect: "manual",
+    signal: wantsEventStream
+      ? request.signal
+      : AbortSignal.any([request.signal, AbortSignal.timeout(UPSTREAM_JSON_TIMEOUT_MS)]),
   };
 
   if (request.method === "POST" || request.method === "PATCH") {
@@ -106,13 +143,30 @@ export async function handleIntelligenceProxy(
   try {
     const response = await fetch(target.url, init);
     const responseType = response.headers.get("content-type") ?? "";
+    if (responseType.startsWith("text/event-stream")) {
+      return new NextResponse(response.body, {
+        status: response.status,
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-store, no-transform",
+          "x-content-type-options": "nosniff",
+          "x-accel-buffering": "no",
+        },
+      });
+    }
     if (!/^application\/json(?:\s*;|$)/i.test(responseType)) {
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        return jsonError(
+          503,
+          "Engine Standby — Intelligence Engine is warming up or undergoing maintenance.",
+          { engine_state: "STANDBY" },
+        );
+      }
       return jsonError(502, "The intelligence API returned an unexpected response.");
     }
     const responseHeaders: Record<string, string> = {
+      ...PROXY_SECURITY_HEADERS,
       "content-type": "application/json",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
     };
     const retryAfter = response.headers.get("retry-after");
     if (retryAfter) {
@@ -123,6 +177,10 @@ export async function handleIntelligenceProxy(
       headers: responseHeaders,
     });
   } catch {
-    return jsonError(503, "Intelligence API is unreachable.");
+    return jsonError(
+      503,
+      "Engine Standby — Connecting to Intelligence Engine timed out or service is unreachable.",
+      { engine_state: "STANDBY" },
+    );
   }
 }
