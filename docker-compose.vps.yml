@@ -11,9 +11,11 @@ services:
       CORS_ORIGINS: https://cointrac.xyz,https://www.cointrac.xyz
       TRUSTED_HOSTS: api.cointrac.xyz,mcp.cointrac.xyz,localhost,127.0.0.1
       MCP_ALLOWED_HOSTS: "127.0.0.1:*,localhost:*,[::1]:*,api.cointrac.xyz,mcp.cointrac.xyz"
-      MCP_ALLOWED_ORIGINS: "http://127.0.0.1:*,http://localhost:*,http://[::1]:*,https://cointrac.xyz,https://www.cointrac.xyz"
+      MCP_ALLOWED_ORIGINS: "http://127.0.0.1:*,http://localhost:*,http://[::1]:*,https://cointrac.xyz,https://www.cointrac.xyz,https://claude.ai,https://chatgpt.com"
       PUBLIC_API_BASE_URL: https://api.cointrac.xyz
       REMOTE_MCP_PUBLIC_URL: https://mcp.cointrac.xyz/mcp
+    volumes:
+      - /etc/cointrac/oauth:/run/oauth:ro
     command:
       - uvicorn
       - app.main:app

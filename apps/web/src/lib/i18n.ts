@@ -237,7 +237,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       connect: "MCP setup",
       evidence: "Evidence inspector",
       login: "Sign in",
-      note: "Public remote MCP is not deployed. Compatibility labels follow completed tests only.",
+      note: "Remote MCP at https://mcp.cointrac.xyz/mcp uses Streamable HTTP (API key Bearer or OAuth 2.1 PKCE). Compatibility labels follow completed tests only.",
     },
     common: {
       copy: "Copy",
@@ -446,7 +446,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       connect: "Penyiapan MCP",
       evidence: "Inspektur bukti",
       login: "Masuk",
-      note: "MCP jarak jauh publik belum diterapkan. Label kompatibilitas mengikuti pengujian yang sudah selesai.",
+      note: "Remote MCP di https://mcp.cointrac.xyz/mcp memakai Streamable HTTP (API key Bearer atau OAuth 2.1 PKCE). Label kompatibilitas mengikuti pengujian yang sudah selesai.",
     },
     common: {
       copy: "Salin",

@@ -45,25 +45,30 @@ export function ConnectSnippets({ mcpUrl, apiBaseUrl }: ConnectSnippetsProps) {
     },
     claude: {
       label: "Claude",
-      filename: "claude_mcp_config.json",
+      filename: "claude-code-and-desktop",
       note:
         locale === "id"
-          ? "Konfigurasi remote Streamable HTTP MCP untuk Claude dengan header x-cointrac-key."
-          : "Remote Streamable HTTP MCP configuration for Claude using x-cointrac-key.",
-      code: JSON.stringify(
-        {
-          mcpServers: {
-            cointrac: {
-              url: mcpUrl,
-              headers: {
-                "x-cointrac-key": "<YOUR_COINTRAC_API_KEY>",
-              },
-            },
-          },
+          ? "Untuk Claude Code CLI gunakan perintah di bawah dengan API key dari /app/keys. Connector web Claude.ai memakai OAuth 2.1 PKCE."
+          : "For Claude Code CLI use the command below with an API key from /app/keys. Claude.ai web connectors use OAuth 2.1 PKCE.",
+      code: `# 1. Claude Code CLI (API Key via Authorization: Bearer)
+claude mcp add --transport http cointrac ${mcpUrl} \\
+  --header "Authorization: Bearer <YOUR_COINTRAC_API_KEY>"
+
+# 2. Claude Desktop / Remote MCP JSON (x-cointrac-key or Bearer)
+${JSON.stringify(
+  {
+    mcpServers: {
+      cointrac: {
+        url: mcpUrl,
+        headers: {
+          Authorization: "Bearer <YOUR_COINTRAC_API_KEY>",
         },
-        null,
-        2,
-      ),
+      },
+    },
+  },
+  null,
+  2,
+)}`,
     },
     gemini: {
       label: "Gemini",
@@ -209,6 +214,45 @@ if __name__ == "__main__":
       >
         <code>{current.code}</code>
       </pre>
+
+      <div className="grid gap-3 border-t border-border bg-background/50 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-[10px] border border-border bg-card/70 p-3">
+          <p className="font-mono text-[11px] font-semibold text-foreground">Claude Code CLI</p>
+          <p className="mt-1 text-muted-foreground">
+            {locale === "id"
+              ? "Jalankan claude mcp add --transport http cointrac dengan Bearer API key dari /app/keys."
+              : "Run claude mcp add --transport http cointrac with a Bearer API key from /app/keys."}
+          </p>
+        </div>
+        <div className="rounded-[10px] border border-border bg-card/70 p-3">
+          <p className="font-mono text-[11px] font-semibold text-foreground">
+            Claude Web / Desktop
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {locale === "id"
+              ? "Connector otomatis memakai OAuth 2.1 PKCE (discovery di api.cointrac.xyz), atau Bearer via mcp-remote."
+              : "Custom connectors use OAuth 2.1 PKCE (discovery on api.cointrac.xyz), or Bearer via mcp-remote."}
+          </p>
+        </div>
+        <div className="rounded-[10px] border border-border bg-card/70 p-3">
+          <p className="font-mono text-[11px] font-semibold text-foreground">ChatGPT &amp; Gemini</p>
+          <p className="mt-1 text-muted-foreground">
+            {locale === "id"
+              ? "Mendukung Streamable HTTP dengan Bearer API key (/app/keys) atau OAuth 2.1 + PKCE."
+              : "Supports Streamable HTTP with Bearer API key (/app/keys) or OAuth 2.1 + PKCE."}
+          </p>
+        </div>
+        <div className="rounded-[10px] border border-border bg-card/70 p-3">
+          <p className="font-mono text-[11px] font-semibold text-foreground">
+            Hermes / Cursor / Antigravity
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {locale === "id"
+              ? "Gunakan Authorization: Bearer atau x-cointrac-key ke endpoint /mcp."
+              : "Send Authorization: Bearer or x-cointrac-key directly to /mcp."}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
