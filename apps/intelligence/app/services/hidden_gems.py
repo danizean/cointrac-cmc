@@ -411,14 +411,14 @@ class HiddenGemService:
         now = self.deps.now()
         run_row = {
             "user_id": user_id,
-            "scan_config_id": req.config_id,
+            "config_id": req.config_id,
             "idempotency_key": idempotency_key,
             "status": "QUEUED",
             "discovery_track": req.track,
             "trading_horizon": req.horizon,
             "effective_tier": effective_tier,
             "evaluation_profile": eval_profile,
-            "baseline_mode": "CROSS_SECTIONAL_UNIVERSE",
+            "baseline_mode": "LIVE_SNAPSHOTS",
             "market_regime": "UNKNOWN",
             "universe_requested": universe_limit,
             "universe_scanned": 0,
@@ -1016,7 +1016,11 @@ class HiddenGemService:
             cached_batch = await self.store.get_recent_ingest_batch(max_age, now)
             if cached_batch is not None:
                 batch_id, batch_rows = cached_batch
-                first_meta = batch_rows[0].get("raw_meta") if batch_rows else {}
+                first_meta = (
+                    (batch_rows[0].get("quality_metadata") or batch_rows[0].get("raw_meta") or {})
+                    if batch_rows
+                    else {}
+                )
                 cached_req_limit = (
                     int(first_meta.get("requested_limit") or 0)
                     if isinstance(first_meta, dict)
@@ -1114,15 +1118,10 @@ class HiddenGemService:
                         "canonical_provider_id": cid,
                         "symbol": str(row.get("symbol") or "").upper(),
                         "name": str(row.get("name") or ""),
-                        "slug": row.get("slug"),
+                        "slug": str(row.get("slug") or cid),
                         "identity_status": "VERIFIED",
                         "tags": list(tags),
                         "date_added": date_added.isoformat() if date_added else None,
-                        "num_market_pairs": (
-                            int(row["num_market_pairs"])
-                            if isinstance(row.get("num_market_pairs"), int)
-                            else None
-                        ),
                     }
                 )
                 parsed_rows.append(
@@ -1221,7 +1220,8 @@ class HiddenGemService:
                         "price": price,
                         "market_cap": row["market_cap"],
                         "volume_24h": row["volume_24h"],
-                        "vol_to_mcap": row["vol_to_mcap"],
+                        "volume_to_mcap": row["vol_to_mcap"],
+                        "num_market_pairs": row["num_market_pairs"],
                         "return_1h": row["return_1h"],
                         "return_4h": ret_4h,
                         "return_24h": row["return_24h"],
@@ -1236,7 +1236,7 @@ class HiddenGemService:
                         "observed_at": src_ts.isoformat(),
                         "fetched_at": now.isoformat(),
                         "data_mode": data_mode,
-                        "raw_meta": {
+                        "quality_metadata": {
                             "endpoint": LISTINGS_ENDPOINT,
                             "requested_limit": universe_limit,
                         },
@@ -1298,6 +1298,7 @@ class HiddenGemService:
     @staticmethod
     def _item_from_cached_row(row: dict[str, object], fallback_ts: datetime) -> _IngestItem | None:
         asset = row.get("asset") if isinstance(row.get("asset"), dict) else {}
+        asset_meta = asset.get("metadata") if isinstance(asset.get("metadata"), dict) else {}
         aid = str(row.get("asset_id") or "")
         sid = str(row.get("id") or "")
         cid = str(asset.get("canonical_provider_id") or "")
@@ -1306,6 +1307,13 @@ class HiddenGemService:
         tags_raw = asset.get("tags")
         tags = tuple(str(t).lower() for t in tags_raw) if isinstance(tags_raw, list) else ()
         src_ts = parse_timestamp(row.get("source_timestamp")) or fallback_ts
+        snap_pairs = row.get("num_market_pairs")
+        asset_pairs = asset.get("num_market_pairs")
+        num_pairs = (
+            int(snap_pairs)
+            if isinstance(snap_pairs, int)
+            else (int(asset_pairs) if isinstance(asset_pairs, int) else None)
+        )
         return _IngestItem(
             asset_id=aid,
             snapshot_id=sid,
@@ -1315,12 +1323,10 @@ class HiddenGemService:
             identity_status=str(asset.get("identity_status") or "VERIFIED"),
             tags=tags,
             date_added=parse_timestamp(asset.get("date_added")),
-            metadata_fetched_at=parse_timestamp(asset.get("metadata_fetched_at")),
-            num_market_pairs=(
-                int(asset["num_market_pairs"])
-                if isinstance(asset.get("num_market_pairs"), int)
-                else None
+            metadata_fetched_at=parse_timestamp(
+                asset_meta.get("metadata_fetched_at") or asset.get("metadata_fetched_at")
             ),
+            num_market_pairs=num_pairs,
             source_timestamp=src_ts,
             price=as_float(row.get("price")),
             market_cap=as_float(row.get("market_cap")),
@@ -1394,13 +1400,17 @@ class HiddenGemService:
                         "canonical_provider_id": item.cmc_id,
                         "symbol": item.symbol,
                         "name": item.name,
-                        "category": info.get("category"),
+                        "slug": str(info.get("slug") or item.symbol.lower() or item.cmc_id),
+                        "identity_status": item.identity_status,
                         "tags": list(item.tags),
                         "date_added": (
                             item.date_added.isoformat() if item.date_added else None
                         ),
-                        "urls": info.get("urls") if isinstance(info.get("urls"), dict) else {},
-                        "metadata_fetched_at": now.isoformat(),
+                        "metadata": {
+                            "category": info.get("category"),
+                            "urls": info.get("urls") if isinstance(info.get("urls"), dict) else {},
+                            "metadata_fetched_at": now.isoformat(),
+                        },
                     }
                 )
             if updates:
@@ -1441,12 +1451,16 @@ class HiddenGemService:
                 return
             async with sem:
                 daily_bars = await self.store.get_cached_historical(
-                    item.asset_id, "DAILY", _HISTORICAL_DAILY_CACHE_TTL, now
+                    item.asset_id, "OHLCV_DAILY", _HISTORICAL_DAILY_CACHE_TTL, now
                 )
+                if not daily_bars:
+                    daily_bars = await self.store.get_cached_historical(
+                        item.asset_id, "QUOTES_DAILY", _HISTORICAL_DAILY_CACHE_TTL, now
+                    )
                 bars_1h: list[OhlcvBar] = []
                 if need_4h:
                     bars_1h = await self.store.get_cached_historical(
-                        item.asset_id, "1H", _HISTORICAL_1H_CACHE_TTL, now
+                        item.asset_id, "OHLCV_1H", _HISTORICAL_1H_CACHE_TTL, now
                     )
 
                 if (
@@ -1468,7 +1482,7 @@ class HiddenGemService:
                         if parsed:
                             await self.store.upsert_historical_cache(
                                 item.asset_id,
-                                "DAILY",
+                                "OHLCV_DAILY",
                                 [
                                     {
                                         "bar_timestamp": b["timestamp"],
@@ -1477,7 +1491,7 @@ class HiddenGemService:
                                         "low": b["low"],
                                         "close": b["close"],
                                         "volume": b["volume"],
-                                        "source_endpoint": OHLCV_ENDPOINT,
+                                        "source_provider": "coinmarketcap",
                                     }
                                     for b in parsed
                                 ],
@@ -1523,7 +1537,7 @@ class HiddenGemService:
                         if parsed_1h:
                             await self.store.upsert_historical_cache(
                                 item.asset_id,
-                                "1H",
+                                "OHLCV_1H",
                                 [
                                     {
                                         "bar_timestamp": b["timestamp"],
@@ -1532,7 +1546,7 @@ class HiddenGemService:
                                         "low": b["low"],
                                         "close": b["close"],
                                         "volume": b["volume"],
-                                        "source_endpoint": OHLCV_ENDPOINT,
+                                        "source_provider": "coinmarketcap",
                                     }
                                     for b in parsed_1h
                                 ],
@@ -1574,7 +1588,7 @@ class HiddenGemService:
                         if q_bars:
                             await self.store.upsert_historical_cache(
                                 item.asset_id,
-                                "DAILY",
+                                "QUOTES_DAILY",
                                 [
                                     {
                                         "bar_timestamp": b["timestamp"],
@@ -1583,7 +1597,7 @@ class HiddenGemService:
                                         "low": None,
                                         "close": b["close"],
                                         "volume": b["volume"],
-                                        "source_endpoint": V3_QUOTES_HIST_ENDPOINT,
+                                        "source_provider": "coinmarketcap",
                                     }
                                     for b in q_bars
                                 ],
@@ -1857,9 +1871,9 @@ class HiddenGemService:
             signal_confidence=float(as_float(row.get("signal_confidence")) or 0.0),
             liquidity_confidence=float(as_float(row.get("liquidity_confidence")) or 0.0),
             liquidity_mode=str(row.get("liquidity_mode") or "PROXY"),  # type: ignore[arg-type]
-            classification=str(row.get("classification") or "WATCHLIST"),  # type: ignore[arg-type]
+            classification=str(row.get("classification") or "WATCH"),  # type: ignore[arg-type]
             eligibility_status=str(  # type: ignore[arg-type]
-                row.get("eligibility_status") or "WATCHLIST_ONLY"
+                row.get("eligibility_status") or "WATCH"
             ),
             components=components,
             penalties=penalties,
@@ -2232,7 +2246,7 @@ class HiddenGemService:
             "evaluation_profile": str(
                 row.get("evaluation_profile") or "BASIC_CAPABILITY_PROFILE"
             ),
-            "baseline_mode": str(row.get("baseline_mode") or "CROSS_SECTIONAL_UNIVERSE"),
+            "baseline_mode": str(row.get("baseline_mode") or "LIVE_SNAPSHOTS"),
             "market_regime": str(row.get("market_regime") or "UNKNOWN"),
             "universe_requested": int(row.get("universe_requested") or 0),  # type: ignore[call-overload]
             "universe_scanned": int(row.get("universe_scanned") or 0),  # type: ignore[call-overload]
@@ -2290,8 +2304,8 @@ class HiddenGemService:
             "signal_confidence": float(as_float(row.get("signal_confidence")) or 0.0),
             "liquidity_confidence": float(as_float(row.get("liquidity_confidence")) or 0.0),
             "liquidity_mode": str(row.get("liquidity_mode") or "PROXY"),
-            "classification": str(row.get("classification") or "WATCHLIST"),
-            "eligibility_status": str(row.get("eligibility_status") or "WATCHLIST_ONLY"),
+            "classification": str(row.get("classification") or "WATCH"),
+            "eligibility_status": str(row.get("eligibility_status") or "WATCH"),
             "score_version": str(row.get("score_version") or HIDDEN_GEM_SCORE_VERSION),
             "badges": list(row.get("badges") or []),  # type: ignore[arg-type]
             "missing_components": list(row.get("missing_components") or []),  # type: ignore[arg-type]

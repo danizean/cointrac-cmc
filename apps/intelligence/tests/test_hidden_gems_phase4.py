@@ -34,7 +34,11 @@ from app.services.hidden_gems import (
     reset_hidden_gem_store,
 )
 from app.services.intelligence import SectorBook, ServiceDeps, install_deps
-from app.services.telegram import TelegramNotifier, reset_telegram_notifier
+from app.services.telegram import (
+    TelegramNotifier,
+    install_telegram_notifier,
+    reset_telegram_notifier,
+)
 from app.services.tier_detection import TierDetector, TierObservation
 
 
@@ -89,6 +93,7 @@ def _setup_phase4(
     install_deps(deps)
     install_hidden_gem_store(store)
     install_budget_controller(budget)
+    install_telegram_notifier(notifier)
     install_keys(
         MemoryKeyDirectory([ApiKeyRecord("key-a", key_hash(KEY_A), 120, True, user_id=USER_A)])
     )
