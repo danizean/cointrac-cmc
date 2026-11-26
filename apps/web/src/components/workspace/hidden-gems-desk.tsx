@@ -162,11 +162,24 @@ export function HiddenGemsDesk() {
         fetchHiddenGemQualityStats(),
       ]);
 
+      const firstError = [
+        scansRes,
+        candidatesRes,
+        configsRes,
+        watchlistRes,
+        alertsRes,
+        qualityRes,
+      ].find((res) => !res.ok);
+
       if (!scansRes.ok) {
         setNotice({ status: scansRes.status, message: scansRes.message });
         return;
       }
-      setNotice(null);
+      if (firstError && !firstError.ok) {
+        setNotice({ status: firstError.status, message: firstError.message });
+      } else {
+        setNotice(null);
+      }
       setScans(scansRes.data);
       if (candidatesRes.ok) setCandidates(candidatesRes.data);
       if (configsRes.ok) setConfigs(configsRes.data);
@@ -175,7 +188,7 @@ export function HiddenGemsDesk() {
       if (qualityRes.ok) setQualityStats(qualityRes.data);
 
       const newest = scansRes.data[0];
-      if (newest) {
+      if (newest && newest.status !== "QUEUED") {
         const detailRes = await fetchHiddenGemScanDetail(newest.id);
         if (detailRes.ok) {
           setRejections(detailRes.data.rejections);
@@ -196,8 +209,20 @@ export function HiddenGemsDesk() {
   useEffect(() => {
     if (!activeScan) return;
     pollTimer.current = setTimeout(() => {
-      void loadWorkspaceData();
-    }, 3500);
+      void fetchHiddenGemScans(15).then((res) => {
+        if (!res.ok) {
+          setNotice({ status: res.status, message: res.message });
+          return;
+        }
+        setScans(res.data);
+        const stillRunning = res.data.some(
+          (s) => s.status === "QUEUED" || s.status === "RUNNING",
+        );
+        if (!stillRunning) {
+          void loadWorkspaceData();
+        }
+      });
+    }, 5000);
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };

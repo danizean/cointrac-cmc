@@ -1129,7 +1129,11 @@ class SupabaseHiddenGemStore:
                 q = q.eq("scan_run_id", run_id)
             if min_score is not None:
                 q = q.gte("adjusted_score", min_score)
-            resp = q.order("adjusted_score", desc=True).limit(limit).execute()
+            resp = (
+                q.order("adjusted_score", desc=True, nullsfirst=False)
+                .limit(limit)
+                .execute()
+            )
             return [self._flatten_candidate(dict(r)) for r in (resp.data or [])]
 
         return await asyncio.to_thread(read)

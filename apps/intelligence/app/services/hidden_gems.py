@@ -740,7 +740,11 @@ class HiddenGemService:
                             {
                                 "evidence_type": obs.evidence_type,
                                 "metric_name": obs.metric_name,
-                                "observed_value": obs.observed_value,
+                                "observed_value": (
+                                    obs.observed_value
+                                    if obs.observed_value is not None
+                                    else {"value": None, "status": "MISSING"}
+                                ),
                                 "interpretation": obs.interpretation,
                                 "direction": obs.direction,
                                 "source_provider": "coinmarketcap",
@@ -1786,7 +1790,11 @@ class HiddenGemService:
                     id=str(e["id"]),
                     evidence_type=str(e["evidence_type"]),
                     metric_name=str(e["metric_name"]),
-                    observed_value=e.get("observed_value"),
+                    observed_value=(
+                        None
+                        if e.get("observed_value") == {"value": None, "status": "MISSING"}
+                        else e.get("observed_value")
+                    ),
                     interpretation=str(e.get("interpretation") or ""),
                     direction=str(e.get("direction") or "NEUTRAL"),
                     source_provider=str(e.get("source_provider") or "coinmarketcap"),
