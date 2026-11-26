@@ -96,6 +96,22 @@ export function DocsView() {
                       <td className="px-4 py-3.5 text-xs text-muted-foreground">{tool.label}</td>
                     </tr>
                   ))}
+                  <tr className="transition-colors hover:bg-card-elevated/50">
+                    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs">
+                      <span className="inline-flex rounded-[6px] bg-positive-soft px-2 py-0.5 font-semibold text-positive">
+                        GET
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-foreground">
+                      /v1/capabilities
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs font-semibold text-link">
+                      get_capabilities
+                    </td>
+                    <td className="px-4 py-3.5 text-xs text-muted-foreground">
+                      Quota Profile, Budget State &amp; Plan Capabilities
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>

@@ -211,7 +211,8 @@ export const PLAYGROUND_PRESETS: PlaygroundPreset[] = [
   {
     id: "compare-l1",
     title: "Deep Research: SOL vs AVAX vs NEAR",
-    subtitle: "Side-by-side liquidity ratio, FDV overhang, RS vs BTC, and 365d risk metrics.",
+    subtitle:
+      "Side-by-side liquidity ratio, FDV overhang, RS vs BTC, and 365d risk metrics (when OHLCV is enabled).",
     badge: "Comparison",
     primaryTool: "compare_assets",
     defaultParams: {

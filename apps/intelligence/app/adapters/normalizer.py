@@ -171,12 +171,15 @@ def global_quote(payload: Mapping[str, object], currency: str) -> dict[str, floa
         ):
             # CMC btc_dominance_24h_percentage_change is percentage-point delta (current - prior)
             dominance_change = btc_dom - prior
+    mcap_now = as_float(block.get("total_market_cap"))
+    mcap_prev = as_float(block.get("total_market_cap_yesterday"))
+    mcap_change_24h = as_float(block.get("total_market_cap_yesterday_percentage_change"))
+    if mcap_now is not None and mcap_prev is not None and mcap_prev > 0.0:
+        mcap_change_24h = ((mcap_now / mcap_prev) - 1.0) * 100.0
     return {
-        "total_market_cap": as_float(block.get("total_market_cap")),
+        "total_market_cap": mcap_now,
         "total_volume_24h": as_float(block.get("total_volume_24h")),
-        "total_market_cap_change_24h_pct": as_float(
-            block.get("total_market_cap_yesterday_percentage_change")
-        ),
+        "total_market_cap_change_24h_pct": mcap_change_24h,
         "btc_dominance": btc_dom,
         "eth_dominance": as_float(data.get("eth_dominance")),
         "btc_dominance_change_24h": dominance_change,
@@ -311,6 +314,9 @@ class ParsedDerivatives:
 def parse_derivatives_pairs(
     payload: Mapping[str, object],
     currency: str = "USD",
+    *,
+    expected_symbol: str | None = None,
+    expected_cmc_id: int | None = None,
 ) -> ParsedDerivatives:
     """Parse CMC v5 nested derivatives market-pairs safely without unsafe cross-exchange merges."""
     data = payload.get("data")
@@ -375,11 +381,16 @@ def parse_derivatives_pairs(
         )
 
     target_currency = currency.strip().upper() or "USD"
+    norm_symbol = expected_symbol.strip().upper() if expected_symbol else None
     seen_keys: set[object] = set()
     observations: list[dict[str, object]] = []
     oi_sum = 0.0
     oi_included = 0
     outlier_excluded = 0
+    quote_attributed_excluded = 0
+    zero_oi_active_count = 0
+    max_oi = 0.0
+    max_oi_exchange: str | None = None
     outlier_names: list[str] = []
     funding_pair_count = 0
 
@@ -411,6 +422,21 @@ def parse_derivatives_pairs(
             else None
         )
         category = pair.get("category") if isinstance(pair.get("category"), str) else None
+
+        base_id_raw = pair.get("base_currency_id") or pair.get("base_id")
+        if (
+            expected_cmc_id is not None
+            and isinstance(base_id_raw, int)
+            and not isinstance(base_id_raw, bool)
+            and base_id_raw != expected_cmc_id
+        ):
+            quote_attributed_excluded += 1
+            continue
+        if norm_symbol is not None and pair_symbol and "/" in pair_symbol:
+            base_part = pair_symbol.split("/", 1)[0].strip().upper()
+            if base_part and base_part != norm_symbol:
+                quote_attributed_excluded += 1
+                continue
 
         dedup_key: object
         if valid_market_id is not None:
@@ -484,13 +510,34 @@ def parse_derivatives_pairs(
             else:
                 oi_sum += open_interest
                 oi_included += 1
+                if open_interest == 0.0 and volume_24h is not None and volume_24h > 0.0:
+                    zero_oi_active_count += 1
+                if open_interest > max_oi:
+                    max_oi = open_interest
+                    max_oi_exchange = exchange_name or exchange_slug or pair_symbol
 
-    total_pairs = reported_total if reported_total is not None else len(observations)
+    total_pairs = (
+        len(observations)
+        if quote_attributed_excluded > 0
+        else (reported_total if reported_total is not None else len(observations))
+    )
     notes = []
+    if quote_attributed_excluded > 0:
+        target_label = norm_symbol or "the requested asset"
+        notes.append(
+            f"Excluded {quote_attributed_excluded} quote-attributed pair(s) where "
+            f"{target_label} was the quote currency rather than the base asset."
+        )
     if not observations:
-        notes.append("CoinMarketCap v5 derivatives response returned zero market pairs.")
+        notes.append(
+            "CoinMarketCap v5 derivatives response returned zero matching base-asset pairs."
+        )
     else:
-        if reported_total is not None and len(observations) < reported_total:
+        if (
+            reported_total is not None
+            and quote_attributed_excluded == 0
+            and len(observations) < reported_total
+        ):
             notes.append(
                 f"Sampled {len(observations)} of {reported_total} reported derivative market "
                 f"pairs; summed open_interest reflects this sampled subset ({oi_included} "
@@ -500,6 +547,16 @@ def parse_derivatives_pairs(
             notes.append(
                 f"open_interest sums {oi_included} deduplicated non-outlier {target_currency} "
                 f"pairs out of {len(observations)} parsed pairs."
+            )
+        if oi_sum > 0.0 and oi_included >= 2 and (max_oi / oi_sum) >= 0.5 and max_oi_exchange:
+            notes.append(
+                f"High single-venue OI concentration: {max_oi_exchange} accounts for "
+                f"{100.0 * max_oi / oi_sum:.1f}% of sampled open_interest."
+            )
+        if zero_oi_active_count > 0:
+            notes.append(
+                f"{zero_oi_active_count} sampled pair(s) reported positive 24h volume with "
+                "zero open_interest; verify venue reporting quality independently."
             )
         if outlier_excluded > 0:
             label = f" ({', '.join(outlier_names[:5])})" if outlier_names else ""

@@ -376,4 +376,5 @@ async def authenticate_access_token(token: str, *, issuer: str, resource: str) -
         rate_limit_per_min=_JWT_DEFAULT_LIMIT,
         is_active=True,
         user_id=user_id,
+        auth_kind="oauth",
     )

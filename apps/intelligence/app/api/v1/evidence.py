@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 
 from app.api.deps import AuthContext, require_api_key
 
@@ -56,7 +56,10 @@ async def list_evidence(auth: AuthContext = Depends(require_api_key)) -> dict[st
     ),
 )
 async def read_evidence(
-    evidence_id: str,
+    evidence_id: str = Path(
+        pattern=r"^ev_[A-Za-z0-9_-]{4,40}$",
+        description="Evidence record identifier (e.g. ev_41376eb4ea)",
+    ),
     auth: AuthContext = Depends(require_api_key),
 ) -> dict[str, object]:
     if not auth.scoped or not auth.user_id:

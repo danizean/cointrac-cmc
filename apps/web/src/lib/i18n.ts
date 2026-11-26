@@ -30,6 +30,7 @@ export interface Dictionary {
     tagline: string;
     product: string;
     developers: string;
+    trust: string;
     capabilities: string;
     integrations: string;
     docs: string;
@@ -37,6 +38,10 @@ export interface Dictionary {
     connect: string;
     evidence: string;
     login: string;
+    privacy: string;
+    terms: string;
+    status: string;
+    contact: string;
     note: string;
   };
   common: {
@@ -230,6 +235,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       tagline: "Structured crypto market data for applications and MCP clients. Missing values stay empty.",
       product: "Product",
       developers: "Developers",
+      trust: "Trust & Support",
       capabilities: "Product",
       integrations: "MCP",
       docs: "API",
@@ -237,6 +243,10 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       connect: "MCP setup",
       evidence: "Evidence inspector",
       login: "Sign in",
+      privacy: "Privacy Policy",
+      terms: "Terms of Service",
+      status: "API Health Status",
+      contact: "support@cointrac.xyz",
       note: "Remote MCP at https://mcp.cointrac.xyz/mcp uses Streamable HTTP (API key Bearer or OAuth 2.1 PKCE). Compatibility labels follow completed tests only.",
     },
     common: {
@@ -439,6 +449,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       tagline: "Data pasar kripto terstruktur untuk aplikasi dan klien MCP. Nilai yang tidak ada tetap kosong.",
       product: "Produk",
       developers: "Developer",
+      trust: "Kepercayaan & Bantuan",
       capabilities: "Produk",
       integrations: "MCP",
       docs: "API",
@@ -446,6 +457,10 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       connect: "Penyiapan MCP",
       evidence: "Inspektur bukti",
       login: "Masuk",
+      privacy: "Kebijakan Privasi",
+      terms: "Ketentuan Layanan",
+      status: "Status Kesehatan API",
+      contact: "support@cointrac.xyz",
       note: "Remote MCP di https://mcp.cointrac.xyz/mcp memakai Streamable HTTP (API key Bearer atau OAuth 2.1 PKCE). Label kompatibilitas mengikuti pengujian yang sudah selesai.",
     },
     common: {

@@ -27,11 +27,18 @@ interface ScopeOption {
 
 const SCOPE_OPTIONS: ScopeOption[] = [
   {
+    size: 50,
+    labelEn: "Top 50",
+    labelId: "Top 50",
+    hintEn: "Core large-cap leaders",
+    hintId: "Koin utama paling likuid",
+  },
+  {
     size: 100,
     labelEn: "Top 100",
     labelId: "Top 100",
-    hintEn: "Large-cap & liquid leaders",
-    hintId: "Koin besar & paling likuid",
+    hintEn: "Large & mid-cap leaders",
+    hintId: "Koin besar & menengah",
   },
   {
     size: 150,
@@ -41,18 +48,11 @@ const SCOPE_OPTIONS: ScopeOption[] = [
     hintId: "Cakupan pasar seimbang",
   },
   {
-    size: 250,
-    labelEn: "Top 250",
-    labelId: "Top 250",
-    hintEn: "Mid-cap & altcoin spikes",
-    hintId: "Termasuk mid-cap & altcoin",
-  },
-  {
-    size: 500,
-    labelEn: "Top 500",
-    labelId: "Top 500",
-    hintEn: "Deep market sweep",
-    hintId: "Sapuan pasar menyeluruh",
+    size: 200,
+    labelEn: "Top 200",
+    labelId: "Top 200",
+    hintEn: "Maximum scanner scope (200)",
+    hintId: "Batas maks pemindaian (200)",
   },
 ];
 

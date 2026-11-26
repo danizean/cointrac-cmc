@@ -24,7 +24,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.api.deps import key_hash
+from app.api.deps import invalidate_key_directory_cache, key_hash
 from app.api.jwt_auth import AuthenticatedUser, require_verified_supabase_user
 
 logger = logging.getLogger("cointrac")
@@ -273,6 +273,7 @@ async def create_key(
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Unable to create API key") from exc
 
+    invalidate_key_directory_cache(user_id=user.user_id)
     logger.info("api_key_created key_id=%s", created.get("id"))
     return CreateKeyResponse(api_key=raw_key, key=_to_summary(created))
 
@@ -306,5 +307,6 @@ async def revoke_key(
     if revoked is None:
         raise HTTPException(status_code=404, detail="API key was not found")
 
+    invalidate_key_directory_cache(user_id=user.user_id)
     logger.info("api_key_revoked key_id=%s", key_id)
     return RevokeKeyResponse(key=_to_summary(revoked))

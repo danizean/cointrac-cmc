@@ -24,7 +24,7 @@ export function SiteFooter() {
 
   return (
     <footer className="mt-20 border-t border-border bg-card/30">
-      <div className="mx-auto grid max-w-[1240px] gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.7fr))] lg:px-8">
+      <div className="mx-auto grid max-w-[1240px] gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,0.65fr))] lg:px-8">
         <div className="max-w-sm space-y-4">
           <Link href="/" className="inline-flex items-center gap-2.5 text-foreground">
             <CoinTracMark className="h-6 w-6 shrink-0" />
@@ -69,12 +69,53 @@ export function SiteFooter() {
             ))}
           </ul>
         </nav>
+        <nav aria-label={t.footer.trust}>
+          <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-foreground">
+            {t.footer.trust}
+          </h2>
+          <ul className="mt-3 space-y-1">
+            <li>
+              <Link
+                href="/privacy"
+                className="inline-flex min-h-10 items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {t.footer.privacy}
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/terms"
+                className="inline-flex min-h-10 items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {t.footer.terms}
+              </Link>
+            </li>
+            <li>
+              <a
+                href="https://api.cointrac.xyz/health"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {t.footer.status}
+              </a>
+            </li>
+            <li>
+              <a
+                href="mailto:support@cointrac.xyz"
+                className="inline-flex min-h-10 items-center font-mono text-xs text-link transition-colors hover:underline"
+              >
+                {t.footer.contact}
+              </a>
+            </li>
+          </ul>
+        </nav>
       </div>
       <div className="border-t border-border">
         <div className="mx-auto flex max-w-[1240px] flex-col gap-2 px-4 py-4 text-xs leading-relaxed text-subtle-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <p>{t.footer.note}</p>
           <p className="font-mono text-[11px]">
-            Signal over noise · 365d Quant Basis · cointrac.xyz
+            Signal over noise · Evidence-backed quant · cointrac.xyz
           </p>
         </div>
       </div>

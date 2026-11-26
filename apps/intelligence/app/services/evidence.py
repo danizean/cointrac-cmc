@@ -100,10 +100,17 @@ class SupabaseEvidenceWriter:
         from app.api.deps import current_principal
 
         principal = current_principal.get()
+        api_key_id = (
+            principal.key_id
+            if principal is not None
+            and principal.key_id is not None
+            and not principal.key_id.startswith("oauth:")
+            else None
+        )
         row = {
             "evidence_id": draft.evidence_id,
             "user_id": principal.user_id if principal is not None and principal.scoped else None,
-            "api_key_id": principal.key_id if principal is not None else None,
+            "api_key_id": api_key_id,
             "tool_name": draft.tool_name,
             "asset_cmc_ids": draft.asset_cmc_ids,
             "endpoints_called": draft.endpoints_called,
@@ -151,6 +158,15 @@ def summarize_calls(records: list[CallRecord], now: datetime) -> CallSummary:
         if record.meta is not None and record.meta.limitation:
             limitations.append(record.meta.limitation)
     if not metas:
+        error_records = [record for record in records if record.error]
+        all_plan_skipped = bool(error_records) and all(
+            record.error_category == "tier_restricted" for record in error_records
+        )
+        fallback_note = (
+            "No request was sent to CoinMarketCap (blocked by recorded capability metadata)."
+            if all_plan_skipped
+            else "No CoinMarketCap payload was available."
+        )
         return CallSummary(
             data_mode="UNAVAILABLE",
             freshness="STALE",
@@ -159,9 +175,7 @@ def summarize_calls(records: list[CallRecord], now: datetime) -> CallSummary:
             source_timestamps={},
             retrieved_at=now,
             endpoints=_endpoints(records),
-            limitations=dedupe_limitations(
-                [*limitations, "No CoinMarketCap payload was available."]
-            ),
+            limitations=dedupe_limitations([*limitations, fallback_note]),
         )
     modes = {meta.data_mode for meta in metas}
     if "VERIFIED_SNAPSHOT_FALLBACK" in modes:

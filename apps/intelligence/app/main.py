@@ -6,7 +6,7 @@ import sys
 from contextlib import asynccontextmanager
 from urllib.parse import parse_qsl, urlparse
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser as McpAuthenticatedUser
@@ -20,11 +20,13 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.adapters.cmc_client import CMCClient
 from app.api.deps import (
     ApiKeyRecord,
+    AuthContext,
     authenticate_mcp_key,
     check_mcp_transport_limit,
     context_from_key,
     current_mcp_auth,
     current_principal,
+    require_api_key,
     resolve_api_key_headers,
 )
 from app.api.docs import render_swagger_docs
@@ -456,8 +458,58 @@ def create_app() -> FastAPI:
             "Mcp-Session-Id",
             "MCP-Protocol-Version",
             "Retry-After",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+            "X-RateLimit-Policy",
         ],
     )
+
+    class _ResponseHeaderMiddleware:
+        def __init__(self, inner: ASGIApp) -> None:
+            self.inner = inner
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope.get("type") != "http":
+                await self.inner(scope, receive, send)
+                return
+            from app.api.deps import current_rate_headers
+
+            bucket: dict[str, str] = {}
+            token = current_rate_headers.set(bucket)
+
+            async def wrapped_send(message: dict[str, object]) -> None:
+                if message.get("type") == "http.response.start":
+                    raw_headers = list(message.get("headers") or [])  # type: ignore[arg-type]
+                    existing = {name.decode("latin1").lower() for name, _ in raw_headers}
+                    for hdr_name, hdr_val in bucket.items():
+                        if hdr_name.lower() not in existing:
+                            raw_headers.append(
+                                (hdr_name.lower().encode("latin1"), hdr_val.encode("latin1"))
+                            )
+                            existing.add(hdr_name.lower())
+                    defaults = [
+                        ("x-content-type-options", "nosniff"),
+                        ("referrer-policy", "strict-origin-when-cross-origin"),
+                    ]
+                    if settings.public_api_base_url.startswith("https://"):
+                        defaults.append(
+                            ("strict-transport-security", "max-age=31536000; includeSubDomains")
+                        )
+                    for hdr_name, hdr_val in defaults:
+                        if hdr_name not in existing:
+                            raw_headers.append(
+                                (hdr_name.encode("latin1"), hdr_val.encode("latin1"))
+                            )
+                    message["headers"] = raw_headers
+                await send(message)  # type: ignore[arg-type]
+
+            try:
+                await self.inner(scope, receive, wrapped_send)
+            finally:
+                current_rate_headers.reset(token)
+
+    app.add_middleware(_ResponseHeaderMiddleware)
 
     @app.get("/docs", include_in_schema=False)
     def swagger_docs() -> HTMLResponse:
@@ -478,7 +530,10 @@ def create_app() -> FastAPI:
         summary="CoinMarketCap Capability Matrix",
         description="Empirically probed CoinMarketCap endpoint availability matrix.",
     )
-    def capabilities() -> dict[str, object] | CapabilityUnavailable:
+    def capabilities(
+        _auth: AuthContext = Depends(require_api_key),
+    ) -> dict[str, object] | CapabilityUnavailable:
+        del _auth
         path = get_settings().capability_matrix_path
         if not path.is_file():
             return CapabilityUnavailable(available=False, results=[], total_credits_used=None)

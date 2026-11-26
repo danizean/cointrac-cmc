@@ -1,5 +1,6 @@
 import hashlib
 import re
+import threading
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -28,6 +29,14 @@ class ApiKeyRecord:
     user_id: str | None = None
     revoked: bool = False
     account_status: str | None = None
+    auth_kind: str = "api_key"
+
+    @property
+    def persisted_key_id(self) -> str | None:
+        """Return DB api_keys.id only for API-key auth, never synthetic OAuth/JWT tokens."""
+        if self.auth_kind != "api_key" or self.key_id.startswith("oauth:"):
+            return None
+        return self.key_id
 
 
 @dataclass(frozen=True)
@@ -65,13 +74,44 @@ class MemoryKeyDirectory:
         return min(limits) if limits else _JWT_DEFAULT_LIMIT
 
 
+_KEY_CACHE_TTL_SECONDS = 15.0
+_KEY_CACHE_MAX_ENTRIES = 512
+
+
 class SupabaseKeyDirectory:
+    def __init__(self, ttl_seconds: float = _KEY_CACHE_TTL_SECONDS) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._lock = threading.Lock()
+        self._key_cache: dict[str, tuple[float, ApiKeyRecord | None]] = {}
+        self._limit_cache: dict[str, tuple[float, int]] = {}
+
+    def invalidate(self, user_id: str | None = None) -> None:
+        with self._lock:
+            if user_id is None:
+                self._key_cache.clear()
+                self._limit_cache.clear()
+                return
+            self._limit_cache.pop(user_id, None)
+            stale_hashes = [
+                h
+                for h, (_, rec) in self._key_cache.items()
+                if rec is None or rec.user_id == user_id
+            ]
+            for h in stale_hashes:
+                self._key_cache.pop(h, None)
+
     async def find_active(self, key_hash: str) -> ApiKeyRecord | None:
         import asyncio
 
         from app.core.db import supabase_client
 
-        def read() -> ApiKeyRecord | None:
+        now = time.monotonic()
+        with self._lock:
+            cached = self._key_cache.get(key_hash)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
+        def read() -> tuple[ApiKeyRecord | None, int | None]:
             response = (
                 supabase_client()
                 .table("api_keys")
@@ -82,14 +122,15 @@ class SupabaseKeyDirectory:
             )
             rows = response.data or []
             if not rows:
-                return None
+                return None, None
             row = rows[0]
             revoked = row.get("revoked_at") is not None
             active = bool(row["is_active"])
             if revoked or not active:
-                return None
+                return None, None
             user_id = row.get("user_id")
             account_status: str | None = None
+            resolved_limit: int | None = None
             if user_id:
                 prof_resp = (
                     supabase_client()
@@ -103,7 +144,18 @@ class SupabaseKeyDirectory:
                 if prof_rows:
                     raw_status = prof_rows[0].get("account_status")
                     account_status = str(raw_status) if raw_status is not None else None
-            return ApiKeyRecord(
+                keys_resp = (
+                    supabase_client()
+                    .table("api_keys")
+                    .select("rate_limit_per_min")
+                    .eq("user_id", str(user_id))
+                    .eq("is_active", True)
+                    .is_("revoked_at", "null")
+                    .execute()
+                )
+                limits = [int(k["rate_limit_per_min"]) for k in keys_resp.data or []]
+                resolved_limit = min(limits) if limits else _JWT_DEFAULT_LIMIT
+            rec = ApiKeyRecord(
                 key_id=str(row["id"]),
                 key_hash=str(row["key_hash"]),
                 rate_limit_per_min=int(row["rate_limit_per_min"]),
@@ -112,13 +164,30 @@ class SupabaseKeyDirectory:
                 revoked=False,
                 account_status=account_status,
             )
+            return rec, resolved_limit
 
-        return await asyncio.to_thread(read)
+        record, resolved_limit = await asyncio.to_thread(read)
+        expires = time.monotonic() + self._ttl_seconds
+        with self._lock:
+            if len(self._key_cache) >= _KEY_CACHE_MAX_ENTRIES:
+                self._key_cache.clear()
+            self._key_cache[key_hash] = (expires, record)
+            if record is not None and record.user_id and resolved_limit is not None:
+                if len(self._limit_cache) >= _KEY_CACHE_MAX_ENTRIES:
+                    self._limit_cache.clear()
+                self._limit_cache[record.user_id] = (expires, resolved_limit)
+        return record
 
     async def tenant_limit(self, user_id: str) -> int:
         import asyncio
 
         from app.core.db import supabase_client
+
+        now = time.monotonic()
+        with self._lock:
+            cached = self._limit_cache.get(user_id)
+            if cached is not None and cached[0] > now:
+                return cached[1]
 
         def read() -> int:
             response = (
@@ -133,7 +202,19 @@ class SupabaseKeyDirectory:
             limits = [int(row["rate_limit_per_min"]) for row in response.data or []]
             return min(limits) if limits else _JWT_DEFAULT_LIMIT
 
-        return await asyncio.to_thread(read)
+        limit = await asyncio.to_thread(read)
+        expires = time.monotonic() + self._ttl_seconds
+        with self._lock:
+            if len(self._limit_cache) >= _KEY_CACHE_MAX_ENTRIES:
+                self._limit_cache.clear()
+            self._limit_cache[user_id] = (expires, limit)
+        return limit
+
+
+def invalidate_key_directory_cache(user_id: str | None = None) -> None:
+    inv = getattr(_directory, "invalidate", None)
+    if callable(inv):
+        inv(user_id=user_id)
 
 
 class SlidingWindow:
@@ -172,6 +253,18 @@ class MemoryRateStore:
         recent.append(current)
         self._hits[principal_id] = recent
         return None
+
+    def rate_headers(self, principal_id: str, limit: int) -> dict[str, str]:
+        current = time.monotonic()
+        recent = [stamp for stamp in self._hits.get(principal_id, []) if current - stamp < 60]
+        remaining = max(0, limit - len(recent))
+        reset = max(1, int(60 - (current - recent[0])) + 1) if recent else 60
+        return {
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": str(remaining),
+            "X-RateLimit-Reset": str(reset),
+            "X-RateLimit-Policy": f"{limit};w=60",
+        }
 
 
 # Canonical quota RPC on private.rate_windows. The legacy function stays in the
@@ -218,6 +311,9 @@ _directory: KeyDirectory = SupabaseKeyDirectory()
 _rate_store: RateStore = SupabaseRateStore()
 current_mcp_auth: ContextVar[ApiKeyRecord | None] = ContextVar("current_mcp_auth", default=None)
 current_principal: ContextVar[AuthContext | None] = ContextVar("current_principal", default=None)
+current_rate_headers: ContextVar[dict[str, str] | None] = ContextVar(
+    "current_rate_headers", default=None
+)
 _jwt_resolver = None
 
 
@@ -346,16 +442,43 @@ async def _consume(principal_id: str, limit: int) -> None:
     except RateStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail="Rate limit store is unavailable") from exc
     if retry_after is not None:
+        headers = {
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(retry_after),
+            "X-RateLimit-Policy": f"{limit};w=60",
+        }
+        _store_rate_headers(headers)
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded",
-            headers={"Retry-After": str(retry_after)},
+            headers=headers,
         )
+    header_fn = getattr(_rate_store, "rate_headers", None)
+    if callable(header_fn):
+        _store_rate_headers(header_fn(principal_id, limit))
+    else:
+        _store_rate_headers(
+            {
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Policy": f"{limit};w=60",
+            }
+        )
+
+
+def _store_rate_headers(headers: dict[str, str]) -> None:
+    bucket = current_rate_headers.get()
+    if bucket is not None:
+        bucket.clear()
+        bucket.update(headers)
+    else:
+        current_rate_headers.set(dict(headers))
 
 
 def context_from_key(record: ApiKeyRecord, byok: str | None, surface: str) -> AuthContext:
     return AuthContext(
-        key_id=record.key_id,
+        key_id=record.persisted_key_id,
         byok=byok,
         surface=surface,
         user_id=record.user_id,
@@ -469,10 +592,21 @@ async def check_mcp_transport_limit(
     bucket so closing a session is not rejected after the frame cap is spent.
     """
     window = _teardown_window if method == "DELETE" else _transport_window
-    retry_after = window.allow(rate_principal(record), record.rate_limit_per_min * 4)
+    frame_limit = record.rate_limit_per_min * 4
+    retry_after = window.allow(rate_principal(record), frame_limit)
     if retry_after is None:
         return None
-    return 429, {"Retry-After": str(retry_after)}, "Rate limit exceeded"
+    return (
+        429,
+        {
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(frame_limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(retry_after),
+            "X-RateLimit-Policy": f"{frame_limit};w=60",
+        },
+        "Rate limit exceeded",
+    )
 
 
 async def check_mcp_tool_limit(record: ApiKeyRecord) -> int | None:
@@ -482,10 +616,33 @@ async def check_mcp_tool_limit(record: ApiKeyRecord) -> int | None:
         if record.user_id
         else record.rate_limit_per_min
     )
+    principal_id = rate_principal(record)
     try:
-        return await _rate_store.consume(rate_principal(record), limit)
+        retry_after = await _rate_store.consume(principal_id, limit)
     except RateStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail="Rate limit store is unavailable") from exc
+    if retry_after is not None:
+        _store_rate_headers(
+            {
+                "Retry-After": str(retry_after),
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(retry_after),
+                "X-RateLimit-Policy": f"{limit};w=60",
+            }
+        )
+        return retry_after
+    header_fn = getattr(_rate_store, "rate_headers", None)
+    if callable(header_fn):
+        _store_rate_headers(header_fn(principal_id, limit))
+    else:
+        _store_rate_headers(
+            {
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Policy": f"{limit};w=60",
+            }
+        )
+    return None
 
 
 async def verify_mcp_key(raw_key: str | None) -> tuple[int, dict[str, str], str] | None:

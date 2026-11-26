@@ -126,6 +126,7 @@ export function MoversDesk() {
   const [showFilters, setShowFilters] = useState(false);
 
   const [running, setRunning] = useState(false);
+  const [validation, setValidation] = useState<string | null>(null);
   const [error, setError] = useState<{
     status: number;
     message: string;
@@ -143,6 +144,25 @@ export function MoversDesk() {
     universe?: string;
     limit?: string;
   }) {
+    const parsedUniverse = optionalNumber(overrides?.universe ?? universe) ?? 150;
+    const parsedLimit = optionalNumber(overrides?.limit ?? limit) ?? 15;
+    if (parsedUniverse < 10 || parsedUniverse > 200) {
+      setValidation(
+        locale === "id"
+          ? "Koin Dipindai harus antara 10 hingga 200."
+          : "Coins Scanned must be between 10 and 200.",
+      );
+      return;
+    }
+    if (parsedLimit < 1 || parsedLimit > 50) {
+      setValidation(
+        locale === "id"
+          ? "Jumlah Hasil harus antara 1 hingga 50."
+          : "Max Results must be between 1 and 50.",
+      );
+      return;
+    }
+    setValidation(null);
     setRunning(true);
     setError(null);
 
@@ -152,8 +172,8 @@ export function MoversDesk() {
       min_volume_24h_usd: optionalNumber(overrides?.minVol ?? minVol),
       max_24h_gain_pct: optionalNumber(overrides?.maxGain ?? maxGain),
       rank_by: overrides?.rankBy ?? rankBy,
-      limit: optionalNumber(overrides?.limit ?? limit) ?? 15,
-      universe_size: optionalNumber(overrides?.universe ?? universe) ?? 150,
+      limit: parsedLimit,
+      universe_size: parsedUniverse,
     };
 
     const result = await runIntelligenceTool("scan_market_movers", params);
@@ -401,27 +421,35 @@ export function MoversDesk() {
             </label>
 
             <label className="text-xs font-medium text-muted-foreground">
-              <span>{locale === "id" ? "Koin Dipindai" : "Coins Scanned"}</span>
+              <span>{locale === "id" ? "Koin Dipindai (10–200)" : "Coins Scanned (10–200)"}</span>
               <input
                 className={INPUT}
+                type="number"
+                min={10}
+                max={200}
                 inputMode="numeric"
                 value={universe}
                 onChange={(event) => {
                   setUniverse(event.target.value);
                   setActivePreset("custom");
+                  if (validation) setValidation(null);
                 }}
               />
             </label>
 
             <label className="text-xs font-medium text-muted-foreground">
-              <span>{locale === "id" ? "Jumlah Hasil" : "Max Results"}</span>
+              <span>{locale === "id" ? "Jumlah Hasil (1–50)" : "Max Results (1–50)"}</span>
               <input
                 className={INPUT}
+                type="number"
+                min={1}
+                max={50}
                 inputMode="numeric"
                 value={limit}
                 onChange={(event) => {
                   setLimit(event.target.value);
                   setActivePreset("custom");
+                  if (validation) setValidation(null);
                 }}
               />
             </label>
@@ -441,6 +469,15 @@ export function MoversDesk() {
           </form>
         ) : null}
       </div>
+
+      {validation ? (
+        <p
+          role="alert"
+          className="rounded-[10px] border border-destructive/40 bg-destructive-soft px-4 py-3 text-xs font-medium text-destructive"
+        >
+          {validation}
+        </p>
+      ) : null}
 
       {error ? (
         <ApiNotice

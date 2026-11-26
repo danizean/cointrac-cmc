@@ -264,6 +264,22 @@ def test_sector_aggregate_uses_median_and_cap_weights() -> None:
     assert stats.total_volume_24h == 40
     assert stats.sector_volume_share_pct == 20
     assert stats.rotation_signal is None
+    assert stats.zero_volume_excluded == 0
+
+
+def test_sector_cap_weighted_excludes_zero_volume_untraded_outliers() -> None:
+    stats = aggregate_sector(
+        [
+            Constituent(100_000_000, 5_000_000, 2.0, 4.0),
+            Constituent(100_000_000, 3_000_000, 4.0, 6.0),
+            Constituent(60_000_000, 0.0, 104_410.1, 104_410.1),
+            Constituent(50_000_000, None, 39_244.8, 39_244.8),
+        ],
+        market_volume_24h=100_000_000,
+    )
+    assert stats.zero_volume_excluded == 2
+    assert stats.cap_weighted_change_24h_pct == 3.0
+    assert stats.cap_weighted_change_7d_pct == 5.0
 
 
 def test_sector_rotation_signals_and_zero_market_volume() -> None:
@@ -653,3 +669,36 @@ def test_sector_benchmark_excess_return_and_timestamp_alignment() -> None:
     assert timestamps_aligned(t0, t_skew, same_source=False) is False
     assert timestamps_aligned(None, t0, same_source=False) is False
     assert timestamps_aligned(t0, None, same_source=False) is False
+
+
+def test_sector_outlier_guard_and_excess_rotation_classification() -> None:
+    from app.quant.sectors import classify_rotation_signal
+
+    # Extreme 24h spike and illiquid large-cap constituent are excluded from cap_weighted
+    stats = aggregate_sector(
+        [
+            Constituent(1_000_000_000, 50_000_000, 3.0, -4.0),
+            Constituent(1_000_000_000, 50_000_000, 3.0, -4.0),
+            Constituent(5_000_000_000, 100.0, 1299.95, 800.0),
+            Constituent(500_000_000, 200_000.0, 104410.0, 500.0),
+        ],
+        market_volume_24h=1_000_000_000,
+    )
+    assert stats.outlier_excluded == 2
+    assert stats.cap_weighted_change_24h_pct == pytest.approx(3.0)
+    assert stats.cap_weighted_change_7d_pct == pytest.approx(-4.0)
+
+    # 24h rebound with negative 7d must NOT report GAINING_MOMENTUM when lagging market
+    assert (
+        classify_rotation_signal(
+            3.05, -5.66, 85.0, excess_24h=-0.58, excess_7d=-0.39, sample_sufficient=True
+        )
+        == "LAGGING"
+    )
+    assert (
+        classify_rotation_signal(
+            4.96, -4.89, 88.0, excess_24h=1.34, excess_7d=0.38, sample_sufficient=True
+        )
+        == "GAINING_MOMENTUM"
+    )
+    assert classify_rotation_signal(3.05, -5.66, 85.0, sample_sufficient=True) == "NEUTRAL"

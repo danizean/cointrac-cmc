@@ -258,9 +258,26 @@ def _extract_bearer_token(authorization: str | None) -> str:
 
 async def require_supabase_user(
     authorization: str | None = Header(default=None),
+    x_cointrac_key: str | None = Header(default=None, include_in_schema=False),
 ) -> AuthenticatedUser:
     """Resolve authenticated user strictly from a verified Supabase JWT + server profile."""
+    if x_cointrac_key and x_cointrac_key.strip() and not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "This endpoint requires a verified user JWT bearer token, "
+                "not a CoinTrac API key."
+            ),
+        )
     token = _extract_bearer_token(authorization)
+    if token.startswith("ct_live_") or token.count(".") != 2:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "This endpoint requires a verified user JWT bearer token, "
+                "not a CoinTrac API key."
+            ),
+        )
     claims = await verify_supabase_jwt(token)
 
     user_id = str(claims["sub"])

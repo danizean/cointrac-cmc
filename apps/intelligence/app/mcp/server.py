@@ -83,6 +83,15 @@ def _build_input[M: BaseModel](model_cls: type[M], tool_name: str, **kwargs: obj
         raise ToolError(_format_validation_error(tool_name, exc)) from None
 
 
+def _validated_quote(tool_name: str, quote_currency: str) -> str:
+    from app.schemas.tools import validate_quote_currency
+
+    try:
+        return validate_quote_currency(quote_currency)
+    except ValueError as exc:
+        raise ToolError(f"Invalid input for {tool_name}: quote_currency: {exc}") from None
+
+
 async def _tracked(name: str, awaitable: Awaitable[EvidenceEnvelope]) -> dict[str, object]:
     record = current_mcp_auth.get()
     if record is not None:
@@ -129,7 +138,7 @@ async def _tracked(name: str, awaitable: Awaitable[EvidenceEnvelope]) -> dict[st
         try:
             await _evidence_writer().log_request(
                 RequestLog(
-                    api_key_id=record.key_id if record is not None else None,
+                    api_key_id=record.persisted_key_id if record is not None else None,
                     user_id=record.user_id if record is not None else None,
                     surface="mcp",
                     tool_name=name,
@@ -175,9 +184,10 @@ async def get_market_overview(
     ] = "USD",
 ) -> dict[str, object]:
     """Macro snapshot."""
+    validated_quote = _validated_quote("get_market_overview", quote_currency)
     return await _tracked(
         "get_market_overview",
-        workflows.get_market_overview(quote_currency.strip().upper() or "USD", deps=_deps),
+        workflows.get_market_overview(validated_quote, deps=_deps),
     )
 
 
@@ -200,11 +210,12 @@ async def analyze_market_regime(
     ] = "USD",
 ) -> dict[str, object]:
     """Regime classification."""
+    validated_quote = _validated_quote("analyze_market_regime", quote_currency)
     return await _tracked(
         "analyze_market_regime",
         workflows.analyze_market_regime(
             deps=_deps,
-            quote_currency=quote_currency.strip().upper() or "USD",
+            quote_currency=validated_quote,
         ),
     )
 
@@ -668,7 +679,7 @@ async def evidence_resource(evidence_id: str) -> str:
             try:
                 await _evidence_writer().log_request(
                     RequestLog(
-                        api_key_id=record.key_id,
+                        api_key_id=record.persisted_key_id,
                         user_id=record.user_id,
                         surface="mcp",
                         tool_name="resource:evidence",
@@ -696,7 +707,7 @@ async def evidence_resource(evidence_id: str) -> str:
     try:
         await _evidence_writer().log_request(
             RequestLog(
-                api_key_id=record.key_id if record is not None else None,
+                api_key_id=record.persisted_key_id if record is not None else None,
                 user_id=record.user_id if record is not None else None,
                 surface="mcp",
                 tool_name="resource:evidence",
@@ -712,6 +723,20 @@ async def evidence_resource(evidence_id: str) -> str:
     return json.dumps(payload)
 
 
+def _sanitize_prompt_ticker_list(raw: str, field_name: str, *, multiple: bool) -> str:
+    import re
+
+    ticker_re = re.compile(r"^[A-Za-z0-9]{1,20}$")
+    parts = [piece.strip().upper() for piece in raw.split(",") if piece.strip()]
+    if not parts or (not multiple and len(parts) != 1):
+        raise ValueError(f"Invalid prompt argument '{field_name}': expected ticker symbol(s).")
+    if not all(ticker_re.fullmatch(part) for part in parts):
+        raise ValueError(
+            f"Invalid prompt argument '{field_name}': symbols must be 1-20 alphanumeric chars."
+        )
+    return ", ".join(parts)
+
+
 @mcp.prompt(name="daily-market-briefing")
 def daily_market_briefing() -> str:
     """Morning market briefing workflow."""
@@ -725,24 +750,39 @@ def daily_market_briefing() -> str:
 
 
 @mcp.prompt(name="asset-due-diligence")
-def asset_due_diligence(symbol: str, peers: str) -> str:
+def asset_due_diligence(
+    symbol: Annotated[str, Field(description="Primary ticker symbol string, e.g. 'BTC'.")],
+    peers: Annotated[
+        str,
+        Field(description="Comma-separated string of peer ticker symbols, e.g. 'ETH, SOL'."),
+    ],
+) -> str:
     """Single-asset due diligence workflow."""
+    clean_symbol = _sanitize_prompt_ticker_list(symbol, "symbol", multiple=False)
+    clean_peers = _sanitize_prompt_ticker_list(peers, "peers", multiple=True)
     return (
-        f"Workflow due diligence {symbol}: 1) get_capabilities. 2) analyze_asset untuk {symbol}. "
-        f"3) compare_assets untuk {symbol} dan {peers}. "
-        f"4) get_historical_performance untuk {symbol}. "
+        f"Workflow due diligence {clean_symbol}: 1) get_capabilities. "
+        f"2) analyze_asset untuk {clean_symbol}. "
+        f"3) compare_assets untuk {clean_symbol} dan {clean_peers}. "
+        f"4) get_historical_performance untuk {clean_symbol}. "
         "Sebut evidence_id dan batasan data. Do not give investment advice, "
         "recommendations, or price targets."
     )
 
 
 @mcp.prompt(name="market-risk-review")
-def market_risk_review(symbols: str) -> str:
+def market_risk_review(
+    symbols: Annotated[
+        str,
+        Field(description="Comma-separated string of ticker symbols, e.g. 'BTC, ETH, SOL'."),
+    ],
+) -> str:
     """Weekly sector rotation workflow. The prompt name stays stable for existing clients."""
+    clean_symbols = _sanitize_prompt_ticker_list(symbols, "symbols", multiple=True)
     return (
         "Workflow rotasi sektor mingguan: 1) get_capabilities. 2) analyze_sector_rotation. "
         "3) scan_market_movers. 4) detect_market_anomalies. "
-        f"Jika pengguna menyebut aset, tambahkan analyze_derivatives untuk {symbols}. "
+        f"Jika pengguna menyebut aset, tambahkan analyze_derivatives untuk {clean_symbols}. "
         "Sebut evidence_id. Do not give investment advice, recommendations, or price targets."
     )
 
@@ -810,7 +850,11 @@ async def _query_evidence(
             and "No CoinMarketCap payload was available." in limitations
         ):
             row["data_mode"] = "UNAVAILABLE"
-        return {key: _jsonable(value) for key, value in row.items() if key != "api_key"}
+        return {
+            key: _jsonable(value)
+            for key, value in row.items()
+            if key not in {"api_key", "user_id", "api_key_id"}
+        }
 
     return await asyncio.to_thread(read)
 
@@ -818,4 +862,10 @@ async def _query_evidence(
 def _jsonable(value: object) -> object:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if hasattr(value, "isoformat") and callable(value.isoformat):
+        return value.isoformat()
     return str(value)

@@ -519,7 +519,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
                         {asset.symbol}
                         {asset.cmc_id !== null && (
                           <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
-                            #{asset.cmc_id}
+                            CMC ID {asset.cmc_id}
                           </span>
                         )}
                       </span>
@@ -987,7 +987,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
               </span>
               {d.cmc_id !== null && (
                 <span className="font-mono text-xs text-muted-foreground">
-                  #{d.cmc_id}
+                  CMC ID {d.cmc_id}
                 </span>
               )}
             </div>
@@ -1053,7 +1053,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
             <div className="flex flex-wrap items-center gap-2.5">
               <CoinLogo cmcId={d.cmc_id} symbol={d.symbol} size="sm" />
               <span className="font-bold text-foreground">{d.symbol}</span>
-              {d.cmc_id !== null && <span>#{d.cmc_id}</span>}
+              {d.cmc_id !== null && <span>CMC ID {d.cmc_id}</span>}
               <span>·</span>
               <span>Mode:</span>
               <strong className="rounded-full border border-border bg-card-elevated px-2.5 py-0.5 text-foreground">
@@ -1078,8 +1078,14 @@ function renderToolData(envelope: EvidenceEnvelope) {
               }
             />
             <MetricTile
-              label="Open Interest"
+              label="Open Interest (Sampled)"
               value={formatCompactUsd(d.open_interest)}
+              sub={
+                d.open_interest_pairs_included !== undefined &&
+                d.open_interest_pairs_included !== null
+                  ? `Subset of ${formatInteger(d.open_interest_pairs_included)} pairs (not full market)`
+                  : "Subset of sampled pairs; not full-market OI"
+              }
             />
             <MetricTile
               label="24h Liquidations"
@@ -1146,7 +1152,9 @@ export function EnvelopeFormattedReport({
             </span>
             <StatusBadge status={envelope.status} />
             <DataModeBadge mode={envelope.evidence.data_mode} />
-            <FreshnessBadge freshness={envelope.evidence.freshness} />
+            {envelope.evidence.data_mode !== "UNAVAILABLE" ? (
+              <FreshnessBadge freshness={envelope.evidence.freshness} />
+            ) : null}
           </div>
           <p className="text-sm leading-relaxed text-foreground">
             {envelope.summary}
@@ -1192,7 +1200,9 @@ export function EnvelopeEvidenceView({
             ({envelope.tool})
           </span>
           <DataModeBadge mode={evidence.data_mode} />
-          <FreshnessBadge freshness={evidence.freshness} />
+          {evidence.data_mode !== "UNAVAILABLE" ? (
+            <FreshnessBadge freshness={evidence.freshness} />
+          ) : null}
         </div>
 
         <Link

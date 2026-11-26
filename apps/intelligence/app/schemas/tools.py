@@ -27,6 +27,56 @@ RotationSignal = Literal[
 RegimeConfidence = Literal["HIGH", "MEDIUM", "LOW"]
 TaxonomySource = Literal["cmc_category", "listings_tag_fallback"]
 _SYMBOL = re.compile(r"^[A-Z0-9]{1,20}$")
+SUPPORTED_QUOTE_CURRENCIES: frozenset[str] = frozenset(
+    {
+        "USD",
+        "EUR",
+        "GBP",
+        "JPY",
+        "AUD",
+        "CAD",
+        "CHF",
+        "CNY",
+        "HKD",
+        "IDR",
+        "INR",
+        "KRW",
+        "MYR",
+        "NZD",
+        "PHP",
+        "PLN",
+        "RUB",
+        "SEK",
+        "SGD",
+        "THB",
+        "TRY",
+        "TWD",
+        "VND",
+        "ZAR",
+        "AED",
+        "ARS",
+        "BRL",
+        "CLP",
+        "COP",
+        "CZK",
+        "DKK",
+        "HUF",
+        "ILS",
+        "MXN",
+        "NGN",
+        "NOK",
+        "PKR",
+        "SAR",
+        "UAH",
+        "BTC",
+        "ETH",
+        "SOL",
+        "BNB",
+        "XRP",
+        "USDT",
+        "USDC",
+    }
+)
 
 
 def _normalize_symbol(value: str) -> str:
@@ -34,6 +84,16 @@ def _normalize_symbol(value: str) -> str:
     if _SYMBOL.fullmatch(symbol) is None:
         raise ValueError("symbol must be 1-20 letters or digits")
     return symbol
+
+
+def validate_quote_currency(value: str) -> str:
+    currency = value.strip().upper()
+    if currency not in SUPPORTED_QUOTE_CURRENCIES:
+        raise ValueError(
+            f"Unsupported quote_currency '{currency}'. "
+            "Use a standard CoinMarketCap fiat or crypto quote (e.g. USD, EUR, GBP, JPY, BTC, ETH)."
+        )
+    return currency
 
 
 class QuoteBrief(StrictModel):
@@ -91,9 +151,9 @@ class ScanMoversInput(StrictModel):
     )
 
     quote_currency: str = "USD"
-    min_market_cap_usd: FiniteFloat | None = None
-    min_volume_24h_usd: FiniteFloat | None = None
-    min_vol_to_mcap: FiniteFloat | None = None
+    min_market_cap_usd: FiniteFloat | None = Field(default=None, ge=0.0)
+    min_volume_24h_usd: FiniteFloat | None = Field(default=None, ge=0.0)
+    min_vol_to_mcap: FiniteFloat | None = Field(default=None, ge=0.0)
     min_rs_vs_btc_7d: FiniteFloat | None = None
     max_24h_gain_pct: FiniteFloat | None = None
     max_7d_gain_pct: FiniteFloat | None = Field(
@@ -106,9 +166,14 @@ class ScanMoversInput(StrictModel):
         ),
     )
     rank_by: RankBy = "composite_momentum_score"
-    limit: int = Field(default=20, ge=1, le=50)
-    universe_size: int = Field(default=150, ge=10, le=200)
+    limit: int = Field(default=20, ge=1, le=50, strict=True)
+    universe_size: int = Field(default=150, ge=10, le=200, strict=True)
     deep_scan: bool = False
+
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
 
 
 class MoverRow(StrictModel):
@@ -156,6 +221,11 @@ class CompareAssetsInput(StrictModel):
     symbols: list[str] = Field(min_length=2, max_length=8)
     quote_currency: str = "USD"
 
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
+
     @field_validator("symbols")
     @classmethod
     def normalize_symbols(cls, values: list[str]) -> list[str]:
@@ -201,6 +271,11 @@ class AnalyzeAssetInput(StrictModel):
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
         return _normalize_symbol(value)
+
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
 
 
 class PricePerformance(StrictModel):
@@ -255,6 +330,11 @@ class AnalyzeMomentumInput(StrictModel):
     symbols: list[str] = Field(min_length=1, max_length=20)
     quote_currency: str = "USD"
 
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
+
     @field_validator("symbols")
     @classmethod
     def normalize_symbols(cls, values: list[str]) -> list[str]:
@@ -300,8 +380,13 @@ class DetectAnomaliesInput(StrictModel):
     )
 
     quote_currency: str = "USD"
-    universe_size: int = Field(default=150, ge=10, le=200)
+    universe_size: int = Field(default=150, ge=10, le=200, strict=True)
     deep_scan: bool = False
+
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
 
 
 class AnomalyHit(StrictModel):
@@ -382,6 +467,11 @@ class SectorRotationInput(StrictModel):
     quote_currency: str = "USD"
     sectors: list[SectorSlug] | None = None
 
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
+
 
 class SectorSnapshot(StrictModel):
     sector_slug: SectorSlug
@@ -461,6 +551,11 @@ class HistoricalPerformanceInput(StrictModel):
     def normalize_symbol(cls, value: str) -> str:
         return _normalize_symbol(value)
 
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
+
 
 class HistoricalPerformanceData(StrictModel):
     symbol: str
@@ -483,6 +578,11 @@ class DerivativesAnalysisInput(StrictModel):
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
         return _normalize_symbol(value)
+
+    @field_validator("quote_currency")
+    @classmethod
+    def normalize_quote(cls, value: str) -> str:
+        return validate_quote_currency(value)
 
 
 class DerivativePairObservation(StrictModel):

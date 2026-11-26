@@ -66,6 +66,7 @@ from app.quant.sectors import (
     MIN_SECTOR_CONSTITUENTS,
     Constituent,
     aggregate_sector,
+    classify_rotation_signal,
     excess_return,
     market_median_benchmark,
     timestamps_aligned,
@@ -380,22 +381,56 @@ class CapabilityMap:
             return self.state(endpoint, credential) != "DENIED"
         return self._server_allows(endpoint)
 
-    def _server_allows(self, endpoint: str) -> bool:
+    def _matrix_entry(self, endpoint: str) -> tuple[str | None, dict[str, object] | None]:
         from app.core.config import get_settings
 
         path = get_settings().capability_matrix_path
         if not path.is_file():
-            return True
+            return None, None
         import json
 
         payload = json.loads(path.read_text(encoding="utf-8"))
-        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return None, None
+        generated = payload.get("generated_at_utc")
+        generated_str = str(generated) if isinstance(generated, str) and generated else None
+        results = payload.get("results")
         if not isinstance(results, list):
-            return True
+            return generated_str, None
         for row in results:
             if isinstance(row, dict) and row.get("endpoint") == endpoint:
-                return row.get("status") not in {"TIER_RESTRICTED", "NOT_FOUND"}
-        return True
+                return generated_str, row
+        return generated_str, None
+
+    def _server_allows(self, endpoint: str) -> bool:
+        _, row = self._matrix_entry(endpoint)
+        if row is None:
+            return True
+        return row.get("status") not in {"TIER_RESTRICTED", "NOT_FOUND"}
+
+    def block_reason(self, endpoint: str, credential: str | None = None) -> str:
+        if credential is not None:
+            return (
+                f"{endpoint} is unavailable without a live request: previously denied "
+                "(HTTP 403 / CMC 1006) for this API key."
+            )
+        generated, row = self._matrix_entry(endpoint)
+        if row is not None:
+            status = row.get("status") or "TIER_RESTRICTED"
+            http_status = row.get("http_status")
+            cmc_code = row.get("cmc_error_code")
+            details = []
+            if http_status is not None:
+                details.append(f"HTTP {http_status}")
+            if cmc_code is not None:
+                details.append(f"CMC {cmc_code}")
+            code_part = f" ({', '.join(details)})" if details else ""
+            probe_part = f" in capability matrix probe {generated}" if generated else ""
+            return (
+                f"{endpoint} is unavailable without a live request: "
+                f"marked {status}{code_part}{probe_part}."
+            )
+        return f"{endpoint} is unavailable without a live request: blocked by capability metadata."
 
 
 def _capability_allows(deps: "ServiceDeps", endpoint: str, credential: str | None) -> bool:
@@ -404,6 +439,13 @@ def _capability_allows(deps: "ServiceDeps", endpoint: str, credential: str | Non
     if len(params) >= 2:
         return method(endpoint, credential)
     return method(endpoint)
+
+
+def _capability_block_reason(deps: "ServiceDeps", endpoint: str, credential: str | None) -> str:
+    method = getattr(deps.capabilities, "block_reason", None)
+    if callable(method):
+        return str(method(endpoint, credential))
+    return f"{endpoint} is unavailable without a live request: blocked by capability metadata."
 
 
 @dataclass
@@ -467,6 +509,14 @@ class Collector:
         self.records: list[CallRecord] = []
 
     async def get(self, endpoint: str, params: dict[str, object]) -> dict[str, object] | None:
+        payload, _ = await self.get_with_record(endpoint, params)
+        return payload
+
+    async def get_with_record(
+        self,
+        endpoint: str,
+        params: dict[str, object],
+    ) -> tuple[dict[str, object] | None, CallRecord]:
         try:
             payload, meta = await self.gateway.fetch(  # type: ignore[attr-defined]
                 endpoint,
@@ -486,18 +536,21 @@ class Collector:
                 recorder = getattr(self.capabilities, "record_outcome", None)
                 if callable(recorder):
                     recorder(endpoint, allowed=False, credential=self.override)
-            self.records.append(CallRecord(endpoint, error=str(exc), error_category=exc.category))
-            return None
+            record = CallRecord(endpoint, error=str(exc), error_category=exc.category)
+            self.records.append(record)
+            return None, record
         if not isinstance(payload, dict) or not isinstance(meta, FetchMeta):
             message = f"{endpoint} returned an unexpected payload"
-            self.records.append(CallRecord(endpoint, error=message))
-            return None
+            record = CallRecord(endpoint, error=message)
+            self.records.append(record)
+            return None, record
         if self.override is not None and self.capabilities is not None:
             recorder = getattr(self.capabilities, "record_outcome", None)
             if callable(recorder):
                 recorder(endpoint, allowed=True, credential=self.override)
-        self.records.append(CallRecord(endpoint, payload, meta))
-        return payload
+        record = CallRecord(endpoint, payload, meta)
+        self.records.append(record)
+        return payload, record
 
     async def get_optional(
         self,
@@ -703,6 +756,22 @@ async def get_market_overview(
             f"{overview_excluded_stables} verified stablecoin(s) excluded from directional "
             "top_gainers/top_losers rankings while preserved in aggregate market overview metrics."
         )
+    positive_briefs = [
+        row for row in directional_briefs if (row.percent_change_24h or 0.0) > 0.0
+    ]
+    negative_briefs = [
+        row for row in directional_briefs if (row.percent_change_24h or 0.0) < 0.0
+    ]
+    if not negative_briefs:
+        overview_notes.append(
+            "No non-stablecoin assets in the top 50 posted negative 24h returns; "
+            "top_losers is empty rather than including positive performers."
+        )
+    elif len(negative_briefs) < 5:
+        overview_notes.append(
+            f"Only {len(negative_briefs)} non-stablecoin asset(s) in the top 50 posted "
+            "negative 24h returns; top_losers excludes positive performers."
+        )
     data = MarketOverviewData(
         quote_currency=quote_currency,
         total_market_cap=metrics.get("total_market_cap"),
@@ -726,9 +795,9 @@ async def get_market_overview(
         eth=_find(briefs, "ETH"),
         sol=_find(briefs, "SOL"),
         top_gainers=sorted(
-            directional_briefs, key=lambda row: row.percent_change_24h or 0, reverse=True
+            positive_briefs, key=lambda row: row.percent_change_24h or 0.0, reverse=True
         )[:5],
-        top_losers=sorted(directional_briefs, key=lambda row: row.percent_change_24h or 0)[:5],
+        top_losers=sorted(negative_briefs, key=lambda row: row.percent_change_24h or 0.0)[:5],
     )
     return await _envelope(
         "get_market_overview",
@@ -768,12 +837,16 @@ async def scan_market_movers(
     eligible_universe: list[UniverseAsset] = []
     excluded_stables = 0
     unknown_class_count = 0
+    corrupt_excluded = 0
     for row in rows:
         if row.get("symbol") == "BTC":
             continue
         stable_cls = classify_stablecoin(_raw_tags(row))
         if stable_cls == "verified_stablecoin":
             excluded_stables += 1
+            continue
+        if _is_corrupt_listing_quote(row, params.quote_currency):
+            corrupt_excluded += 1
             continue
         if stable_cls == "unknown":
             unknown_class_count += 1
@@ -824,6 +897,11 @@ async def scan_market_movers(
         notes.append(
             f"{unknown_class_count} asset(s) had missing/empty classification tags "
             "(unknown stablecoin status) and were preserved rather than silently discarded."
+        )
+    if corrupt_excluded > 0:
+        notes.append(
+            f"{corrupt_excluded} zero-volume or extreme-outlier listing(s) excluded from "
+            "mover rankings to prevent upstream data corruption."
         )
     if any(
         row.timeframes_available is not None and row.timeframes_available < 4 for row in data.movers
@@ -922,7 +1000,11 @@ async def compare_assets(
     return await _envelope(
         "compare_assets",
         status,
-        f"Compared {len(comparisons)} assets.",
+        (
+            f"Compared {len(comparisons)} of {len(params.symbols)} requested assets."
+            if len(comparisons) < len(params.symbols)
+            else f"Compared {len(comparisons)} assets."
+        ),
         data,
         [
             "volume_to_mcap",
@@ -1137,10 +1219,14 @@ async def detect_market_anomalies(
     eligible_rows: list[dict[str, object]] = []
     excluded_stables = 0
     unknown_class_count = 0
+    corrupt_excluded = 0
     for row in rows:
         stable_cls = classify_stablecoin(_raw_tags(row))
         if stable_cls == "verified_stablecoin":
             excluded_stables += 1
+            continue
+        if _is_corrupt_listing_quote(row, params.quote_currency, allow_zero_volume=True):
+            corrupt_excluded += 1
             continue
         if stable_cls == "unknown":
             unknown_class_count += 1
@@ -1151,6 +1237,11 @@ async def detect_market_anomalies(
         notes.append(
             f"{excluded_stables} verified stablecoin(s) excluded from anomaly distribution "
             "calculations using CoinMarketCap canonical stablecoin tags."
+        )
+    if corrupt_excluded > 0:
+        notes.append(
+            f"{corrupt_excluded} listing(s) with extreme corrupt return values (>5,000% 24h) "
+            "excluded so statistical anomaly thresholds remain valid."
         )
     if unknown_class_count > 0:
         notes.append(
@@ -1406,13 +1497,20 @@ async def analyze_sector_rotation(
     membership_counts: dict[str, int] = {}
     under_sampled: list[str] = []
     skewed_benchmark_sectors: list[str] = []
-    rwa_requested = False
-    for sector in sectors:
-        if sector.slug == "rwa":
-            rwa_requested = True
-        constituents, member_keys, taxonomy_source, sector_ts = await _sector_members(
-            sector, rows, request.quote_currency, collector, bound, listings_ts
-        )
+    zero_vol_filtered: list[str] = []
+    outlier_filtered: list[str] = []
+    rwa_requested = any(sector.slug == "rwa" for sector in sectors)
+    sector_results = await asyncio.gather(
+        *[
+            _sector_members(
+                sector, rows, request.quote_currency, collector, bound, listings_ts
+            )
+            for sector in sectors
+        ]
+    )
+    for sector, (constituents, member_keys, taxonomy_source, sector_ts) in zip(
+        sectors, sector_results, strict=True
+    ):
         for key in member_keys:
             membership_counts[key] = membership_counts.get(key, 0) + 1
         stats = aggregate_sector(
@@ -1422,6 +1520,10 @@ async def analyze_sector_rotation(
         )
         if not stats.sample_sufficient:
             under_sampled.append(f"{sector.slug} (n={stats.constituent_count})")
+        if stats.zero_volume_excluded > 0:
+            zero_vol_filtered.append(f"{sector.slug} ({stats.zero_volume_excluded})")
+        if stats.outlier_excluded > 0:
+            outlier_filtered.append(f"{sector.slug} ({stats.outlier_excluded})")
         same_source = taxonomy_source == "listings_tag_fallback"
         if timestamps_aligned(
             sector_ts,
@@ -1435,6 +1537,14 @@ async def analyze_sector_rotation(
             excess_24h = None
             excess_7d = None
             skewed_benchmark_sectors.append(sector.slug)
+        rotation_signal = classify_rotation_signal(
+            stats.median_change_24h_pct,
+            stats.median_change_7d_pct,
+            stats.breadth_positive_24h_pct,
+            excess_24h=excess_24h,
+            excess_7d=excess_7d,
+            sample_sufficient=stats.sample_sufficient,
+        )
         snapshots.append(
             SectorSnapshot(
                 sector_slug=sector.slug,  # type: ignore[arg-type]
@@ -1449,7 +1559,7 @@ async def analyze_sector_rotation(
                 breadth_positive_24h_pct=stats.breadth_positive_24h_pct,
                 total_volume_24h=stats.total_volume_24h,
                 sector_volume_share_pct=stats.sector_volume_share_pct,
-                rotation_signal=stats.rotation_signal,  # type: ignore[arg-type]
+                rotation_signal=rotation_signal,  # type: ignore[arg-type]
                 taxonomy_source=taxonomy_source,  # type: ignore[arg-type]
                 sample_sufficient=stats.sample_sufficient,
             )
@@ -1474,6 +1584,18 @@ async def analyze_sector_rotation(
             f"Sectors below minimum sample size ({MIN_SECTOR_CONSTITUENTS} constituents) are "
             f"marked INSUFFICIENT_DATA rather than directional rotation: "
             f"{', '.join(under_sampled)}."
+        )
+    if zero_vol_filtered:
+        notes.append(
+            "Excluded zero-volume category constituents from cap-weighted sector returns to "
+            "prevent untraded quote distortion: "
+            f"{', '.join(zero_vol_filtered)}."
+        )
+    if outlier_filtered:
+        notes.append(
+            "Excluded extreme-return or illiquid large-cap category outliers from cap-weighted "
+            "sector returns to prevent upstream CMC data corruption: "
+            f"{', '.join(outlier_filtered)}."
         )
     rwa_universe: RwaUniverseContext | None = None
     if rwa_requested:
@@ -1562,6 +1684,7 @@ async def analyze_sector_rotation(
     elif (
         under_sampled
         or skewed_benchmark_sectors
+        or outlier_filtered
         or used_snapshot_fallback
         or any(record.error for record in collector.records)
     ):
@@ -1724,7 +1847,9 @@ async def get_historical_performance(
         )
         for record in collector.records
     )
-    if asset.empty:
+    if asset_id is None:
+        status = EvidenceStatus.INSUFFICIENT_DATA
+    elif asset.empty:
         status = (
             EvidenceStatus.TIER_RESTRICTED if tier_blocked else EvidenceStatus.INSUFFICIENT_DATA
         )
@@ -1776,6 +1901,24 @@ async def analyze_derivatives(
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
     ids, notes = await _resolve(bound, collector, [params.symbol])
     cmc_id = ids.get(params.symbol)
+    if cmc_id is None:
+        return await _envelope(
+            "analyze_derivatives",
+            EvidenceStatus.INSUFFICIENT_DATA,
+            f"{params.symbol} could not be resolved for derivatives analysis.",
+            DerivativesAnalysisData(
+                symbol=params.symbol,
+                cmc_id=None,
+                quote_currency=params.quote_currency,
+                mode="spot_stress_proxy",
+            ),
+            ["funding_rate", "open_interest", "liquidations_24h"],
+            "symbol resolution",
+            [],
+            collector,
+            bound,
+            notes,
+        )
 
     async def _get_asset_derivatives() -> dict[str, object] | None:
         if cmc_id is not None and _capability_allows(bound, DERIVATIVES, collector.override):
@@ -1887,7 +2030,12 @@ async def analyze_derivatives(
             bound,
             notes,
         )
-    parsed = parse_derivatives_pairs(derivative_payload, params.quote_currency)
+    parsed = parse_derivatives_pairs(
+        derivative_payload,
+        params.quote_currency,
+        expected_symbol=params.symbol,
+        expected_cmc_id=cmc_id,
+    )
     notes.extend(parsed.limitations)
     pair_models = [DerivativePairObservation(**obs) for obs in parsed.market_pairs]
     data = DerivativesAnalysisData(
@@ -2055,14 +2203,11 @@ async def _sector_members(
     listings_ts: datetime | None,
 ) -> tuple[list[Constituent], list[str], str, datetime | None]:
     if sector.category_id and _capability_allows(deps, CATEGORY, collector.override):
-        before = len(collector.records)
-        payload = await collector.get(
+        payload, record = await collector.get_with_record(
             CATEGORY,
             {"id": sector.category_id, "limit": 100, "convert": currency},
         )
-        cat_ts = None
-        if len(collector.records) > before and collector.records[-1].meta is not None:
-            cat_ts = collector.records[-1].meta.source_timestamp
+        cat_ts = record.meta.source_timestamp if record.meta is not None else None
         category_rows = listing_rows(payload or {})
         if not category_rows:
             data = (payload or {}).get("data")
@@ -2100,7 +2245,7 @@ async def _sector_members(
 def _plan_blocked(collector: Collector, deps: ServiceDeps, endpoint: str) -> bool:
     if _capability_allows(deps, endpoint, collector.override):
         return False
-    message = f"{endpoint} is unavailable: current CoinMarketCap plan"
+    message = _capability_block_reason(deps, endpoint, collector.override)
     collector.records.append(CallRecord(endpoint, error=message, error_category="tier_restricted"))
     return True
 
@@ -2263,6 +2408,43 @@ def _brief(row: dict[str, object], currency: str) -> QuoteBrief:
     )
 
 
+def _is_corrupt_listing_quote(
+    row: dict[str, object],
+    currency: str,
+    *,
+    allow_zero_volume: bool = False,
+) -> bool:
+    """Filter untraded zero-volume listings and implausible CMC upstream return spikes."""
+    quote = quote_of(row, currency)
+    volume_24h = as_float(quote.get("volume_24h"))
+    market_cap = as_float(quote.get("market_cap"))
+    change_24h = as_float(quote.get("percent_change_24h"))
+    change_7d = as_float(quote.get("percent_change_7d"))
+    change_30d = as_float(quote.get("percent_change_30d"))
+    change_60d = as_float(quote.get("percent_change_60d"))
+    if not allow_zero_volume and volume_24h is not None and volume_24h <= 0.0:
+        return True
+    if change_24h is not None and abs(change_24h) > 5000.0:
+        return True
+    if not allow_zero_volume:
+        if change_7d is not None and abs(change_7d) > 20000.0:
+            return True
+        if change_30d is not None and abs(change_30d) > 20000.0:
+            return True
+        if change_60d is not None and abs(change_60d) > 50000.0:
+            return True
+        if (
+            market_cap is not None
+            and market_cap >= 1_000_000.0
+            and volume_24h is not None
+            and volume_24h < 1_000.0
+            and change_24h is not None
+            and abs(change_24h) > 100.0
+        ):
+            return True
+    return False
+
+
 def _universe(row: dict[str, object], currency: str) -> UniverseAsset:
     quote = quote_of(row, currency)
     return UniverseAsset(
@@ -2388,6 +2570,17 @@ async def get_capabilities(deps: ServiceDeps | None = None) -> EvidenceEnvelope[
                     name=name,
                     mode="fallback",
                     reason="Conservation budget keeps this tool on warm cache or a snapshot.",
+                )
+            )
+        elif name == "get_historical_performance" and not _capability_allows(bound, OHLCV, None):
+            tools.append(
+                ToolAvailability(
+                    name=name,
+                    mode="fallback",
+                    reason=(
+                        "Historical OHLCV is unavailable on the active CoinMarketCap plan "
+                        "without caller BYOK."
+                    ),
                 )
             )
         else:

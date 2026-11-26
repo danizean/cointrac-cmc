@@ -99,7 +99,7 @@ const en: MarketingCopy = {
     values: [
       {
         title: "Market & asset analysis",
-        body: "Market overview, regime classification, single-asset metrics, and sector performance calculated in Python with a 365-day annualization basis.",
+        body: "Market overview, regime classification, single-asset metrics, and sector performance calculated in Python (using a 365-day annualization basis when historical OHLCV is available).",
       },
       {
         title: "Screening & risk context",
@@ -114,7 +114,7 @@ const en: MarketingCopy = {
     flowLede: "One Python backend serves the web app, REST API, and MCP server. It does not use an LLM on the server and does not stream live ticks.",
     flow: [
       { title: "CoinMarketCap data", body: "Fetches market quotes and metadata, tracking plan limits and missing fields." },
-      { title: "Python calculations", body: "Runs fixed quantitative formulas (365-day volatility, relative strength, regime rules)." },
+      { title: "Python calculations", body: "Runs fixed quantitative formulas (relative strength, regime rules, and 365-day volatility when OHLCV is enabled)." },
       { title: "REST & MCP", body: "Exposes the same 10 tools over /v1/* HTTP routes and 11 tools over MCP." },
       { title: "Structured response", body: "Returns JSON with status, data mode, freshness, and a list of limitations." },
     ],
@@ -173,7 +173,7 @@ const en: MarketingCopy = {
       },
       {
         title: "Your CoinMarketCap Plan",
-        body: "Historical OHLCV depends on your upstream CoinMarketCap tier (Basic/Startup plans return TIER_RESTRICTED). Cache hits save your upstream quota.",
+        body: "Historical OHLCV and 365-day risk metrics (volatility, max drawdown, beta, correlation) require a higher CoinMarketCap plan (via BYOK). Default Basic/Startup plans return TIER_RESTRICTED or PARTIAL (null) on those fields.",
       },
     ],
     pricingNote: "Currently free to use · No paid checkout required · Cache hits use 0 CoinTrac credits.",
@@ -190,6 +190,10 @@ const en: MarketingCopy = {
       {
         question: "How do I authenticate with REST and MCP?",
         answer: "Send your API key in the x-cointrac-key or Authorization: Bearer header. The backend also includes OAuth 2.1 + PKCE endpoints for remote MCP.",
+      },
+      {
+        question: "Why do historical or 365-day risk metrics return TIER_RESTRICTED or null?",
+        answer: "CoinMarketCap restricts /v2/cryptocurrency/ohlcv/historical on Basic and Startup tiers. On those tiers, get_historical_performance returns TIER_RESTRICTED and volatility/drawdown fields stay null unless you pass a higher-tier CMC key via x-cmc-api-key (BYOK).",
       },
       {
         question: "How does the web dashboard call the API?",
@@ -215,8 +219,8 @@ const en: MarketingCopy = {
       },
       {
         id: "history",
-        title: "Historical performance (plan-dependent)",
-        body: "Returns historical OHLCV performance when your CoinMarketCap plan includes it. Basic and Startup plans return TIER_RESTRICTED instead of partial guesses.",
+        title: "Historical performance (plan / BYOK-dependent)",
+        body: "Covers get_historical_performance plus 365-day volatility and drawdown fields on analyze_asset and compare_assets. On CoinMarketCap Basic and Startup plans, OHLCV endpoints return TIER_RESTRICTED (or PARTIAL with null risk fields) unless you supply a higher-tier CMC key via BYOK.",
       },
     ],
     availabilityTitle: "How to read response statuses",
@@ -226,14 +230,14 @@ const en: MarketingCopy = {
       { label: "TIER_RESTRICTED", body: "Your upstream CoinMarketCap plan does not include the required series (common on Basic/Startup for historical OHLCV)." },
       { label: "INSUFFICIENT_DATA", body: "Not enough valid data points to compute the metric reliably, so the result stays marked rather than guessed." },
     ],
-    modesTitle: "Data mode (LIVE, CACHED, VERIFIED_SNAPSHOT_FALLBACK) and freshness (FRESH, AGING, STALE) are always shown separately. Missing numbers stay null—never turned into 0.",
+    modesTitle: "Data mode (LIVE, CACHED, VERIFIED_SNAPSHOT_FALLBACK, UNAVAILABLE) reflects upstream CoinMarketCap sources, while freshness (FRESH, AGING, STALE) and cache_hit are reported separately. Missing numbers stay null—never turned into 0.",
     nextIntegrations: "View MCP integrations",
     nextDocs: "Read API docs",
   },
   integrations: {
     eyebrow: "MCP Integrations",
     title: "Bring market tools to your AI agent.",
-    lede: "CoinTrac provides one Streamable HTTP MCP server over HTTPS with 11 tools, 5 resources, and 3 prompts. Connect your AI client using an API key or OAuth 2.1.",
+    lede: "CoinTrac provides one Streamable HTTP MCP server over HTTPS with 11 tools, 5 resources (3 static + 2 URI templates), and 3 prompts. Connect your AI client using an API key or OAuth 2.1.",
     conceptTitle: "Streamable HTTP over HTTPS",
     conceptBody:
       "Send MCP JSON-RPC requests directly to /mcp over TLS. Every tool returns the same EvidenceEnvelope[T] format as the REST API.",
@@ -307,9 +311,15 @@ const en: MarketingCopy = {
       },
       {
         title: "Evidence & provenance",
-        body: "Every tool response returns an EvidenceEnvelope[T] with timestamps, data mode, freshness, and limitations, scoped to your account.",
+        body: "Every tool response returns an EvidenceEnvelope[T] with source_timestamps, data_mode, freshness, and limitations, scoped to your account.",
         links: [{ href: "/evidence", label: "Evidence inspector" }],
         sources: ["/evidence"],
+      },
+      {
+        title: "Understanding data_mode vs. cache_hit",
+        body: "evidence.data_mode (LIVE, CACHED, VERIFIED_SNAPSHOT_FALLBACK, UNAVAILABLE) describes the upstream CoinMarketCap feed snapshots used, while evidence.cache_hit tells you whether this tool call hit CoinTrac's response cache (0 CoinTrac/CMC credits). When a live endpoint is combined with a cached snapshot, data_mode is CACHED even if cache_hit is false.",
+        links: [{ href: "/product", label: "Status & mode guide" }],
+        sources: ["evidence.data_mode", "evidence.cache_hit"],
       },
       {
         title: "Authentication",
@@ -344,7 +354,7 @@ const id: MarketingCopy = {
     values: [
       {
         title: "Analisis pasar & aset",
-        body: "Ringkasan pasar, pembacaan kondisi pasar (regime), metrik per aset, dan performa sektor dihitung di Python dengan basis 365 hari.",
+        body: "Ringkasan pasar, pembacaan kondisi pasar (regime), metrik per aset, dan performa sektor dihitung di Python (dengan basis 365 hari saat OHLCV historis tersedia).",
       },
       {
         title: "Screening & konteks risiko",
@@ -359,7 +369,7 @@ const id: MarketingCopy = {
     flowLede: "Satu backend Python melayani web, REST API, dan server MCP. Tidak ada AI/LLM di server yang mengarang hasil, dan bukan feed harga real-time per detik.",
     flow: [
       { title: "Data CoinMarketCap", body: "Mengambil data pasar dan mencatat batas paket maupun kolom yang kosong." },
-      { title: "Hitungan Python", body: "Menjalankan rumus tetap (volatilitas 365 hari, kekuatan relatif, dan aturan kondisi pasar)." },
+      { title: "Hitungan Python", body: "Menjalankan rumus tetap (kekuatan relatif, aturan regime, dan volatilitas 365 hari saat OHLCV tersedia)." },
       { title: "REST & MCP", body: "Menyediakan 10 tool lewat rute HTTP /v1/* dan 11 tool lewat server MCP." },
       { title: "Respons terstruktur", body: "Mengembalikan JSON berisi status, mode data, kesegaran, dan daftar keterbatasan." },
     ],
@@ -418,7 +428,7 @@ const id: MarketingCopy = {
       },
       {
         title: "Paket CoinMarketCap",
-        body: "Data historis OHLCV bergantung pada paket CoinMarketCap yang dipakai (paket Basic/Startup mengembalikan TIER_RESTRICTED). Cache hit membantu menghemat kuota.",
+        body: "Data historis OHLCV dan metrik risiko 365 hari (volatilitas, max drawdown, beta, korelasi) butuh paket CoinMarketCap lebih tinggi (via BYOK). Paket Basic/Startup mengembalikan TIER_RESTRICTED atau PARTIAL (null) pada metrik tersebut.",
       },
     ],
     pricingNote: "Gratis digunakan saat ini · Tidak ada pembayaran · Cache hit memakai 0 kredit CoinTrac.",
@@ -435,6 +445,10 @@ const id: MarketingCopy = {
       {
         question: "Bagaimana cara login / autentikasi ke REST dan MCP?",
         answer: "Kirim API key melalui header x-cointrac-key atau Authorization: Bearer. Tersedia juga endpoint OAuth 2.1 + PKCE untuk remote MCP.",
+      },
+      {
+        question: "Mengapa metrik historis atau risiko 365 hari mengembalikan TIER_RESTRICTED atau null?",
+        answer: "CoinMarketCap membatasi endpoint /v2/cryptocurrency/ohlcv/historical pada paket Basic dan Startup. Di tier tersebut, get_historical_performance mengembalikan TIER_RESTRICTED dan metrik volatilitas/drawdown tetap null kecuali Anda menyertakan API key CMC tier lebih tinggi lewat x-cmc-api-key (BYOK).",
       },
       {
         question: "Bagaimana halaman web ini memanggil backend?",
@@ -460,8 +474,8 @@ const id: MarketingCopy = {
       },
       {
         id: "history",
-        title: "Performa historis (bergantung paket)",
-        body: "Mengembalikan performa historis OHLCV jika paket CoinMarketCap Anda mendukungnya. Paket Basic dan Startup mengembalikan TIER_RESTRICTED tanpa mengarang angka.",
+        title: "Performa historis (bergantung plan / BYOK)",
+        body: "Mencakup get_historical_performance serta metrik volatilitas dan drawdown 365 hari di analyze_asset dan compare_assets. Pada paket CoinMarketCap Basic dan Startup, endpoint OHLCV mengembalikan TIER_RESTRICTED (atau PARTIAL dengan field risiko null) kecuali Anda menyertakan key CMC tier lebih tinggi via BYOK.",
       },
     ],
     availabilityTitle: "Cara membaca status respons",
@@ -471,14 +485,14 @@ const id: MarketingCopy = {
       { label: "TIER_RESTRICTED", body: "Paket CoinMarketCap yang dipakai tidak mencakup data tersebut (umumnya terjadi pada OHLCV historis di paket Basic/Startup)." },
       { label: "INSUFFICIENT_DATA", body: "Jumlah sampel data belum cukup untuk dihitung dengan layak, sehingga status ditandai jelas tanpa menebak." },
     ],
-    modesTitle: "Mode data (LIVE, CACHED, VERIFIED_SNAPSHOT_FALLBACK) dan kesegaran (FRESH, AGING, STALE) selalu ditampilkan terpisah. Angka yang kosong tetap null—tidak pernah diubah menjadi 0.",
+    modesTitle: "Mode data (LIVE, CACHED, VERIFIED_SNAPSHOT_FALLBACK, UNAVAILABLE) mencerminkan sumber upstream CoinMarketCap, sedangkan freshness (FRESH, AGING, STALE) dan cache_hit dilaporkan terpisah. Angka kosong tetap null—tidak diubah menjadi 0.",
     nextIntegrations: "Lihat integrasi MCP",
     nextDocs: "Baca dokumentasi API",
   },
   integrations: {
     eyebrow: "Integrasi MCP",
     title: "Hubungkan agen AI ke data CoinTrac.",
-    lede: "CoinTrac menyediakan satu server MCP Streamable HTTP melalui HTTPS dengan 11 tool, 5 resource, dan 3 prompt. Hubungkan klien AI Anda menggunakan API key atau OAuth 2.1.",
+    lede: "CoinTrac menyediakan satu server MCP Streamable HTTP melalui HTTPS dengan 11 tool, 5 resource (3 statis + 2 template URI), dan 3 prompt. Hubungkan klien AI Anda menggunakan API key atau OAuth 2.1.",
     conceptTitle: "Streamable HTTP melalui HTTPS",
     conceptBody:
       "Kirim permintaan MCP JSON-RPC langsung ke /mcp melalui HTTPS. Setiap tool mengembalikan format EvidenceEnvelope[T] yang sama dengan REST API.",
@@ -552,9 +566,15 @@ const id: MarketingCopy = {
       },
       {
         title: "Bukti & provenance",
-        body: "Setiap respons mengembalikan EvidenceEnvelope[T] berisi timestamp, mode data, kesegaran, dan batasan yang terisolasi per akun.",
+        body: "Setiap respons mengembalikan EvidenceEnvelope[T] berisi source_timestamps, data_mode, kesegaran, dan batasan yang terisolasi per akun.",
         links: [{ href: "/evidence", label: "Inspektur bukti" }],
         sources: ["/evidence"],
+      },
+      {
+        title: "Perbedaan data_mode vs. cache_hit",
+        body: "evidence.data_mode (LIVE, CACHED, VERIFIED_SNAPSHOT_FALLBACK, UNAVAILABLE) menggambarkan asal snapshot upstream CoinMarketCap yang dipakai, sedangkan evidence.cache_hit menandakan apakah panggilan tool ini langsung diambil dari cache respons CoinTrac (0 kredit). Saat data live digabung dengan snapshot cache, data_mode bernilai CACHED meskipun cache_hit bernilai false.",
+        links: [{ href: "/product", label: "Panduan status & mode" }],
+        sources: ["evidence.data_mode", "evidence.cache_hit"],
       },
       {
         title: "Autentikasi",

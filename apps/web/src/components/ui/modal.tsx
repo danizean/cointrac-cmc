@@ -26,21 +26,30 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  const allowBackdropCloseRef = useRef(allowBackdropClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    allowBackdropCloseRef.current = allowBackdropClose;
+  });
 
   useEffect(() => {
     if (!open) return;
     previousFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (closeRef.current) {
-      closeRef.current.focus();
-    } else {
-      dialogRef.current?.focus();
+    if (dialogRef.current && !dialogRef.current.contains(document.activeElement)) {
+      if (closeRef.current) {
+        closeRef.current.focus();
+      } else {
+        dialogRef.current.focus();
+      }
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && allowBackdropClose) {
+      if (event.key === "Escape" && allowBackdropCloseRef.current) {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key === "Tab" && dialogRef.current) {
@@ -69,7 +78,7 @@ export function Modal({
       window.removeEventListener("keydown", onKeyDown);
       previousFocusRef.current?.focus();
     };
-  }, [open, onClose, allowBackdropClose]);
+  }, [open]);
 
   if (!open) return null;
 

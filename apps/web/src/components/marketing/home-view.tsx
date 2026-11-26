@@ -243,7 +243,7 @@ export function HomeView() {
                 </p>
                 <div className="mt-5 rounded-[10px] border border-border bg-code-bg px-4 py-3 font-mono text-xs text-muted-foreground">
                   <span className="text-positive">GET</span>{" "}
-                  <span className="text-foreground">/v1/market/overview</span>
+                  <span className="text-foreground">/v1/intelligence/market-overview</span>
                   <span className="mx-2 text-border-strong">·</span>
                   <span className="text-link">x-cointrac-key</span>
                 </div>

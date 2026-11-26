@@ -74,8 +74,14 @@ def test_rate_limit_returns_retry_after() -> None:
     finally:
         install_deps(None)
     assert first.status_code == 200
+    assert first.headers["x-ratelimit-limit"] == "1"
+    assert first.headers["x-ratelimit-remaining"] == "0"
+    assert first.headers["x-content-type-options"] == "nosniff"
     assert second.status_code == 429
     assert second.headers["retry-after"]
+    assert second.headers["x-ratelimit-limit"] == "1"
+    assert second.headers["x-ratelimit-remaining"] == "0"
+    assert second.headers["x-content-type-options"] == "nosniff"
 
 
 def test_invalid_byok_header_returns_400_instead_of_silent_fallback() -> None:
@@ -134,3 +140,52 @@ def test_mcp_mount_enforces_api_key_and_rate_limit() -> None:
     assert throttled.headers["retry-after"]
     assert teardown.status_code != 401
     assert teardown.status_code != 429
+
+
+def test_invalid_symbol_and_quote_currency_return_422() -> None:
+    api = use_sandbox(20)
+    headers = {"x-cointrac-key": SANDBOX}
+    try:
+        bad_dash = api.get("/v1/intelligence/assets/BTC-USD", headers=headers)
+        bad_len = api.get("/v1/intelligence/assets/" + ("A" * 25), headers=headers)
+        bad_hist = api.get("/v1/intelligence/assets/BTC-USD/historical", headers=headers)
+        bad_deriv = api.get("/v1/intelligence/assets/BTC-USD/derivatives", headers=headers)
+        bad_quote_ov = api.get(
+            "/v1/intelligence/market-overview",
+            params={"quote_currency": "XXX"},
+            headers=headers,
+        )
+        bad_quote_asset = api.get(
+            "/v1/intelligence/assets/BTC",
+            params={"quote_currency": "XXX"},
+            headers=headers,
+        )
+        bad_neg_mcap = api.post(
+            "/v1/intelligence/scan-movers",
+            json={"min_market_cap_usd": -1},
+            headers=headers,
+        )
+        bad_str_limit = api.post(
+            "/v1/intelligence/scan-movers",
+            json={"limit": "10"},
+            headers=headers,
+        )
+        bad_ev_id = api.get("/v1/evidence/notanid", headers=headers)
+        jwt_only = api.get("/v1/keys", headers=headers)
+        unauth_caps = TestClient(app).get("/v1/capabilities")
+        auth_caps = api.get("/v1/capabilities", headers=headers)
+    finally:
+        install_deps(None)
+    assert bad_dash.status_code == 422
+    assert bad_len.status_code == 422
+    assert bad_hist.status_code == 422
+    assert bad_deriv.status_code == 422
+    assert bad_quote_ov.status_code == 422
+    assert bad_quote_asset.status_code == 422
+    assert bad_neg_mcap.status_code == 422
+    assert bad_str_limit.status_code == 422
+    assert bad_ev_id.status_code == 422
+    assert jwt_only.status_code == 401
+    assert "JWT bearer token" in jwt_only.json()["detail"]
+    assert unauth_caps.status_code == 401
+    assert auth_caps.status_code == 200

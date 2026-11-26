@@ -2,18 +2,21 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 from app.api.deps import AuthContext, require_api_key
 from app.schemas.envelope import EvidenceEnvelope
 from app.schemas.tools import (
     AnalyzeAssetData,
+    AnalyzeAssetInput,
     AnalyzeMomentumData,
     AnalyzeMomentumInput,
     CompareAssetsData,
     CompareAssetsInput,
     DerivativesAnalysisData,
+    DerivativesAnalysisInput,
     DetectAnomaliesData,
     DetectAnomaliesInput,
     HistoricalPerformanceData,
@@ -24,11 +27,28 @@ from app.schemas.tools import (
     ScanMoversInput,
     SectorRotationData,
     SectorRotationInput,
+    validate_quote_currency,
 )
 from app.services import intelligence as workflows
 from app.services.evidence import RequestLog, SupabaseEvidenceWriter
 
 router = APIRouter(prefix="/v1/intelligence", tags=["Intelligence"])
+
+
+def _quote_param(
+    quote_currency: str = Query(default="USD", description="Fiat or crypto quote currency"),
+) -> str:
+    try:
+        return validate_quote_currency(quote_currency)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+def _build_validated[M](model_cls: type[M], **kwargs: object) -> M:
+    try:
+        return model_cls(**kwargs)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from None
 
 
 @router.get(
@@ -41,7 +61,7 @@ router = APIRouter(prefix="/v1/intelligence", tags=["Intelligence"])
 )
 async def market_overview(
     background: BackgroundTasks,
-    quote_currency: str = Query(default="USD", description="Fiat or crypto quote currency"),
+    quote_currency: str = Depends(_quote_param),
     auth: AuthContext = Depends(require_api_key),
 ) -> EvidenceEnvelope[MarketOverviewData]:
     return await _call(
@@ -104,13 +124,17 @@ async def compare(
 )
 async def asset(
     background: BackgroundTasks,
-    symbol: str = Path(description="Asset ticker symbol (e.g. SOL, BTC, ETH)", examples=["SOL"]),
-    quote_currency: str = Query(default="USD"),
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        pattern=r"^[A-Za-z0-9]{1,20}$",
+        description="Asset ticker symbol (e.g. SOL, BTC, ETH)",
+        examples=["SOL"],
+    ),
+    quote_currency: str = Depends(_quote_param),
     auth: AuthContext = Depends(require_api_key),
 ) -> EvidenceEnvelope[AnalyzeAssetData]:
-    from app.schemas.tools import AnalyzeAssetInput
-
-    params = AnalyzeAssetInput(symbol=symbol, quote_currency=quote_currency)
+    params = _build_validated(AnalyzeAssetInput, symbol=symbol, quote_currency=quote_currency)
     return await _call(
         "analyze_asset",
         auth,
@@ -171,7 +195,7 @@ async def anomalies(
 )
 async def regime(
     background: BackgroundTasks,
-    quote_currency: str = Query(default="USD"),
+    quote_currency: str = Depends(_quote_param),
     auth: AuthContext = Depends(require_api_key),
 ) -> EvidenceEnvelope[MarketRegimeData]:
     return await _call(
@@ -214,12 +238,23 @@ async def sectors(
 )
 async def historical(
     background: BackgroundTasks,
-    symbol: str = Path(description="Asset ticker symbol (e.g. SOL)", examples=["SOL"]),
-    quote_currency: str = Query(default="USD"),
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        pattern=r"^[A-Za-z0-9]{1,20}$",
+        description="Asset ticker symbol (e.g. SOL)",
+        examples=["SOL"],
+    ),
+    quote_currency: str = Depends(_quote_param),
     count: int = Query(default=30, ge=5, le=90, description="Number of daily candles (5-90)"),
     auth: AuthContext = Depends(require_api_key),
 ) -> EvidenceEnvelope[HistoricalPerformanceData]:
-    params = HistoricalPerformanceInput(symbol=symbol, quote_currency=quote_currency, count=count)
+    params = _build_validated(
+        HistoricalPerformanceInput,
+        symbol=symbol,
+        quote_currency=quote_currency,
+        count=count,
+    )
     return await _call(
         "get_historical_performance",
         auth,
@@ -238,13 +273,21 @@ async def historical(
 )
 async def derivatives(
     background: BackgroundTasks,
-    symbol: str = Path(description="Asset ticker symbol (e.g. BTC)", examples=["BTC"]),
-    quote_currency: str = Query(default="USD"),
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        pattern=r"^[A-Za-z0-9]{1,20}$",
+        description="Asset ticker symbol (e.g. BTC)",
+        examples=["BTC"],
+    ),
+    quote_currency: str = Depends(_quote_param),
     auth: AuthContext = Depends(require_api_key),
 ) -> EvidenceEnvelope[DerivativesAnalysisData]:
-    from app.schemas.tools import DerivativesAnalysisInput
-
-    params = DerivativesAnalysisInput(symbol=symbol, quote_currency=quote_currency)
+    params = _build_validated(
+        DerivativesAnalysisInput,
+        symbol=symbol,
+        quote_currency=quote_currency,
+    )
     return await _call(
         "analyze_derivatives",
         auth,

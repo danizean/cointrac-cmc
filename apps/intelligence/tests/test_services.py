@@ -1745,3 +1745,159 @@ async def test_six_verified_sector_mappings_migration_and_rwa_unmapped() -> None
     for slug in verified_six:
         assert by_slug[slug].taxonomy_source == "cmc_category"
     assert by_slug["rwa"].taxonomy_source == "listings_tag_fallback"
+
+
+@pytest.mark.asyncio
+async def test_qa_regressions_oauth_persistence_losers_corrupt_quotes_and_derivatives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.deps import ApiKeyRecord, context_from_key, current_principal
+    from app.services.evidence import EvidenceDraft, SupabaseEvidenceWriter
+
+    # 1. OAuth principal writes api_key_id=None (never "oauth:<jti>") to Postgres UUID columns
+    inserted: list[dict[str, object]] = []
+
+    class _FakeTable:
+        def insert(self, row: dict[str, object]) -> "_FakeTable":
+            inserted.append(row)
+            return self
+
+        def execute(self) -> object:
+            return type("R", (), {"data": [{}]})()
+
+    class _FakeDb:
+        def table(self, name: str) -> _FakeTable:
+            assert name == "evidence_records"
+            return _FakeTable()
+
+    oauth_rec = ApiKeyRecord(
+        key_id="oauth:550e8400-e29b-41d4-a716-446655440000",
+        key_hash="",
+        rate_limit_per_min=60,
+        is_active=True,
+        user_id="11111111-1111-4111-8111-111111111111",
+        auth_kind="oauth",
+    )
+    tok = current_principal.set(context_from_key(oauth_rec, None, "mcp"))
+    try:
+        monkeypatch.setattr("app.api.v1.evidence.invalidate_evidence_cache", lambda: None)
+        writer = SupabaseEvidenceWriter(client=_FakeDb())
+        await writer.persist(
+            EvidenceDraft(
+                evidence_id="ev_oauth12345",
+                tool_name="get_market_overview",
+                asset_cmc_ids=[],
+                endpoints_called=[],
+                data_mode="CACHED",
+                freshness="FRESH",
+                credit_cost=0,
+                engine_version="1.0.0",
+                methodology={},
+                limitations=[],
+                raw_excerpt={},
+            )
+        )
+    finally:
+        current_principal.reset(tok)
+    assert inserted[0]["api_key_id"] is None
+    assert inserted[0]["user_id"] == "11111111-1111-4111-8111-111111111111"
+
+    # 2. Positive market day: top_losers excludes positive gainers; corrupt SLX excluded from movers
+    slx = coin(
+        77777,
+        "SLX",
+        104410.0,
+        change_7d=90000.0,
+        market_cap=100_000_000,
+        volume=0.0,
+        tags=["defi"],
+    )
+    handlers = common_handlers()
+    handlers["/v1/cryptocurrency/listings/latest"] = listings(BTC, ETH, SOL, slx)
+    deps, _ = envelope_deps(Scripted(handlers))
+
+    ov = await get_market_overview(deps=deps)
+    assert ov.data.top_losers == []
+    assert any("top_losers is empty" in note for note in ov.limitations)
+
+    mv = await scan_market_movers(ScanMoversInput(limit=10), deps=deps)
+    assert all(row.symbol != "SLX" for row in mv.data.movers)
+    assert any("upstream data corruption" in note for note in mv.limitations)
+
+    # 3. Unknown symbol in derivatives & historical returns INSUFFICIENT_DATA cleanly
+    handlers["/v1/cryptocurrency/map"] = {"data": [], "status": STATUS}
+    bad_deriv = await analyze_derivatives(DerivativesAnalysisInput(symbol="NOTACOIN123"), deps=deps)
+    assert bad_deriv.status == EvidenceStatus.INSUFFICIENT_DATA
+    assert all("unavailable on this CoinMarketCap plan" not in n for n in bad_deriv.limitations)
+
+    bad_hist = await get_historical_performance(
+        HistoricalPerformanceInput(symbol="NOTACOIN123"),
+        deps=deps,
+    )
+    assert bad_hist.status == EvidenceStatus.INSUFFICIENT_DATA
+
+    # 4. Derivatives excludes quote-attributed pairs and flags >50% single-venue OI + zero-OI pairs
+    handlers["/v1/cryptocurrency/map"] = {
+        "data": [{"id": 825, "symbol": "USDT", "rank": 3}],
+        "status": STATUS,
+    }
+    handlers["/v5/cryptocurrency/derivatives/market-pairs/list/latest"] = {
+        "data": {
+            "num_market_pairs": 100,
+            "market_pairs": [
+                {
+                    "market_id": 1,
+                    "market_pair_symbol": "BTC/USDT",
+                    "category": "perpetual",
+                    "exchange": {"exchange_id": 1, "exchange_name": "Binance"},
+                    "quotes": [{"convert_symbol": "USD", "open_interest": 999_000_000}],
+                },
+                {
+                    "market_id": 2,
+                    "market_pair_symbol": "USDT/USD",
+                    "category": "perpetual",
+                    "exchange": {"exchange_id": 2, "exchange_name": "ASTX"},
+                    "quotes": [
+                        {
+                            "convert_symbol": "USD",
+                            "volume_24h": 700_000_000,
+                            "open_interest": 500_000_000,
+                        }
+                    ],
+                },
+                {
+                    "market_id": 3,
+                    "market_pair_symbol": "USDT/EUR",
+                    "category": "perpetual",
+                    "exchange": {"exchange_id": 3, "exchange_name": "Bybit"},
+                    "quotes": [
+                        {
+                            "convert_symbol": "USD",
+                            "volume_24h": 10_000_000,
+                            "open_interest": 5_000_000,
+                        }
+                    ],
+                },
+                {
+                    "market_id": 4,
+                    "market_pair_symbol": "USDT/USDC",
+                    "category": "perpetual",
+                    "exchange": {"exchange_id": 4, "exchange_name": "KTX"},
+                    "quotes": [
+                        {
+                            "convert_symbol": "USD",
+                            "volume_24h": 5_000_000,
+                            "open_interest": 0,
+                        }
+                    ],
+                },
+            ],
+        },
+        "status": STATUS,
+    }
+    usdt_deriv = await analyze_derivatives(DerivativesAnalysisInput(symbol="USDT"), deps=deps)
+    assert usdt_deriv.data.open_interest == pytest.approx(505_000_000)
+    assert all(pair.market_pair_symbol != "BTC/USDT" for pair in usdt_deriv.data.market_pairs)
+    assert any("quote-attributed pair" in note for note in usdt_deriv.limitations)
+    assert any("High single-venue OI concentration" in note for note in usdt_deriv.limitations)
+    assert any("zero open_interest" in note for note in usdt_deriv.limitations)
