@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Layers, Play } from "lucide-react";
+import { ArrowRight, Gem, Layers, Play } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { StatusBadge } from "@/components/status-badges";
@@ -65,7 +65,10 @@ export function CapabilitiesView() {
             <span>{copy.eyebrow}</span>
           </div>
 
-          <h1 className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl">
+          <h1
+            id="product-hero-heading"
+            className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl"
+          >
             {copy.title}
           </h1>
 
@@ -125,10 +128,17 @@ export function CapabilitiesView() {
 
         <div className="mt-8 space-y-14">
           {visibleGroups.map((group) => (
-            <section key={group.id} className="space-y-4">
+            <section
+              key={group.id}
+              aria-labelledby={`group-${group.id}-heading`}
+              className="space-y-4"
+            >
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div>
-                  <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+                  <h2
+                    id={`group-${group.id}-heading`}
+                    className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
+                  >
                     {group.title}
                   </h2>
                   <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
@@ -195,9 +205,61 @@ export function CapabilitiesView() {
           ))}
         </div>
 
+        {/* Hidden Gem Discovery Engine Module */}
+        <section
+          aria-labelledby="hidden-gems-module-heading"
+          className="mt-16 border-t border-border pt-14"
+        >
+          <div className="ct-surface-featured flex flex-col justify-between gap-5 rounded-[16px] p-6 lg:flex-row lg:items-center">
+            <div className="max-w-3xl space-y-2">
+              <div className="inline-flex items-center gap-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-link">
+                <Gem className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Hidden Gem Discovery Engine</span>
+              </div>
+              <h2
+                id="hidden-gems-module-heading"
+                className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
+              >
+                {locale === "id"
+                  ? "Mesin Penemuan Altcoin Deterministik (/v1/hidden-gems/*)"
+                  : "Deterministic Altcoin Discovery Pipeline (/v1/hidden-gems/*)"}
+              </h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {locale === "id"
+                  ? "Pemindaian asinkron jalur Early Asymmetric dan Confirmed Momentum dengan penyaring anti-chase, fallback historis adaptif, sitasi bukti teraudit, pengingat Telegram opsional, serta evaluasi forward T+1/3/7/14/30 hari."
+                  : "Asynchronous Early Asymmetric & Confirmed Momentum screening with hard-gate anti-chase rules, adaptive historical fallback, evidence-cited explanations, optional Telegram alerts, and T+1/3/7/14/30d outcome checkpoints."}
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px] text-muted-foreground">
+                <span className="rounded-[7px] border border-border bg-background/70 px-2.5 py-0.5 text-foreground">
+                  <strong className="text-link">POST</strong> /v1/hidden-gems/scans
+                </span>
+                <span className="rounded-[7px] border border-border bg-background/70 px-2.5 py-0.5 text-foreground">
+                  <strong className="text-positive">GET</strong> /v1/hidden-gems/candidates
+                </span>
+                <span className="rounded-[7px] border border-border bg-background/70 px-2.5 py-0.5 text-foreground">
+                  <strong className="text-positive">GET</strong> /v1/hidden-gems/quality-stats
+                </span>
+              </div>
+            </div>
+            <Link
+              href="/app/hidden-gems"
+              className="tg-btn tg-btn-secondary inline-flex shrink-0"
+            >
+              <span>{locale === "id" ? "Buka Workspace" : "Open Workspace"}</span>
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </div>
+        </section>
+
         {/* Status & Data Mode Section */}
-        <section className="mt-20 border-t border-border pt-14">
-          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+        <section
+          aria-labelledby="availability-heading"
+          className="mt-16 border-t border-border pt-14"
+        >
+          <h2
+            id="availability-heading"
+            className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
+          >
             {copy.availabilityTitle}
           </h2>
           <dl className="mt-6 grid gap-4 md:grid-cols-2">

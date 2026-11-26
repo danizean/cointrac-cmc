@@ -2,7 +2,7 @@
 
 import { LineChart, Play, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ApiNotice } from "@/components/api-notice";
 import { useAppPreferences } from "@/components/app-preferences";
 import {
@@ -47,12 +47,10 @@ export function AnalysisDesk({
   pageKey,
   tools,
   fields,
-  autoRun = false,
 }: {
   pageKey: PageKey;
   tools: ToolName[];
   fields: Field[];
-  autoRun?: boolean;
 }) {
   const { locale } = useAppPreferences();
   const searchParams = useSearchParams();
@@ -83,7 +81,6 @@ export function AnalysisDesk({
   } | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
   const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
-  const started = useRef(false);
 
   function paramsFor(tool: ToolName, overrideSymbol?: string, overrideQuote?: string): Record<string, unknown> {
     const base = { quote_currency: (overrideQuote ?? quote).trim().toUpperCase() || "USD" };
@@ -152,17 +149,6 @@ export function AnalysisDesk({
         : null,
     );
   }
-
-  useEffect(() => {
-    if ((!autoRun && !querySymbol) || started.current) return;
-    started.current = true;
-    const timer = window.setTimeout(() => {
-      void run(querySymbol || undefined);
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // Run initial snapshot once when opened via autoRun or deep-linked ?symbol=.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRun, querySymbol]);
 
   const quoteOnly = fields.length === 1 && fields[0] === "quote";
 

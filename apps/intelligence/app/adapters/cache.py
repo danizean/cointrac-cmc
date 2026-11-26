@@ -16,6 +16,7 @@ ENDPOINT_TTL_SECONDS: dict[str, int] = {
     "/v1/cryptocurrency/category": 900,
     "/v2/cryptocurrency/info": 3600,
     "/v2/cryptocurrency/ohlcv/historical": 3600,
+    "/v3/cryptocurrency/quotes/historical": 3600,
     "/v1/cryptocurrency/map": 3600,
     "/v5/cryptocurrency/derivatives/market-pairs/list/latest": 300,
     "/v5/derivatives/liquidations/quotes/latest": 300,

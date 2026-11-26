@@ -47,10 +47,10 @@ describe("R3 Workspace Navigation Architecture", () => {
         "/app/settings",
       ],
     );
-    assert.equal(MARKET_SUB_ROUTES.length, 7);
+    assert.equal(MARKET_SUB_ROUTES.length, 8);
   });
 
-  it("highlights Market Intelligence active for all 7 intelligence desk sub-routes", () => {
+  it("highlights Market Intelligence active for all 8 intelligence desk sub-routes", () => {
     const overview = WORKSPACE_NAV_ITEMS[0];
     const market = WORKSPACE_NAV_ITEMS[1];
     const keys = WORKSPACE_NAV_ITEMS[2];

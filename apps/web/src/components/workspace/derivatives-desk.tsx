@@ -2,7 +2,7 @@
 
 import { Activity, Play, RefreshCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ApiNotice } from "@/components/api-notice";
 import { useAppPreferences } from "@/components/app-preferences";
 import {
@@ -39,7 +39,6 @@ export function DerivativesDesk() {
     retryAfterSeconds?: number;
   } | null>(null);
   const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
-  const autoStartedForRef = useRef<string | null>(null);
 
   async function run(overrideSymbol?: string, overrideQuote?: string) {
     const activeSym = (overrideSymbol ?? symbol).trim().toUpperCase();
@@ -70,19 +69,6 @@ export function DerivativesDesk() {
     }
     setEnvelopes([result.data]);
   }
-
-  useEffect(() => {
-    const target = querySymbol || "BTC";
-    if (autoStartedForRef.current === target) return;
-    autoStartedForRef.current = target;
-    const timer = window.setTimeout(() => {
-      setSymbol(target);
-      void run(target);
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // Run initial derivatives check automatically on mount or ?symbol= navigation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [querySymbol]);
 
   return (
     <div className="space-y-6">

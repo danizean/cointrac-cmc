@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     mcp_session_idle_timeout: float = Field(default=1800.0, ge=60.0, le=86400.0)
     mcp_max_sessions: int = Field(default=1000, ge=1, le=50_000)
     remote_mcp_public_url: str = ""
+    telegram_bot_token: SecretStr = SecretStr("")
+    telegram_default_chat_id: str = ""
 
     @field_validator("mcp_allowed_hosts")
     @classmethod

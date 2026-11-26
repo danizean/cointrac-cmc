@@ -37,7 +37,10 @@ export function IntegrationsView() {
             <span>{copy.eyebrow}</span>
           </div>
 
-          <h1 className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl">
+          <h1
+            id="integrations-hero-heading"
+            className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl"
+          >
             {copy.title}
           </h1>
 
@@ -103,9 +106,12 @@ export function IntegrationsView() {
         </div>
 
         {/* 4 Target Clients: ChatGPT, Claude, Gemini, Hermes */}
-        <section className="mt-16">
+        <section aria-labelledby="integrations-clients-heading" className="mt-16">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+            <h2
+              id="integrations-clients-heading"
+              className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
+            >
               {copy.statusTitle}
             </h2>
             <span className="font-mono text-xs text-subtle-foreground">
@@ -145,9 +151,15 @@ export function IntegrationsView() {
         </section>
 
         {/* Resources & Prompts */}
-        <section className="mt-16 grid gap-6 border-t border-border pt-14 lg:grid-cols-2">
+        <section
+          aria-labelledby="integrations-resources-heading"
+          className="mt-16 grid gap-6 border-t border-border pt-14 lg:grid-cols-2"
+        >
           <div className="ct-surface-featured rounded-[16px] p-6">
-            <h2 className="text-xl font-semibold tracking-tight text-foreground">
+            <h2
+              id="integrations-resources-heading"
+              className="text-xl font-semibold tracking-tight text-foreground"
+            >
               Resources &amp; URI templates
             </h2>
             <ul className="mt-4 divide-y divide-border">
@@ -163,7 +175,10 @@ export function IntegrationsView() {
           </div>
 
           <div className="ct-surface-featured rounded-[16px] p-6">
-            <h2 className="text-xl font-semibold tracking-tight text-foreground">
+            <h2
+              id="integrations-prompts-heading"
+              className="text-xl font-semibold tracking-tight text-foreground"
+            >
               MCP Prompts
             </h2>
             <ul className="mt-4 divide-y divide-border">

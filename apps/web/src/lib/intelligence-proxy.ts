@@ -111,6 +111,10 @@ export async function handleIntelligenceProxy(
       }
       headers.set("x-cmc-api-key", byok);
     }
+    const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+    if (idempotencyKey && idempotencyKey.length <= 128) {
+      headers.set("idempotency-key", idempotencyKey);
+    }
   }
 
   const init: RequestInit = {
@@ -142,6 +146,12 @@ export async function handleIntelligenceProxy(
 
   try {
     const response = await fetch(target.url, init);
+    if (response.status === 204) {
+      return new NextResponse(null, {
+        status: 204,
+        headers: PROXY_SECURITY_HEADERS,
+      });
+    }
     const responseType = response.headers.get("content-type") ?? "";
     if (responseType.startsWith("text/event-stream")) {
       return new NextResponse(response.body, {

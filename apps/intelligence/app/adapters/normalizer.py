@@ -1185,6 +1185,82 @@ def ohlcv_points(payload: Mapping[str, object], currency: str) -> list[tuple[dat
     return points
 
 
+def parse_v3_quotes_historical(
+    payload: Mapping[str, object],
+    currency: str = "USD",
+) -> dict[int, list[dict[str, object]]]:
+    """Parse CMC /v3/cryptocurrency/quotes/historical keyed by numeric cmc_id."""
+    parsed: dict[int, list[dict[str, object]]] = {}
+    target = currency.strip().upper() or "USD"
+    for asset in keyed_assets(payload):
+        raw_id = asset.get("id")
+        if not isinstance(raw_id, int) or isinstance(raw_id, bool):
+            continue
+        quotes = asset.get("quotes")
+        if not isinstance(quotes, list):
+            continue
+        bars: list[dict[str, object]] = []
+        for entry in quotes:
+            if not isinstance(entry, dict):
+                continue
+            stamp = _parse_time(entry.get("timestamp"))
+            block = quote_of(entry, target)
+            price = as_float(block.get("price"))
+            if stamp is None or price is None or price <= 0.0:
+                continue
+            bars.append(
+                {
+                    "timestamp": stamp,
+                    "close": price,
+                    "volume": as_float(block.get("volume_24h")),
+                    "market_cap": as_float(block.get("market_cap")),
+                }
+            )
+        if bars:
+            bars.sort(key=lambda b: b["timestamp"])  # type: ignore[arg-type,return-value]
+            parsed[raw_id] = bars
+    return parsed
+
+
+def parse_ohlcv_bars(
+    payload: Mapping[str, object],
+    currency: str = "USD",
+) -> dict[int, list[dict[str, object]]]:
+    """Parse CMC /v2/cryptocurrency/ohlcv/historical bars keyed by numeric cmc_id."""
+    parsed: dict[int, list[dict[str, object]]] = {}
+    target = currency.strip().upper() or "USD"
+    for asset in keyed_assets(payload):
+        raw_id = asset.get("id")
+        if not isinstance(raw_id, int) or isinstance(raw_id, bool):
+            continue
+        quotes = asset.get("quotes")
+        if not isinstance(quotes, list):
+            continue
+        bars: list[dict[str, object]] = []
+        for entry in quotes:
+            if not isinstance(entry, dict):
+                continue
+            stamp = _parse_time(entry.get("time_close") or entry.get("timestamp"))
+            block = quote_of(entry, target)
+            close = as_float(block.get("close"))
+            if stamp is None or close is None or close <= 0.0:
+                continue
+            bars.append(
+                {
+                    "timestamp": stamp,
+                    "open": as_float(block.get("open")),
+                    "high": as_float(block.get("high")),
+                    "low": as_float(block.get("low")),
+                    "close": close,
+                    "volume": as_float(block.get("volume")),
+                }
+            )
+        if bars:
+            bars.sort(key=lambda b: b["timestamp"])  # type: ignore[arg-type,return-value]
+            parsed[raw_id] = bars
+    return parsed
+
+
 def performance_rows(payload: Mapping[str, object], currency: str) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for asset in keyed_assets(payload):

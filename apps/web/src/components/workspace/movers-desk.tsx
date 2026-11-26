@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronUp, Play, RefreshCw, SlidersHorizontal, TrendingUp } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ApiNotice } from "@/components/api-notice";
 import { useAppPreferences } from "@/components/app-preferences";
 import {
@@ -133,7 +133,6 @@ export function MoversDesk() {
     retryAfterSeconds?: number;
   } | null>(null);
   const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
-  const autoStarted = useRef(false);
 
   async function run(overrides?: {
     quote?: string;
@@ -188,17 +187,6 @@ export function MoversDesk() {
     }
     setEnvelopes([result.data]);
   }
-
-  useEffect(() => {
-    if (autoStarted.current) return;
-    autoStarted.current = true;
-    const timer = window.setTimeout(() => {
-      void run();
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // Run initial anti-chase momentum scan automatically on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function applyPreset(preset: MoverPreset) {
     setActivePreset(preset.id);

@@ -2,7 +2,7 @@
 
 import { LineChart, Play, RefreshCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ApiNotice } from "@/components/api-notice";
 import { useAppPreferences } from "@/components/app-preferences";
 import {
@@ -41,7 +41,6 @@ export function HistoricalDesk() {
     retryAfterSeconds?: number;
   } | null>(null);
   const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
-  const autoStartedForRef = useRef<string | null>(null);
 
   async function run(overrides?: { symbol?: string; quote?: string; days?: number }) {
     const activeSym = (overrides?.symbol ?? symbol).trim().toUpperCase();
@@ -77,19 +76,6 @@ export function HistoricalDesk() {
     }
     setEnvelopes([result.data]);
   }
-
-  useEffect(() => {
-    const target = querySymbol || "SOL";
-    if (autoStartedForRef.current === target) return;
-    autoStartedForRef.current = target;
-    const timer = window.setTimeout(() => {
-      setSymbol(target);
-      void run({ symbol: target });
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // Run initial historical performance automatically on mount or ?symbol= navigation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [querySymbol]);
 
   return (
     <div className="space-y-6">

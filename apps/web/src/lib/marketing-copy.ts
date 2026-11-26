@@ -98,16 +98,16 @@ const en: MarketingCopy = {
     valueTitle: "What CoinTrac handles",
     values: [
       {
-        title: "Market & asset analysis",
-        body: "Market overview, regime classification, single-asset metrics, and sector performance calculated in Python (using a 365-day annualization basis when historical OHLCV is available).",
+        title: "Market & Hidden Gem discovery",
+        body: "Market overview, regime classification, Hidden Gem Discovery (Early & Confirmed tracks), and sector performance calculated deterministically in Python on a 365-day annualization basis.",
       },
       {
         title: "Screening & risk context",
-        body: "Scan market movers, spot volume or price anomalies, compare assets side by side, and view derivatives context when available.",
+        body: "Scan market movers, spot volume or price anomalies, compare assets side by side, and inspect derivatives or forward T+1/3/7/14/30d tracking when available.",
       },
       {
         title: "Saved response records",
-        body: "Every call returns an EvidenceEnvelope[T] and saves an audit record tied to your account, including timestamps and limitations.",
+        body: "Every call returns an EvidenceEnvelope[T] and saves an audit record tied to your account, including timestamps, credit usage, and limitations.",
       },
     ],
     flowTitle: "How a request works",
@@ -198,6 +198,10 @@ const en: MarketingCopy = {
       {
         question: "How does the web dashboard call the API?",
         answer: "The browser sends requests through /api/cointrac/* on the Next.js server, so secret keys never touch the browser.",
+      },
+      {
+        question: "How does Hidden Gem Discovery score candidates without an LLM?",
+        answer: "CoinTrac evaluates liquidity, turnover ratio, anti-chase caps, geometric relative strength vs. BTC/ETH, and trend structure deterministically in Python, citing persisted evidence rows without inventing missing data.",
       },
     ],
   },
@@ -336,6 +340,12 @@ const en: MarketingCopy = {
         links: [{ href: "/connect", label: "Python & cURL examples" }],
         sources: ["https://api.cointrac.xyz/docs"],
       },
+      {
+        title: "Hidden Gem Discovery API",
+        body: "Trigger asynchronous scans, fetch scored candidates with persisted evidence citations, and inspect T+1/3/7/14/30d outcome quality metrics.",
+        links: [{ href: "/app/hidden-gems", label: "Open Hidden Gems workspace" }],
+        sources: ["/v1/hidden-gems/scans", "/v1/hidden-gems/candidates"],
+      },
     ],
   },
 };
@@ -353,16 +363,16 @@ const id: MarketingCopy = {
     valueTitle: "Yang dikerjakan CoinTrac",
     values: [
       {
-        title: "Analisis pasar & aset",
-        body: "Ringkasan pasar, pembacaan kondisi pasar (regime), metrik per aset, dan performa sektor dihitung di Python (dengan basis 365 hari saat OHLCV historis tersedia).",
+        title: "Analisis pasar & Hidden Gem",
+        body: "Ringkasan pasar, klasifikasi kondisi pasar (regime), Hidden Gem Discovery (jalur Early & Confirmed), dan performa sektor dihitung deterministik di Python dengan basis 365 hari.",
       },
       {
         title: "Screening & konteks risiko",
-        body: "Pantau penggerak pasar, deteksi anomali harga/volume, bandingkan beberapa aset, dan cek konteks derivatif saat datanya tersedia.",
+        body: "Pantau penggerak pasar, deteksi anomali harga/volume, bandingkan beberapa aset, serta lacak evaluasi forward T+1/3/7/14/30 hari saat datanya tersedia.",
       },
       {
         title: "Catatan bukti per permintaan",
-        body: "Setiap pemanggilan menghasilkan EvidenceEnvelope[T] dan menyimpan catatan riwayat milik akun Anda beserta waktu sumber dan batasannya.",
+        body: "Setiap pemanggilan menghasilkan EvidenceEnvelope[T] dan menyimpan catatan riwayat milik akun Anda beserta waktu sumber, biaya kredit, dan batasannya.",
       },
     ],
     flowTitle: "Cara kerja setiap permintaan",
@@ -453,6 +463,10 @@ const id: MarketingCopy = {
       {
         question: "Bagaimana halaman web ini memanggil backend?",
         answer: "Browser memanggil /api/cointrac/* di server Next.js sehingga kunci rahasia dan service-role tidak pernah dikirim ke browser.",
+      },
+      {
+        question: "Bagaimana Hidden Gem Discovery menghitung skor tanpa LLM?",
+        answer: "CoinTrac menilai likuiditas, rasio turnover, batas anti-chase, relative strength geometrik terhadap BTC/ETH, dan struktur tren secara deterministik di Python dengan sitasi baris bukti tanpa menebak data yang kosong.",
       },
     ],
   },
@@ -590,6 +604,12 @@ const id: MarketingCopy = {
         body: "Periksa skema request, model Pydantic v2, dan uji payload HTTP langsung pada dokumentasi OpenAPI.",
         links: [{ href: "/connect", label: "Contoh Python & cURL" }],
         sources: ["https://api.cointrac.xyz/docs"],
+      },
+      {
+        title: "API Hidden Gem Discovery",
+        body: "Jalankan scan asinkron, ambil kandidat terskor beserta sitasi bukti teraudit, dan pantau metrik kualitas evaluasi T+1/3/7/14/30 hari.",
+        links: [{ href: "/app/hidden-gems", label: "Buka workspace Hidden Gems" }],
+        sources: ["/v1/hidden-gems/scans", "/v1/hidden-gems/candidates"],
       },
     ],
   },

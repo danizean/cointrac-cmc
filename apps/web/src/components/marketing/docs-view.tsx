@@ -6,6 +6,45 @@ import { TOOL_CATALOG, publicOpenApiDocsUrl } from "@/lib/catalog";
 import { MARKETING } from "@/lib/marketing-copy";
 import { useAppPreferences } from "../app-preferences";
 
+const HIDDEN_GEM_ROUTES = [
+  {
+    method: "POST",
+    path: "/v1/hidden-gems/scans",
+    notesEn: "Enqueue async discovery scan (202 Accepted, optional Idempotency-Key)",
+    notesId: "Antrekan scan discovery asinkron (202 Accepted, mendukung Idempotency-Key)",
+  },
+  {
+    method: "GET",
+    path: "/v1/hidden-gems/scans",
+    notesEn: "List account scan runs, credit cost, capability profile & status",
+    notesId: "Daftar eksekusi scan akun, biaya kredit, profil kapabilitas & status",
+  },
+  {
+    method: "GET",
+    path: "/v1/hidden-gems/candidates",
+    notesEn: "Filter scored candidates (track, horizon, min_score, confidence)",
+    notesId: "Filter kandidat terskor (track, horizon, min_score, confidence)",
+  },
+  {
+    method: "GET",
+    path: "/v1/hidden-gems/candidates/{id}",
+    notesEn: "Inspect 6-component breakdown, deterministic thesis & persisted evidence",
+    notesId: "Detail 6 komponen skor, penjelasan deterministik & bukti terpersistensi",
+  },
+  {
+    method: "GET",
+    path: "/v1/hidden-gems/quality-stats",
+    notesEn: "Aggregated forward T+1/3/7/14/30d outcome accuracy by track & version",
+    notesId: "Agregat akurasi evaluasi forward T+1/3/7/14/30d per track & versi",
+  },
+  {
+    method: "POST",
+    path: "/v1/hidden-gems/outcomes/evaluate",
+    notesEn: "Evaluate due forward outcome checkpoints against stored snapshots",
+    notesId: "Evaluasi checkpoint outcome forward dari snapshot tersimpan",
+  },
+] as const;
+
 export function DocsView() {
   const { locale } = useAppPreferences();
   const copy = MARKETING[locale].docs;
@@ -25,7 +64,10 @@ export function DocsView() {
             <span>{copy.eyebrow}</span>
           </div>
 
-          <h1 className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl">
+          <h1
+            id="docs-hero-heading"
+            className="ct-enter-delay-1 mt-4 max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-foreground sm:text-5xl"
+          >
             {copy.title}
           </h1>
 
@@ -52,9 +94,12 @@ export function DocsView() {
       </div>
 
       <div className="mx-auto w-full max-w-[1240px] px-4 py-14 sm:px-6 lg:px-8">
-        <section id="api" className="scroll-mt-24 space-y-4">
+        <section id="api" aria-labelledby="docs-api-heading" className="scroll-mt-24 space-y-4">
           <div>
-            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+            <h2
+              id="docs-api-heading"
+              className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
+            >
               REST Intelligence Endpoints
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
@@ -112,6 +157,66 @@ export function DocsView() {
                       Quota Profile, Budget State &amp; Plan Capabilities
                     </td>
                   </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section
+          id="hidden-gems-api"
+          aria-labelledby="docs-hidden-gems-heading"
+          className="mt-14 scroll-mt-24 space-y-4"
+        >
+          <div>
+            <h2
+              id="docs-hidden-gems-heading"
+              className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
+            >
+              Hidden Gem Discovery Endpoints
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+              {locale === "id"
+                ? "Endpoint terisolasi per akun untuk memindai altcoin Early/Confirmed, menyimpan watchlist, mengaudit penolakan hard-gate, dan melacak outcome forward."
+                : "Account-scoped REST endpoints for asynchronous Early/Confirmed altcoin scans, watchlists, hard-gate rejection logs, alerts, and forward outcomes."}
+            </p>
+          </div>
+
+          <div className="ct-surface-featured overflow-hidden rounded-[16px]">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+                <thead className="border-b border-border bg-card-elevated/60 font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Method</th>
+                    <th className="px-4 py-3 font-semibold">Endpoint path</th>
+                    <th className="px-4 py-3 font-semibold">Purpose</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {HIDDEN_GEM_ROUTES.map((route) => (
+                    <tr
+                      key={`${route.method}-${route.path}`}
+                      className="transition-colors hover:bg-card-elevated/50"
+                    >
+                      <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs">
+                        <span
+                          className={`inline-flex rounded-[6px] px-2 py-0.5 font-semibold ${
+                            route.method === "GET"
+                              ? "bg-positive-soft text-positive"
+                              : "bg-primary/14 text-link"
+                          }`}
+                        >
+                          {route.method}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-foreground">
+                        {route.path}
+                      </td>
+                      <td className="px-4 py-3.5 text-xs text-muted-foreground">
+                        {locale === "id" ? route.notesId : route.notesEn}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

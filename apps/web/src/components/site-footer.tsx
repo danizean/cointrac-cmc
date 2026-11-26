@@ -112,11 +112,17 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="border-t border-border">
-        <div className="mx-auto flex max-w-[1240px] flex-col gap-2 px-4 py-4 text-xs leading-relaxed text-subtle-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-[1240px] flex-wrap items-center justify-between gap-3 px-4 py-4 text-xs leading-relaxed text-subtle-foreground sm:px-6 lg:px-8">
           <p>{t.footer.note}</p>
-          <p className="font-mono text-[11px]">
-            Signal over noise · Evidence-backed quant · cointrac.xyz
-          </p>
+          <div className="flex items-center gap-4 font-mono text-[11px]">
+            <Link href="/privacy" className="transition-colors hover:text-foreground">
+              {t.footer.privacy}
+            </Link>
+            <Link href="/terms" className="transition-colors hover:text-foreground">
+              {t.footer.terms}
+            </Link>
+            <span>cointrac.xyz</span>
+          </div>
         </div>
       </div>
     </footer>

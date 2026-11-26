@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowRight, Menu, Moon, Search, Sun, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { probeAccountSession, type AccountSessionStatus } from "@/lib/session-probe";
 import { useAppPreferences } from "./app-preferences";
 
 const NAV = [
@@ -16,20 +17,29 @@ const NAV = [
 export function CoinTracMark({ className = "h-6 w-6" }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 28 28"
+      viewBox="0 0 512 512"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       aria-hidden="true"
     >
-      <rect width="28" height="28" rx="7" fill="#1769FF" />
+      <rect x="24" y="24" width="464" height="464" rx="104" fill="#1769FF" />
       <path
-        d="M19.5 10.2C18.3 8.85 16.55 8 14.5 8C10.9 8 8 10.7 8 14C8 17.3 10.9 20 14.5 20C16.6 20 18.4 19.1 19.6 17.65"
+        d="M 356 151 A 145 145 0 1 0 356 361"
+        fill="none"
         stroke="#FFFFFF"
-        strokeWidth="2.3"
+        strokeWidth="48"
+        strokeLinecap="butt"
+      />
+      <path
+        d="M 338 256 H 378"
+        fill="none"
+        stroke="#62E6FF"
+        strokeWidth="18"
         strokeLinecap="round"
       />
-      <circle cx="19.5" cy="14" r="2" fill="#FFFFFF" />
+      <circle cx="390" cy="256" r="17" fill="#62E6FF" />
+      <circle cx="390" cy="256" r="6" fill="#1769FF" />
     </svg>
   );
 }
@@ -38,6 +48,19 @@ export function SiteHeader({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const pathname = usePathname();
   const { locale, t, toggleTheme, setLocale } = useAppPreferences();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [account, setAccount] = useState<AccountSessionStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void probeAccountSession().then((next) => {
+      if (!cancelled) setAccount(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  const isSignedIn = account?.status === "authenticated";
 
   const labels = {
     capabilities: t.nav.capabilities,
@@ -145,13 +168,25 @@ export function SiteHeader({ onOpenSearch }: { onOpenSearch?: () => void }) {
             <Moon className="h-4 w-4 dark:hidden" aria-hidden="true" />
           </button>
 
-          <Link
-            href="/login"
-            className="hidden h-9 items-center gap-1.5 rounded-full border border-border-strong bg-card px-4 text-[13.5px] font-semibold text-foreground shadow-sm transition-colors hover:bg-muted sm:inline-flex"
-          >
-            <span>{t.nav.signIn}</span>
-            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          </Link>
+          {isSignedIn ? (
+            <Link
+              href="/app"
+              title={account?.email ?? undefined}
+              className="hidden h-9 items-center gap-2 rounded-full border border-positive/40 bg-positive/10 px-4 text-[13.5px] font-semibold text-foreground shadow-sm transition-colors hover:bg-positive/20 sm:inline-flex"
+            >
+              <span className="h-2 w-2 rounded-full bg-positive" aria-hidden="true" />
+              <span>Dashboard</span>
+              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="hidden h-9 items-center gap-1.5 rounded-full border border-border-strong bg-card px-4 text-[13.5px] font-semibold text-foreground shadow-sm transition-colors hover:bg-muted sm:inline-flex"
+            >
+              <span>{t.nav.signIn}</span>
+              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            </Link>
+          )}
 
           <button
             type="button"
@@ -183,13 +218,23 @@ export function SiteHeader({ onOpenSearch }: { onOpenSearch?: () => void }) {
               </Link>
             ))}
             <div className="mt-3 border-t border-border pt-3">
-              <Link
-                href="/login"
-                onClick={() => setMobileOpen(false)}
-                className="tg-btn tg-btn-secondary inline-flex w-full"
-              >
-                {t.nav.signIn}
-              </Link>
+              {isSignedIn ? (
+                <Link
+                  href="/app"
+                  onClick={() => setMobileOpen(false)}
+                  className="tg-btn tg-btn-primary inline-flex w-full"
+                >
+                  Dashboard
+                </Link>
+              ) : (
+                <Link
+                  href="/login"
+                  onClick={() => setMobileOpen(false)}
+                  className="tg-btn tg-btn-secondary inline-flex w-full"
+                >
+                  {t.nav.signIn}
+                </Link>
+              )}
             </div>
           </nav>
         </div>

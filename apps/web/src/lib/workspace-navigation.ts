@@ -140,6 +140,11 @@ export const MARKET_SUB_ROUTES: ReadonlyArray<MarketSubRoute> = [
     keywords: ["movers", "screener", "anti-chase", "volume", "gain"],
   },
   {
+    href: "/app/hidden-gems",
+    label: { en: "Hidden Gems", id: "Hidden Gems" },
+    keywords: ["hidden", "gems", "discovery", "early", "confirmed", "watchlist", "alpha"],
+  },
+  {
     href: "/app/anomalies",
     label: { en: "Anomalies", id: "Anomali" },
     keywords: ["anomalies", "outlier", "z-score", "divergence", "mad"],

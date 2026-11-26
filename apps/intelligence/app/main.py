@@ -32,6 +32,7 @@ from app.api.deps import (
 from app.api.docs import render_swagger_docs
 from app.api.v1.auth import router as auth_router
 from app.api.v1.evidence import router as evidence_router
+from app.api.v1.hidden_gems import router as hidden_gems_router
 from app.api.v1.keys import router as keys_router
 from app.api.v1.mcp_status import router as mcp_status_router
 from app.api.v1.router import router as intelligence_router
@@ -128,6 +129,7 @@ async def lifespan(_app: FastAPI):
     register_secrets(
         settings.cmc_api_key.get_secret_value(),
         settings.supabase_service_role_key.get_secret_value(),
+        settings.telegram_bot_token.get_secret_value(),
     )
     configure_logging()
     budget_store = SupabaseBudgetStore() if settings.supabase_url else MemoryBudgetStore()
@@ -170,9 +172,33 @@ async def lifespan(_app: FastAPI):
             settings.mcp_stateless_http,
             bool(settings.remote_mcp_public_url),
         )
+        watchdog_task: asyncio.Task[None] | None = None
+        if "pytest" not in sys.modules:
+            from app.services.hidden_gems import get_hidden_gem_service
+
+            async def _hg_watchdog_loop() -> None:
+                while True:
+                    await asyncio.sleep(120)
+                    svc = get_hidden_gem_service()
+                    try:
+                        await svc.run_zombie_watchdog()
+                        await svc.evaluate_outcome_checkpoints()
+                        await svc.run_due_scheduled_scans()
+                    except Exception as exc:
+                        logger.warning(
+                            "hidden_gems scheduler error (%s)", exc.__class__.__name__
+                        )
+
+            watchdog_task = asyncio.create_task(_hg_watchdog_loop())
         try:
             yield
         finally:
+            if watchdog_task is not None:
+                watchdog_task.cancel()
+                try:
+                    await watchdog_task
+                except asyncio.CancelledError:
+                    pass
             try:
                 await warmer.stop()
             except Exception as exc:
@@ -545,6 +571,7 @@ def create_app() -> FastAPI:
     if get_oauth_runtime() is not None:
         app.include_router(oauth_router)
     app.include_router(intelligence_router)
+    app.include_router(hidden_gems_router)
     app.include_router(evidence_router)
     app.include_router(telemetry_router)
     app.include_router(auth_router)

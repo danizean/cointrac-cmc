@@ -247,7 +247,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       terms: "Terms of Service",
       status: "API Health Status",
       contact: "support@cointrac.xyz",
-      note: "Remote MCP at https://mcp.cointrac.xyz/mcp uses Streamable HTTP (API key Bearer or OAuth 2.1 PKCE). Compatibility labels follow completed tests only.",
+      note: "© 2026 CoinTrac. All rights reserved.",
     },
     common: {
       copy: "Copy",
@@ -461,7 +461,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       terms: "Ketentuan Layanan",
       status: "Status Kesehatan API",
       contact: "support@cointrac.xyz",
-      note: "Remote MCP di https://mcp.cointrac.xyz/mcp memakai Streamable HTTP (API key Bearer atau OAuth 2.1 PKCE). Label kompatibilitas mengikuti pengujian yang sudah selesai.",
+      note: "© 2026 CoinTrac. All rights reserved.",
     },
     common: {
       copy: "Salin",

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>CoinTrac brand mark</title>
+  <desc>Original CoinTrac monogram: a bold open C with a cyan tracking signal.</desc>
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="#1769FF"/>
+  <path d="M 356 151 A 145 145 0 1 0 356 361" fill="none" stroke="#FFFFFF" stroke-width="48" stroke-linecap="butt"/>
+  <path d="M 338 256 H 378" fill="none" stroke="#62E6FF" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="390" cy="256" r="17" fill="#62E6FF"/>
+  <circle cx="390" cy="256" r="6" fill="#1769FF"/>
+</svg>

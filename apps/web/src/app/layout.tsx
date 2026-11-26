@@ -28,28 +28,63 @@ export const metadata: Metadata = {
   metadataBase: site,
   alternates: { canonical: "/" },
   title: {
-    default: "CoinTrac — Crypto market intelligence for APIs and MCP",
+    default: "CoinTrac — Crypto Market Intelligence API & MCP Server",
     template: "%s · CoinTrac",
   },
   description:
-    "CoinTrac gives applications and MCP clients structured cryptocurrency market data. Results keep source, freshness, and plan limits explicit.",
+    "CoinTrac turns CoinMarketCap feeds into deterministic REST endpoints, Hidden Gem Discovery, and 11 MCP tools with audited provenance and null-safe responses.",
+  keywords: [
+    "crypto market intelligence API",
+    "CoinMarketCap MCP server",
+    "Model Context Protocol crypto",
+    "hidden gem crypto discovery",
+    "deterministic crypto analytics",
+    "OAuth 2.1 PKCE MCP",
+    "EvidenceEnvelope",
+  ],
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
+  },
   openGraph: {
-    title: "CoinTrac — Crypto market intelligence for APIs and MCP",
+    title: "CoinTrac — Crypto Market Intelligence API & MCP Server",
     description:
-      "Structured cryptocurrency market data through a REST API and an MCP server. Missing values stay empty.",
+      "Deterministic cryptocurrency market intelligence via REST and Streamable HTTP MCP. Audited timestamps, explicit tier limits, and null-safe fields.",
     siteName: "CoinTrac",
     type: "website",
+    locale: "en_US",
     url: site,
+    images: [
+      {
+        url: "/brand/cointrac-logo.png",
+        alt: "CoinTrac Market Intelligence API & MCP Server",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
-    title: "CoinTrac — Crypto market intelligence for APIs and MCP",
+    card: "summary_large_image",
+    title: "CoinTrac — Crypto Market Intelligence API & MCP Server",
     description:
-      "Structured cryptocurrency market data through a REST API and an MCP server.",
+      "Deterministic crypto market intelligence via REST API, Hidden Gem Discovery, and 11 MCP tools.",
+    images: ["/brand/cointrac-logo.png"],
   },
   icons: {
-    icon: "/brand/cointrac-symbol.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/brand/cointrac-logo.svg", type: "image/svg+xml" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
+  manifest: "/site.webmanifest",
 };
 
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('tg_theme');var isDark=t?t==='dark':true;document.documentElement.classList.toggle('dark',isDark);document.documentElement.style.colorScheme=isDark?'dark':'light';}catch(e){}})();`;

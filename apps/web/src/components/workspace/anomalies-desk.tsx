@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, Play, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ApiNotice } from "@/components/api-notice";
 import { useAppPreferences } from "@/components/app-preferences";
 import {
@@ -69,7 +69,6 @@ export function AnomaliesDesk() {
     retryAfterSeconds?: number;
   } | null>(null);
   const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
-  const autoStarted = useRef(false);
 
   async function run(overrides?: { quote?: string; universe?: number }) {
     setRunning(true);
@@ -89,17 +88,6 @@ export function AnomaliesDesk() {
     }
     setEnvelopes([result.data]);
   }
-
-  useEffect(() => {
-    if (autoStarted.current) return;
-    autoStarted.current = true;
-    const timer = window.setTimeout(() => {
-      void run();
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // Run initial anomaly scan automatically on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <div className="space-y-6">

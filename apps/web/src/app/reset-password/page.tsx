@@ -4,7 +4,7 @@ import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 
 export const metadata: Metadata = {
-  title: "Reset password",
+  title: "Reset password — CoinTrac",
   description: "Request a password reset or update your CoinTrac account password.",
 };
 
@@ -20,10 +20,13 @@ async function ResetPasswordContent({ searchParams }: { searchParams: ResetSearc
 
 export default function ResetPasswordPage({ searchParams }: { searchParams: ResetSearchParams }) {
   return (
-    <main id="content" className="mx-auto flex max-w-md flex-col px-4 py-12 sm:py-16">
+    <main
+      id="content"
+      className="mx-auto flex w-full max-w-[440px] flex-1 flex-col justify-center px-4 py-10 sm:px-6"
+    >
       <Suspense
         fallback={
-          <div className="tg-panel h-72 animate-pulse rounded-2xl p-8" aria-busy="true" />
+          <div className="ct-surface-featured h-72 w-full animate-pulse rounded-[18px]" aria-busy="true" />
         }
       >
         <ResetPasswordContent searchParams={searchParams} />

@@ -31,14 +31,20 @@ export function HomeView() {
           aria-hidden="true"
           className="ct-grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[560px]"
         />
-        <section className="relative mx-auto grid w-full max-w-[1240px] items-center gap-12 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)] lg:px-8 lg:pb-24 lg:pt-20">
+        <section
+          aria-labelledby="hero-heading"
+          className="relative mx-auto grid w-full max-w-[1240px] items-center gap-12 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)] lg:px-8 lg:pb-24 lg:pt-20"
+        >
           <div className="space-y-7">
             <div className="ct-enter inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/10 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-link">
               <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
               <span>{copy.eyebrow}</span>
             </div>
 
-            <h1 className="ct-enter-delay-1 max-w-[17ch] text-4xl font-semibold leading-[1.06] tracking-[-0.03em] text-foreground sm:text-5xl lg:text-[56px]">
+            <h1
+              id="hero-heading"
+              className="ct-enter-delay-1 max-w-[17ch] text-4xl font-semibold leading-[1.06] tracking-[-0.03em] text-foreground sm:text-5xl lg:text-[56px]"
+            >
               {copy.title}
             </h1>
 
@@ -74,7 +80,10 @@ export function HomeView() {
       </div>
 
       {/* Engineering Guarantees Strip */}
-      <section className="border-y border-border/80 bg-card/35">
+      <section aria-labelledby="guarantees-heading" className="border-y border-border/80 bg-card/35">
+        <h2 id="guarantees-heading" className="sr-only">
+          {locale === "id" ? "Jaminan Arsitektur Data" : "Engineering Guarantees"}
+        </h2>
         <div className="mx-auto grid max-w-[1240px] grid-cols-2 gap-6 px-4 py-6 sm:px-6 lg:grid-cols-4 lg:px-8">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-border bg-card text-link">
@@ -127,12 +136,15 @@ export function HomeView() {
 
       <div className="mx-auto w-full max-w-[1240px] px-4 sm:px-6 lg:px-8">
         {/* Asymmetric Bento Architecture */}
-        <section className="py-20">
+        <section aria-labelledby="architecture-heading" className="py-20">
           <div className="max-w-3xl">
             <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-link">
               {locale === "id" ? "Arsitektur" : "Architecture"}
             </p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-[-0.025em] text-foreground sm:text-4xl">
+            <h2
+              id="architecture-heading"
+              className="mt-2 text-3xl font-semibold tracking-[-0.025em] text-foreground sm:text-4xl"
+            >
               {copy.problemTitle}
             </h2>
             <p className="mt-4 text-base leading-relaxed text-muted-foreground">
@@ -189,12 +201,15 @@ export function HomeView() {
         </section>
 
         {/* Connected Pipeline Flow */}
-        <section className="border-t border-border py-20">
+        <section aria-labelledby="pipeline-heading" className="border-t border-border py-20">
           <div className="max-w-3xl">
             <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-link">
               {locale === "id" ? "Alur Kerja" : "How It Works"}
             </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
+            <h2
+              id="pipeline-heading"
+              className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl"
+            >
               {copy.flowTitle}
             </h2>
             <p className="mt-3 text-base leading-relaxed text-muted-foreground">
@@ -293,8 +308,11 @@ export function HomeView() {
         </section>
 
         {/* Audiences */}
-        <section className="border-t border-border py-20">
-          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
+        <section aria-labelledby="audiences-heading" className="border-t border-border py-20">
+          <h2
+            id="audiences-heading"
+            className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl"
+          >
             {copy.audiencesTitle}
           </h2>
           <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -368,8 +386,11 @@ export function HomeView() {
         </section>
 
         {/* FAQ */}
-        <section className="border-t border-border py-20">
-          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
+        <section aria-labelledby="faq-heading" className="border-t border-border py-20">
+          <h2
+            id="faq-heading"
+            className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl"
+          >
             {copy.faqTitle}
           </h2>
           <div className="ct-surface-card mt-8 divide-y divide-border rounded-[16px] px-6">

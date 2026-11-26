@@ -5,12 +5,17 @@ import {
   ChevronDown,
   ChevronUp,
   Code2,
+  Eye,
   GitCompareArrows,
+  History,
+  Info,
   KeyRound,
   Layers,
   Loader2,
   Play,
   RotateCcw,
+  Sparkles,
+  Terminal,
   Trash2,
   TrendingUp,
 } from "lucide-react";
@@ -25,11 +30,22 @@ import {
   publicOpenApiDocsUrl,
   type PlaygroundPreset,
 } from "@/lib/catalog";
-import { probeSession, type SessionProbe } from "@/lib/session-probe";
-import { validateToolInput } from "@/lib/tool-input";
-import { workspaceCopy } from "@/lib/workspace-copy";
 import { formatDurationMs } from "@/lib/format";
+import {
+  PLAYGROUND_TOOL_GROUPS,
+  getPresetSampleEnvelopes,
+  getSampleEnvelopeForTool,
+  type PlaygroundToolGroup,
+} from "@/lib/playground-samples";
+import {
+  probeAccountSession,
+  probeSession,
+  type AccountSessionStatus,
+  type SessionProbe,
+} from "@/lib/session-probe";
+import { validateToolInput } from "@/lib/tool-input";
 import type { EvidenceEnvelope, RankBy, SectorSlug, ToolName } from "@/lib/types";
+import { workspaceCopy } from "@/lib/workspace-copy";
 import { ApiNotice } from "./api-notice";
 import { useAppPreferences } from "./app-preferences";
 import { CopyButton } from "./copy-button";
@@ -40,12 +56,18 @@ import {
 import { JsonViewer } from "./json-viewer";
 
 type OutputTab = "report" | "json" | "evidence" | "request";
+type OutputSourceMode = "sample" | "live";
+type RequestSnippetLang = "curl" | "mcp" | "python";
+type ToolGroupFilter = "all" | PlaygroundToolGroup["id"];
 
 const QUICK_SYMBOLS = ["BTC", "ETH", "SOL", "AVAX", "LINK"] as const;
 const QUICK_SYMBOL_SETS = ["SOL, AVAX, NEAR", "BTC, ETH, SOL"] as const;
+const MAX_HISTORY_ITEMS = 5;
 
 interface RunOutcome {
+  id: string;
   label: string;
+  tool: ToolName;
   envelopes: EvidenceEnvelope[];
   latencyMs: number;
   error?: {
@@ -69,6 +91,22 @@ const PRESET_ACCENTS = {
   "sector-rwa": "bg-accent/15 text-accent",
 } as const;
 
+const TOOL_SCHEMA_TAG: Record<
+  ToolName,
+  { badge: string; toneClass: string }
+> = {
+  get_market_overview: { badge: "OK", toneClass: "text-positive border-positive/30 bg-positive/10" },
+  analyze_market_regime: { badge: "OK", toneClass: "text-positive border-positive/30 bg-positive/10" },
+  scan_market_movers: { badge: "OK", toneClass: "text-positive border-positive/30 bg-positive/10" },
+  compare_assets: { badge: "OK / PARTIAL", toneClass: "text-link border-primary/30 bg-primary/10" },
+  analyze_asset: { badge: "PARTIAL", toneClass: "text-accent border-accent/35 bg-accent/10" },
+  analyze_momentum: { badge: "OK", toneClass: "text-positive border-positive/30 bg-positive/10" },
+  detect_market_anomalies: { badge: "OK", toneClass: "text-positive border-positive/30 bg-positive/10" },
+  analyze_sector_rotation: { badge: "OK", toneClass: "text-positive border-positive/30 bg-positive/10" },
+  get_historical_performance: { badge: "BYOK OHLCV", toneClass: "text-accent border-accent/35 bg-accent/10" },
+  analyze_derivatives: { badge: "PARTIAL / PROXY", toneClass: "text-link border-primary/30 bg-primary/10" },
+};
+
 function parseSymbolList(raw: string): string[] {
   return Array.from(
     new Set(
@@ -90,11 +128,26 @@ function parseOptionalNumber(raw: string): number | null {
 const INPUT_CLASS =
   "mt-1.5 min-h-11 sm:min-h-10 w-full rounded-[10px] border border-border bg-input-bg px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle-foreground transition-colors focus:border-primary focus:outline-none";
 
-export function PlaygroundConsole() {
+export interface PlaygroundConsoleProps {
+  initialAuthenticated?: boolean;
+  initialEmail?: string | null;
+}
+
+export function PlaygroundConsole({
+  initialAuthenticated = false,
+  initialEmail = null,
+}: PlaygroundConsoleProps = {}) {
   const { t, locale } = useAppPreferences();
   const copy = workspaceCopy(locale);
-  const [session, setSession] = useState<SessionProbe | "unknown">("unknown");
+  const [session, setSession] = useState<SessionProbe | "unknown">(
+    initialAuthenticated ? "authenticated" : "unknown",
+  );
+  const [accountAuth, setAccountAuth] = useState<
+    AccountSessionStatus["status"] | "unknown"
+  >(initialAuthenticated ? "authenticated" : "unknown");
+  const [accountEmail, setAccountEmail] = useState<string | null>(initialEmail);
   const [selectedTool, setSelectedTool] = useState<ToolName>("compare_assets");
+  const [groupFilter, setGroupFilter] = useState<ToolGroupFilter>("all");
   const [quoteCurrency, setQuoteCurrency] = useState("USD");
   const [symbol, setSymbol] = useState("SOL");
   const [symbolsInput, setSymbolsInput] = useState("SOL, AVAX, NEAR");
@@ -118,33 +171,92 @@ export function PlaygroundConsole() {
 
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [outputTab, setOutputTab] = useState<OutputTab>("report");
+  const [outputSource, setOutputSource] = useState<OutputSourceMode>("sample");
+  const [snippetLang, setSnippetLang] = useState<RequestSnippetLang>("curl");
   const [running, setRunning] = useState(false);
+  const [runSeq, setRunSeq] = useState(0);
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
+  const [runHistory, setRunHistory] = useState<RunOutcome[]>([]);
 
   const currentToolMeta =
     TOOL_CATALOG.find((item) => item.name === selectedTool) ?? TOOL_CATALOG[0];
 
   useEffect(() => {
     let cancelled = false;
-    void probeSession().then((next) => {
-      if (!cancelled) setSession(next);
-    });
+    void Promise.all([probeAccountSession(), probeSession()]).then(
+      ([acct, backend]) => {
+        if (cancelled) return;
+        setAccountAuth(acct.status);
+        setAccountEmail(acct.email);
+        setSession(backend);
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, []);
 
+  const isSignedIn =
+    accountAuth === "authenticated" || session === "authenticated";
+
+  function recordOutcome(next: Omit<RunOutcome, "id">) {
+    const nextSeq = runSeq + 1;
+    setRunSeq(nextSeq);
+    const entry: RunOutcome = {
+      ...next,
+      id: `${next.tool}-${nextSeq}`,
+    };
+    setOutcome(entry);
+    setOutputSource("live");
+    if (entry.envelopes.length > 0 && !entry.error) {
+      setRunHistory((prev) =>
+        [entry, ...prev.filter((item) => item.id !== entry.id)].slice(
+          0,
+          MAX_HISTORY_ITEMS,
+        ),
+      );
+    }
+  }
+
   async function ensureSession(): Promise<boolean> {
-    const next = await probeSession();
+    const [acct, next] = await Promise.all([
+      probeAccountSession(),
+      probeSession(),
+    ]);
+    setAccountAuth(acct.status);
+    setAccountEmail(acct.email);
     setSession(next);
+
     if (next === "authenticated") return true;
-    setOutcome({
+
+    if (acct.status === "authenticated") {
+      recordOutcome({
+        label: currentToolMeta.label,
+        tool: selectedTool,
+        envelopes: [],
+        latencyMs: 0,
+        error: {
+          status: 503,
+          message:
+            locale === "id"
+              ? "Anda sudah masuk, namun server Intelligence API belum merespons. Pastikan backend FastAPI berjalan lalu coba lagi."
+              : "Your session is signed in, but the Intelligence API server is unreachable. Start the FastAPI backend and retry.",
+        },
+      });
+      return false;
+    }
+
+    recordOutcome({
       label: currentToolMeta.label,
+      tool: selectedTool,
       envelopes: [],
       latencyMs: 0,
       error: {
-        status: next === "anonymous" ? 401 : 503,
-        message: next === "anonymous" ? copy.signInBody : copy.sessionFailed,
+        status: next === "anonymous" || acct.status === "anonymous" ? 401 : 503,
+        message:
+          next === "anonymous" || acct.status === "anonymous"
+            ? copy.signInBody
+            : copy.sessionFailed,
       },
     });
     return false;
@@ -213,14 +325,16 @@ export function PlaygroundConsole() {
   ) {
     if (!(await ensureSession())) return;
     setRunning(true);
+    setOutputSource("live");
     const res = await runIntelligenceTool(tool, params, {
       byok: byokKey || undefined,
     });
     setRunning(false);
 
     if (!res.ok) {
-      setOutcome({
+      recordOutcome({
         label,
+        tool,
         envelopes: [],
         latencyMs: res.latencyMs,
         error: {
@@ -232,14 +346,15 @@ export function PlaygroundConsole() {
       return;
     }
 
-    setOutcome({
+    recordOutcome({
       label,
+      tool,
       envelopes: [res.data],
       latencyMs: res.latencyMs,
     });
   }
 
-  async function handleRunPreset(preset: PlaygroundPreset) {
+  function applyPresetParams(preset: PlaygroundPreset) {
     setActivePresetId(preset.id);
     setSelectedTool(preset.primaryTool);
 
@@ -270,6 +385,20 @@ export function PlaygroundConsole() {
     if (Array.isArray(params.sectors)) {
       setSelectedSectors(params.sectors as SectorSlug[]);
     }
+  }
+
+  async function handleRunPreset(preset: PlaygroundPreset) {
+    applyPresetParams(preset);
+    const params = preset.defaultParams;
+
+    // Anonymous visitors get instant Sample Schema visual preview instead of hitting a blocking 401 wall.
+    if (!isSignedIn) {
+      setOutputSource("sample");
+      if (outputTab === "request") {
+        setOutputTab("report");
+      }
+      return;
+    }
 
     if (!preset.pairedTool) {
       await executeSingleTool(preset.primaryTool, params, preset.title);
@@ -278,6 +407,7 @@ export function PlaygroundConsole() {
 
     if (!(await ensureSession())) return;
     setRunning(true);
+    setOutputSource("live");
     const [first, second] = await Promise.all([
       runIntelligenceTool(preset.primaryTool, params, {
         byok: byokKey || undefined,
@@ -294,8 +424,9 @@ export function PlaygroundConsole() {
     if (first.ok) envelopes.push(first.data);
 
     const failed = !first.ok ? first : !second.ok ? second : null;
-    setOutcome({
+    recordOutcome({
       label: preset.title,
+      tool: preset.primaryTool,
       envelopes,
       latencyMs: totalLatency,
       error: failed
@@ -306,6 +437,14 @@ export function PlaygroundConsole() {
           }
         : undefined,
     });
+  }
+
+  function selectToolAndPreview(toolName: ToolName) {
+    setSelectedTool(toolName);
+    setActivePresetId(null);
+    if (!outcome || outcome.tool !== toolName) {
+      setOutputSource("sample");
+    }
   }
 
   function resetDefaults() {
@@ -333,8 +472,9 @@ export function PlaygroundConsole() {
 
     const invalid = validateToolInput(selectedTool, params);
     if (invalid) {
-      setOutcome({
+      recordOutcome({
         label: currentToolMeta.label,
+        tool: selectedTool,
         envelopes: [],
         latencyMs: 0,
         error: { status: 400, message: invalid },
@@ -345,13 +485,38 @@ export function PlaygroundConsole() {
     await executeSingleTool(selectedTool, params, currentToolMeta.label);
   }
 
+  const activePreset = activePresetId
+    ? PLAYGROUND_PRESETS.find((p) => p.id === activePresetId) ?? null
+    : null;
+
+  const sampleEnvelopes = activePreset
+    ? getPresetSampleEnvelopes(
+        activePreset.primaryTool,
+        activePreset.pairedTool,
+        locale,
+      )
+    : [getSampleEnvelopeForTool(selectedTool, locale)];
+
+  const showingLive = outputSource === "live" && outcome !== null;
+  const activeEnvelopes = showingLive ? outcome.envelopes : sampleEnvelopes;
+
+  const visibleToolNames =
+    groupFilter === "all"
+      ? TOOL_CATALOG.map((item) => item.name)
+      : PLAYGROUND_TOOL_GROUPS.find((g) => g.id === groupFilter)?.tools ?? [];
+
   const liveParams = buildParamsForTool(selectedTool);
   const apiBase = publicOpenApiDocsUrl().replace(/\/docs$/, "");
   const mcpEndpoint = publicMcpUrl();
+  const resolvedGetPath = currentToolMeta.restPath.replace(
+    "{symbol}",
+    encodeURIComponent(symbol.trim().toUpperCase() || "SOL"),
+  );
   const liveCurl =
     currentToolMeta.method === "GET"
-      ? `curl -sf -H "x-cointrac-key: <YOUR_COINTRAC_API_KEY>" \\\n  "${apiBase}${currentToolMeta.restPath.replace("{symbol}", encodeURIComponent(symbol.trim().toUpperCase() || "SOL"))}"`
+      ? `curl -sf -H "x-cointrac-key: <YOUR_COINTRAC_API_KEY>" \\\n  "${apiBase}${resolvedGetPath}"`
       : `curl -sf -X POST \\\n  -H "x-cointrac-key: <YOUR_COINTRAC_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(liveParams)}' \\\n  "${apiBase}${currentToolMeta.restPath}"`;
+
   const liveMcpPayload = JSON.stringify(
     {
       jsonrpc: "2.0",
@@ -366,15 +531,115 @@ export function PlaygroundConsole() {
     2,
   );
 
+  const livePythonSnippet =
+    currentToolMeta.method === "GET"
+      ? `import httpx\n\nresp = httpx.get(\n    "${apiBase}${resolvedGetPath}",\n    headers={"x-cointrac-key": "<YOUR_COINTRAC_API_KEY>"},\n    params={"quote_currency": ${JSON.stringify(liveParams.quote_currency ?? "USD")}},\n)\nenvelope = resp.json()\nprint(envelope["status"], envelope["evidence"]["evidence_id"])`
+      : `import httpx\n\nresp = httpx.post(\n    "${apiBase}${currentToolMeta.restPath}",\n    headers={"x-cointrac-key": "<YOUR_COINTRAC_API_KEY>"},\n    json=${JSON.stringify(liveParams, null, 4)},\n)\nenvelope = resp.json()\nprint(envelope["status"], envelope["evidence"]["evidence_id"])`;
+
+  const snippetContent =
+    snippetLang === "curl"
+      ? liveCurl
+      : snippetLang === "mcp"
+        ? liveMcpPayload
+        : livePythonSnippet;
+
   return (
     <div className="space-y-6">
-      {session === "anonymous" ? (
+      {/* Interactive Onboarding Strip + Auth Banner */}
+      <div className="grid gap-3 md:grid-cols-3">
+        {[
+          {
+            step: "01",
+            title:
+              locale === "id"
+                ? "Pilih Tool atau Preset"
+                : "Pick Tool or Preset",
+            desc:
+              locale === "id"
+                ? "Jelajahi 10 intelligence tools & 4 skenario preset terkurasi."
+                : "Browse 10 intelligence tools across macro, screening & risk.",
+          },
+          {
+            step: "02",
+            title:
+              locale === "id"
+                ? "Preview Skema Output"
+                : "Inspect Visual Schema",
+            desc:
+              locale === "id"
+                ? "Lihat langsung grafik, tabel null-safe, JSON, dan audit provenance."
+                : "Explore formatted charts, null-safe tables, JSON & provenance immediately.",
+          },
+          {
+            step: "03",
+            title:
+              locale === "id"
+                ? "Eksekusi Live & Salin Kode"
+                : "Execute Live & Export",
+            desc:
+              locale === "id"
+                ? "Jalankan dengan sesi Anda atau salin snippet cURL / MCP / Python."
+                : "Run against live CMC data or copy ready-made cURL, MCP & Python code.",
+          },
+        ].map((guide) => (
+          <div
+            key={guide.step}
+            className="ct-surface-card flex items-start gap-3 rounded-[14px] px-4 py-3"
+          >
+            <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/12 font-mono text-[11px] font-bold text-link">
+              {guide.step}
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-foreground">{guide.title}</p>
+              <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                {guide.desc}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {isSignedIn ? (
+        <div className="ct-surface-card flex flex-wrap items-center justify-between gap-3 rounded-[14px] px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-positive/35 bg-positive/10 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-positive">
+              <span className="h-1.5 w-1.5 rounded-full bg-positive" aria-hidden="true" />
+              {locale === "id" ? "Sesi Aktif" : "Signed In"}
+            </span>
+            <span className="font-mono text-foreground">
+              {accountEmail ?? (locale === "id" ? "Akun terverifikasi" : "Verified account")}
+            </span>
+            {session === "unavailable" ? (
+              <span className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-0.5 font-mono text-[10.5px] text-accent">
+                {locale === "id"
+                  ? "Intelligence API offline · Preview skema tersedia"
+                  : "Intelligence API offline · Schema preview active"}
+              </span>
+            ) : null}
+          </div>
+          <Link
+            href="/app"
+            className="font-mono text-xs font-semibold text-link transition-colors hover:underline"
+          >
+            {locale === "id" ? "Buka Dashboard →" : "Open Workspace →"}
+          </Link>
+        </div>
+      ) : accountAuth === "anonymous" || session === "anonymous" ? (
         <div className="ct-surface-featured flex flex-col justify-between gap-4 rounded-[16px] px-5 py-4 sm:flex-row sm:items-center">
-          <div>
-            <p className="text-sm font-semibold text-foreground">{copy.signIn}</p>
-            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-              {copy.signInBody}
-            </p>
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-primary/35 bg-primary/12 text-link">
+              <Eye className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {locale === "id"
+                  ? "Mode Preview Skema Aktif — Masuk untuk Eksekusi Live"
+                  : "Schema Preview Active — Sign In for Live Execution"}
+              </p>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                {copy.signInBody}
+              </p>
+            </div>
           </div>
           <Link
             href="/login?next=/playground"
@@ -384,6 +649,8 @@ export function PlaygroundConsole() {
           </Link>
         </div>
       ) : null}
+
+      {/* Curated Presets */}
       <section aria-labelledby="presets-heading" className="space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2
@@ -393,7 +660,13 @@ export function PlaygroundConsole() {
             {t.playground.presetsHeading}
           </h2>
           <span className="font-mono text-[11px] text-subtle-foreground">
-            {locale === "id" ? "Klik untuk langsung menjalankan" : "Click any preset to run"}
+            {isSignedIn
+              ? locale === "id"
+                ? "Klik preset untuk langsung menjalankan live"
+                : "Click any preset to execute live"
+              : locale === "id"
+                ? "Klik preset untuk memuat parameter & preview hasil"
+                : "Click any preset to load params & inspect sample output"}
           </span>
         </div>
 
@@ -425,14 +698,29 @@ export function PlaygroundConsole() {
                     >
                       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                     </span>
-                    <p className="text-[13px] font-semibold leading-snug text-foreground">
-                      {preset.title}
-                    </p>
+                    <div>
+                      <p className="text-[13px] font-semibold leading-snug text-foreground">
+                        {preset.title}
+                      </p>
+                      <span className="mt-0.5 inline-block font-mono text-[10px] text-subtle-foreground">
+                        {preset.badge}
+                      </span>
+                    </div>
                   </div>
-                  <Play className="mt-1 h-3 w-3 shrink-0 text-subtle-foreground transition-colors group-hover:text-link" aria-hidden="true" />
+                  {isSignedIn ? (
+                    <Play
+                      className="mt-1 h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-colors group-hover:text-link"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Eye
+                      className="mt-1 h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-colors group-hover:text-link"
+                      aria-hidden="true"
+                    />
+                  )}
                 </div>
 
-                <p className="mt-2 line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
+                <p className="mt-2.5 line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
                   {preset.subtitle}
                 </p>
               </button>
@@ -441,7 +729,7 @@ export function PlaygroundConsole() {
         </div>
       </section>
 
-      {/* Split IDE Studio: Parameter Rail + Output Terminal */}
+      {/* Split Studio: Left Tool Navigator & Params + Right Interactive Output Studio */}
       <div className="grid gap-6 lg:grid-cols-12">
         {/* Left Rail */}
         <section
@@ -452,56 +740,135 @@ export function PlaygroundConsole() {
             onSubmit={handleFormSubmit}
             className="ct-surface-featured space-y-5 rounded-[18px] p-5"
           >
-            <div className="space-y-2.5">
+            {/* Visual Tool Navigator */}
+            <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <label
-                  htmlFor="tool-select"
+                <span
                   id="tool-runner-heading"
-                  className="block font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                  className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
                 >
-                  {t.playground.toolRunnerLabel}
-                </label>
+                  {t.playground.toolRunnerLabel} ({TOOL_CATALOG.length})
+                </span>
                 <button
                   type="button"
                   onClick={resetDefaults}
                   className="inline-flex cursor-pointer items-center gap-1 font-mono text-[11px] text-subtle-foreground transition-colors hover:text-foreground"
                 >
                   <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                  <span>{locale === "id" ? "Reset" : "Reset"}</span>
+                  <span>Reset</span>
                 </button>
               </div>
-              <select
-                id="tool-select"
-                value={selectedTool}
-                onChange={(e) => {
-                  setSelectedTool(e.target.value as ToolName);
-                  setActivePresetId(null);
-                }}
-                className="w-full cursor-pointer rounded-[10px] border border-border bg-input-bg px-3 py-2.5 font-mono text-xs font-semibold text-foreground transition-colors focus:border-primary focus:outline-none"
+
+              {/* Group Filter Pills */}
+              <div
+                role="group"
+                aria-label="Filter tools by category"
+                className="flex flex-wrap gap-1.5"
               >
-                {TOOL_CATALOG.map((tool) => (
-                  <option key={tool.name} value={tool.name}>
-                    {tool.name} ({tool.method})
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {currentToolMeta.summary}
-              </p>
-              <p className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-border bg-background/60 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
-                <span
-                  className={`shrink-0 ${
-                    currentToolMeta.method === "GET"
-                      ? "font-bold text-positive"
-                      : "font-bold text-link"
-                  }`}
-                >
-                  {currentToolMeta.method}
-                </span>
-                <span className="truncate">{currentToolMeta.restPath}</span>
-              </p>
+                {(
+                  [
+                    { id: "all", label: locale === "id" ? "Semua (10)" : "All (10)" },
+                    ...PLAYGROUND_TOOL_GROUPS.map((g) => ({
+                      id: g.id,
+                      label: locale === "id" ? g.labelId : g.labelEn,
+                    })),
+                  ] as const
+                ).map((tab) => {
+                  const active = groupFilter === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setGroupFilter(tab.id)}
+                      className={`cursor-pointer rounded-full border px-2.5 py-1 font-mono text-[10.5px] font-medium transition-colors ${
+                        active
+                          ? "border-primary/60 bg-primary/15 text-link"
+                          : "border-border bg-background/60 text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Interactive Tool List */}
+              <div
+                role="listbox"
+                aria-label={t.playground.toolRunnerLabel}
+                className="grid max-h-[260px] gap-1.5 overflow-y-auto pr-1"
+              >
+                {TOOL_CATALOG.filter((tool) =>
+                  visibleToolNames.includes(tool.name),
+                ).map((tool) => {
+                  const active = selectedTool === tool.name;
+                  const schemaTag = TOOL_SCHEMA_TAG[tool.name];
+                  return (
+                    <button
+                      key={tool.name}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => selectToolAndPreview(tool.name)}
+                      className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-[10px] border px-3 py-2 text-left transition-all ${
+                        active
+                          ? "border-primary/60 bg-primary/12 shadow-sm"
+                          : "border-border bg-background/50 hover:border-border-strong hover:bg-card-elevated/70"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-mono text-[10px] font-bold ${
+                              tool.method === "GET"
+                                ? "text-positive"
+                                : "text-link"
+                            }`}
+                          >
+                            {tool.method}
+                          </span>
+                          <span className="truncate text-xs font-semibold text-foreground">
+                            {tool.label}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
+                          {tool.name}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-1.5 py-0.5 font-mono text-[9.5px] font-medium ${schemaTag.toneClass}`}
+                      >
+                        {schemaTag.badge}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Selected Tool Explanation & Endpoint */}
+              <div className="space-y-2 rounded-[12px] border border-border bg-background/50 p-3">
+                <p className="text-xs leading-relaxed text-foreground">
+                  {currentToolMeta.summary}
+                </p>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  {currentToolMeta.routingNote}
+                </p>
+                <p className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-border bg-card px-2.5 py-1 font-mono text-[10.5px] text-muted-foreground">
+                  <span
+                    className={`shrink-0 font-bold ${
+                      currentToolMeta.method === "GET"
+                        ? "text-positive"
+                        : "text-link"
+                    }`}
+                  >
+                    {currentToolMeta.method}
+                  </span>
+                  <span className="truncate">{currentToolMeta.restPath}</span>
+                </p>
+              </div>
             </div>
 
+            {/* Dynamic Tool Parameters */}
             <div className="space-y-3.5 border-t border-border pt-4">
               <div>
                 <label
@@ -803,7 +1170,7 @@ export function PlaygroundConsole() {
             <button
               type="submit"
               disabled={running}
-              className="tg-btn tg-btn-primary flex min-h-11 w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+              className="tg-btn tg-btn-primary ct-btn-glow flex min-h-11 w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
             >
               {running ? (
                 <>
@@ -890,11 +1257,12 @@ export function PlaygroundConsole() {
           </div>
         </section>
 
-        {/* Right Output Terminal */}
+        {/* Right Output Studio */}
         <section
           aria-labelledby="output-heading"
           className="space-y-4 lg:col-span-8"
         >
+          {/* Output Studio Header: Tabs + Sample/Live Toggle + Status */}
           <div className="ct-surface-featured flex flex-wrap items-center justify-between gap-3 rounded-[16px] px-4 py-3">
             <div
               role="tablist"
@@ -906,7 +1274,10 @@ export function PlaygroundConsole() {
                   { id: "report", label: t.playground.tabReport },
                   { id: "json", label: t.playground.tabJson },
                   { id: "evidence", label: t.playground.tabEvidence },
-                  { id: "request", label: locale === "id" ? "Request" : "Request" },
+                  {
+                    id: "request",
+                    label: locale === "id" ? "Kode Request" : "Request Code",
+                  },
                 ] as const
               ).map((tab) => {
                 const active = outputTab === tab.id;
@@ -929,58 +1300,156 @@ export function PlaygroundConsole() {
               })}
             </div>
 
-            <div
-              id="output-heading"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              className="font-mono text-xs text-muted-foreground"
-            >
-              {running ? (
-                <span className="inline-flex items-center gap-1.5 text-link">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {t.common.running}
-                </span>
-              ) : outcome ? (
-                <span>
-                  <strong className="text-foreground">{outcome.label}</strong> ·{" "}
-                  {formatDurationMs(outcome.latencyMs)}
-                </span>
-              ) : (
-                <span>{t.common.ready}</span>
-              )}
+            {/* Source Mode Switcher: Sample Schema vs Live Result */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                role="group"
+                aria-label={
+                  locale === "id" ? "Sumber preview output" : "Output source mode"
+                }
+                className="inline-flex items-center rounded-[10px] border border-border bg-background/70 p-1 font-mono text-[11px]"
+              >
+                <button
+                  type="button"
+                  onClick={() => setOutputSource("sample")}
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1 transition-colors ${
+                    !showingLive
+                      ? "bg-accent/20 font-semibold text-accent"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Sparkles className="h-3 w-3" aria-hidden="true" />
+                  <span>{locale === "id" ? "Contoh Skema" : "Sample Schema"}</span>
+                </button>
+                {outcome !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setOutputSource("live")}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1 transition-colors ${
+                      showingLive
+                        ? "bg-positive/20 font-semibold text-positive"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Terminal className="h-3 w-3" aria-hidden="true" />
+                    <span>{locale === "id" ? "Hasil Live" : "Live Result"}</span>
+                  </button>
+                )}
+              </div>
+
+              <div
+                id="output-heading"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="font-mono text-xs text-muted-foreground"
+              >
+                {running ? (
+                  <span className="inline-flex items-center gap-1.5 text-link">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {t.common.running}
+                  </span>
+                ) : showingLive ? (
+                  <span>
+                    <strong className="text-foreground">{outcome.label}</strong> ·{" "}
+                    {formatDurationMs(outcome.latencyMs)}
+                  </span>
+                ) : (
+                  <span className="text-accent">
+                    {locale === "id" ? "Sampel skema" : "Schema preview"}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
+          {/* Session Run History Bar */}
+          {runHistory.length > 0 && (
+            <div className="ct-surface-card flex flex-wrap items-center gap-2 rounded-[12px] px-3.5 py-2.5">
+              <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-subtle-foreground">
+                <History className="h-3.5 w-3.5" aria-hidden="true" />
+                {locale === "id" ? "Riwayat Sesi:" : "Session Runs:"}
+              </span>
+              {runHistory.map((item) => {
+                const isSelected = showingLive && outcome?.id === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setOutcome(item);
+                      setOutputSource("live");
+                      setSelectedTool(item.tool);
+                    }}
+                    className={`cursor-pointer rounded-full border px-2.5 py-1 font-mono text-[10.5px] transition-colors ${
+                      isSelected
+                        ? "border-positive/60 bg-positive/15 font-semibold text-positive"
+                        : "border-border bg-background/60 text-muted-foreground hover:border-border-strong hover:text-foreground"
+                    }`}
+                  >
+                    {item.label} · {formatDurationMs(item.latencyMs)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Request Code View (cURL / MCP / Python) */}
           {outputTab === "request" && (
             <div className="ct-code-swap space-y-4">
               <div className="ct-surface-featured overflow-hidden rounded-[16px]">
-                <div className="flex items-center justify-between border-b border-border bg-[#080B12] px-4 py-2.5">
-                  <span className="inline-flex items-center gap-2 font-mono text-xs font-semibold text-link">
-                    <Code2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>REST cURL · {selectedTool}</span>
-                  </span>
-                  <CopyButton text={liveCurl} label={locale === "id" ? "Salin" : "Copy"} />
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-[#080B12] px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Code2 className="h-3.5 w-3.5 text-link" aria-hidden="true" />
+                    <div
+                      role="tablist"
+                      aria-label="Request snippet language"
+                      className="inline-flex items-center gap-1"
+                    >
+                      {(
+                        [
+                          { id: "curl", label: "REST cURL" },
+                          { id: "mcp", label: "MCP JSON-RPC" },
+                          { id: "python", label: "Python httpx" },
+                        ] as const
+                      ).map((lang) => (
+                        <button
+                          key={lang.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={snippetLang === lang.id}
+                          onClick={() => setSnippetLang(lang.id)}
+                          className={`cursor-pointer rounded-[6px] px-2.5 py-1 font-mono text-[11px] font-medium transition-colors ${
+                            snippetLang === lang.id
+                              ? "bg-primary/20 text-link"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {lang.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <CopyButton
+                    text={snippetContent}
+                    label={locale === "id" ? "Salin" : "Copy"}
+                  />
                 </div>
                 <pre className="overflow-x-auto bg-code-bg p-4 font-mono text-xs leading-6 text-foreground">
-                  <code>{liveCurl}</code>
+                  <code>{snippetContent}</code>
                 </pre>
               </div>
 
-              <div className="ct-surface-featured overflow-hidden rounded-[16px]">
-                <div className="flex items-center justify-between border-b border-border bg-[#080B12] px-4 py-2.5">
-                  <span className="font-mono text-xs font-semibold text-link">
-                    MCP tools/call · {mcpEndpoint}
-                  </span>
-                  <CopyButton text={liveMcpPayload} label={locale === "id" ? "Salin" : "Copy"} />
-                </div>
-                <pre className="overflow-x-auto bg-code-bg p-4 font-mono text-xs leading-6 text-foreground">
-                  <code>{liveMcpPayload}</code>
-                </pre>
+              <div className="ct-surface-card rounded-[14px] p-4 font-mono text-[11px] text-muted-foreground">
+                <span className="font-semibold text-foreground">MCP Endpoint:</span>{" "}
+                {mcpEndpoint} ·{" "}
+                <span className="font-semibold text-foreground">REST Base:</span>{" "}
+                {apiBase}
               </div>
             </div>
           )}
 
+          {/* Running State */}
           {outputTab !== "request" && running && (
             <div className="ct-surface-featured overflow-hidden rounded-[16px]">
               <div className="h-[2px] w-full overflow-hidden bg-border/40">
@@ -1000,42 +1469,72 @@ export function PlaygroundConsole() {
             </div>
           )}
 
-          {outputTab !== "request" && !running && !outcome && (
-            <div className="ct-surface-card flex flex-col items-center justify-center rounded-[18px] border-dashed p-12 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10 text-link">
-                <Activity className="h-6 w-6" aria-hidden="true" />
-              </span>
-              <p className="mt-4 text-base font-semibold text-foreground">
-                {t.playground.emptyTitle}
-              </p>
-              <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
-                {t.playground.emptyDesc}
-              </p>
-              <button
-                type="button"
-                onClick={() => setOutputTab("request")}
-                className="mt-5 inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border-strong bg-card px-4 py-1.5 font-mono text-xs font-medium text-foreground transition-colors hover:bg-muted"
-              >
-                <Code2 className="h-3.5 w-3.5 text-link" aria-hidden="true" />
-                <span>{locale === "id" ? "Lihat Request cURL / MCP" : "Preview cURL / MCP Request"}</span>
-              </button>
-            </div>
-          )}
+          {/* Live Error Notice */}
+          {outputTab !== "request" &&
+            !running &&
+            showingLive &&
+            outcome?.error && (
+              <ApiNotice
+                status={outcome.error.status}
+                message={outcome.error.message}
+                retryAfterSeconds={outcome.error.retryAfterSeconds}
+              />
+            )}
 
-          {outputTab !== "request" && !running && outcome?.error && (
-            <ApiNotice
-              status={outcome.error.status}
-              message={outcome.error.message}
-              retryAfterSeconds={outcome.error.retryAfterSeconds}
-            />
-          )}
-
-          {outputTab !== "request" && !running && outcome && outcome.envelopes.length > 0 && (
+          {/* Active Envelopes (Sample Schema OR Live Result) */}
+          {outputTab !== "request" && !running && activeEnvelopes.length > 0 && (
             <div className="ct-code-swap space-y-4">
+              {!showingLive && (
+                <div className="flex flex-col justify-between gap-3 rounded-[14px] border border-accent/40 bg-accent/10 px-4 py-3 sm:flex-row sm:items-center">
+                  <div className="flex items-start gap-2.5">
+                    <Info
+                      className="mt-0.5 h-4 w-4 shrink-0 text-accent"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-accent">
+                        {locale === "id"
+                          ? "Contoh Skema Ilustratif · Bukan Data Live"
+                          : "Illustrative Schema Example · Not Live Data"}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-foreground">
+                        {locale === "id"
+                          ? "Ini adalah bentuk struktur respons asli EvidenceEnvelope[T] (lengkap dengan grafik, nilai null jujur, dan provenance audit). Klik Run untuk mengambil data real-time."
+                          : "Previewing the real EvidenceEnvelope[T] structure (interactive charts, honest null-safety, and audit provenance). Click Run to query live market ticks."}
+                      </p>
+                    </div>
+                  </div>
+                  {isSignedIn ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const params = buildParamsForTool(selectedTool);
+                        void executeSingleTool(
+                          selectedTool,
+                          params,
+                          currentToolMeta.label,
+                        );
+                      }}
+                      className="tg-btn tg-btn-primary inline-flex shrink-0 cursor-pointer text-xs"
+                    >
+                      <Play className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>{locale === "id" ? "Jalankan Live" : "Run Live"}</span>
+                    </button>
+                  ) : (
+                    <Link
+                      href="/login?next=/playground"
+                      className="tg-btn tg-btn-secondary inline-flex shrink-0 text-xs"
+                    >
+                      {locale === "id" ? "Masuk untuk Live" : "Sign in for Live"}
+                    </Link>
+                  )}
+                </div>
+              )}
+
               {outputTab === "report" &&
-                outcome.envelopes.map((env) => (
+                activeEnvelopes.map((env) => (
                   <EnvelopeFormattedReport
-                    key={env.evidence.evidence_id}
+                    key={`${showingLive ? "live" : "sample"}-${env.evidence.evidence_id}`}
                     envelope={env}
                   />
                 ))}
@@ -1043,22 +1542,22 @@ export function PlaygroundConsole() {
               {outputTab === "json" && (
                 <JsonViewer
                   title={
-                    outcome.envelopes.length === 1
-                      ? `${outcome.envelopes[0].tool} · EvidenceEnvelope`
-                      : `${outcome.label} · ${outcome.envelopes.length} Envelopes`
+                    activeEnvelopes.length === 1
+                      ? `${activeEnvelopes[0].tool} · ${showingLive ? "Live" : "Sample"} EvidenceEnvelope`
+                      : `${activePreset?.title ?? outcome?.label ?? "Preset"} · ${activeEnvelopes.length} Envelopes`
                   }
                   value={
-                    outcome.envelopes.length === 1
-                      ? outcome.envelopes[0]
-                      : outcome.envelopes
+                    activeEnvelopes.length === 1
+                      ? activeEnvelopes[0]
+                      : activeEnvelopes
                   }
                 />
               )}
 
               {outputTab === "evidence" &&
-                outcome.envelopes.map((env) => (
+                activeEnvelopes.map((env) => (
                   <EnvelopeEvidenceView
-                    key={env.evidence.evidence_id}
+                    key={`${showingLive ? "live" : "sample"}-ev-${env.evidence.evidence_id}`}
                     envelope={env}
                   />
                 ))}

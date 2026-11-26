@@ -15,7 +15,6 @@ export default function MarketPage() {
         pageKey="market"
         tools={["get_market_overview", "analyze_market_regime"]}
         fields={["quote"]}
-        autoRun
       />
     </Suspense>
   );

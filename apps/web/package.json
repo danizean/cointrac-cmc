@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/lib/intelligence-target.test.ts src/lib/format.test.ts src/lib/auth-redirect.test.ts src/lib/proxy-auth.test.ts src/lib/session-probe.test.ts src/lib/tool-input.test.ts src/lib/workspace-navigation.test.ts src/lib/site-url.test.ts src/lib/budget-state.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/intelligence-target.test.ts src/lib/format.test.ts src/lib/auth-redirect.test.ts src/lib/proxy-auth.test.ts src/lib/session-probe.test.ts src/lib/tool-input.test.ts src/lib/workspace-navigation.test.ts src/lib/site-url.test.ts src/lib/budget-state.test.ts src/lib/hidden-gems.test.ts src/lib/playground-samples.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

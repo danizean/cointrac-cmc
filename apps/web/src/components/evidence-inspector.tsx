@@ -42,7 +42,7 @@ export function EvidenceInspector({
   initialQueryId = null,
   initialError = null,
 }: EvidenceInspectorProps) {
-  const { t } = useAppPreferences();
+  const { t, locale } = useAppPreferences();
   const [records, setRecords] = useState<EvidenceRecord[]>(initialRecords);
   const [error, setError] = useState<{ status: number; message: string } | null>(
     initialError,
@@ -150,7 +150,7 @@ export function EvidenceInspector({
   return (
     <div className="space-y-5">
       {/* Filter + Lookup Panel */}
-      <div className="tg-panel space-y-4 rounded-2xl p-5">
+      <div className="ct-surface-featured space-y-4 rounded-[18px] p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex flex-1 flex-wrap items-end gap-3">
             <div className="min-w-[220px] flex-1 space-y-1.5">
@@ -162,7 +162,7 @@ export function EvidenceInspector({
               </label>
               <div className="relative">
                 <Search
-                  className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                  className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground"
                   aria-hidden="true"
                 />
                 <input
@@ -171,7 +171,7 @@ export function EvidenceInspector({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t.evidence.searchPlaceholder}
-                  className="w-full rounded-xl border border-border bg-card-elevated py-2 pl-9 pr-3 font-mono text-xs text-foreground"
+                  className="min-h-10 w-full rounded-[10px] border border-border bg-input-bg py-2 pl-9 pr-3 font-mono text-xs text-foreground placeholder:text-subtle-foreground transition-colors focus:border-primary focus:outline-none"
                 />
               </div>
             </div>
@@ -180,7 +180,7 @@ export function EvidenceInspector({
               type="button"
               disabled={loadingList}
               onClick={handleRefresh}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-card-elevated px-4 py-2 font-mono text-xs font-semibold text-foreground transition-colors duration-200 hover:border-primary/50 hover:bg-muted/70 disabled:opacity-60"
+              className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[10px] border border-border-strong bg-card px-4 py-2 font-mono text-xs font-semibold text-foreground transition-colors duration-200 hover:border-primary/50 hover:bg-muted/70 disabled:opacity-60"
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${loadingList ? "animate-spin" : ""}`}
@@ -190,7 +190,7 @@ export function EvidenceInspector({
             </button>
           </div>
 
-          <form onSubmit={handleLookupSubmit} className="flex w-full min-w-0 flex-wrap items-end gap-2">
+          <form onSubmit={handleLookupSubmit} className="flex w-full min-w-0 flex-wrap items-end gap-2 lg:w-auto lg:min-w-[340px]">
             <div className="min-w-0 flex-1 space-y-1.5">
               <label
                 htmlFor="evidence-lookup"
@@ -204,12 +204,12 @@ export function EvidenceInspector({
                 value={lookupId}
                 onChange={(e) => setLookupId(e.target.value)}
                 placeholder="ev_a1b2c3d4e5"
-                className="w-full min-w-0 rounded-xl border border-border bg-card-elevated px-3 py-2 font-mono text-xs text-foreground"
+                className="min-h-10 w-full min-w-0 rounded-[10px] border border-border bg-input-bg px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle-foreground transition-colors focus:border-primary focus:outline-none"
               />
             </div>
             <button
               type="submit"
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-mono text-xs font-bold text-accent-foreground transition-opacity duration-200 hover:opacity-90"
+              className="tg-btn tg-btn-primary ct-btn-glow inline-flex min-h-10 cursor-pointer items-center gap-1.5 px-4 py-2 font-mono text-xs font-semibold"
             >
               <FileSearch className="h-3.5 w-3.5" aria-hidden="true" />
               {t.common.inspect}
@@ -221,7 +221,7 @@ export function EvidenceInspector({
           <div
             role="group"
             aria-label="Filter by data mode"
-            className="inline-flex flex-wrap items-center gap-1 rounded-full border border-border bg-card-elevated p-1"
+            className="inline-flex flex-wrap items-center gap-1 rounded-[10px] border border-border bg-background/70 p-1"
           >
             {MODE_FILTERS.map((opt) => {
               const active = modeFilter === opt.value;
@@ -231,9 +231,9 @@ export function EvidenceInspector({
                   type="button"
                   aria-pressed={active}
                   onClick={() => setModeFilter(opt.value)}
-                  className={`cursor-pointer whitespace-nowrap rounded-full px-3 py-1 font-mono text-[11px] font-semibold transition-all duration-150 ${
+                  className={`cursor-pointer whitespace-nowrap rounded-[7px] px-3 py-1 font-mono text-[11px] font-medium transition-colors duration-150 ${
                     active
-                      ? "bg-foreground text-background shadow-xs"
+                      ? "bg-primary text-white shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -261,14 +261,27 @@ export function EvidenceInspector({
 
       {error && error.status !== 401 ? <ApiNotice status={error.status} message={error.message} /> : null}
 
-      <div className="tg-panel max-w-full overflow-hidden rounded-2xl">
+      <div className="ct-surface-featured max-w-full overflow-hidden rounded-[18px]">
         {error?.status === 401 ? (
-          <div className="space-y-3 p-6">
-            <p className="text-sm font-semibold text-foreground">Sign in to read this account&apos;s evidence.</p>
-            <p className="text-sm text-muted-foreground">{error.message}</p>
-            <Link href="/login?next=/evidence" className="tg-btn tg-btn-primary inline-flex">
-              Sign in
-            </Link>
+          <div className="flex flex-col justify-between gap-4 p-6 sm:flex-row sm:items-center sm:p-8">
+            <div className="space-y-1.5">
+              <p className="text-base font-semibold text-foreground">
+                {locale === "id"
+                  ? "Masuk untuk melihat riwayat evidence akun Anda."
+                  : "Sign in to read this account\u2019s evidence."}
+              </p>
+              <p className="max-w-xl text-xs leading-relaxed text-muted-foreground">
+                {error.message}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Link href="/playground" className="tg-btn tg-btn-secondary inline-flex shrink-0 text-xs">
+                {locale === "id" ? "Buka Playground" : "Explore Playground"}
+              </Link>
+              <Link href="/login?next=/evidence" className="tg-btn tg-btn-primary ct-btn-glow inline-flex shrink-0 text-xs">
+                {locale === "id" ? "Masuk" : "Sign in"}
+              </Link>
+            </div>
           </div>
         ) : filteredRecords.length === 0 ? (
           <div className="p-12 text-center">
@@ -428,7 +441,7 @@ export function EvidenceInspector({
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-border bg-card-elevated/70 p-3.5">
+                    <div className="ct-surface-card rounded-[14px] p-3.5">
                       <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         {t.evidence.createdUtc}
                       </p>
@@ -436,7 +449,7 @@ export function EvidenceInspector({
                         {formatUtc(selected.created_at)}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-border bg-card-elevated/70 p-3.5">
+                    <div className="ct-surface-card rounded-[14px] p-3.5">
                       <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         {t.playground.creditCost}
                       </p>
@@ -444,7 +457,7 @@ export function EvidenceInspector({
                         {selected.credit_cost}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-border bg-card-elevated/70 p-3.5">
+                    <div className="ct-surface-card rounded-[14px] p-3.5">
                       <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         {t.evidence.canonicalIds}
                       </p>
