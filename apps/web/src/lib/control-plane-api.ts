@@ -239,6 +239,16 @@ export interface AdminAIUserRow {
   estimated_cost_30d_usd: number;
 }
 
+export interface AdminDailySeriesPoint {
+  date_utc: string;
+  requests: number;
+  cached: number;
+  rate_limited: number;
+  errors: number;
+  tokens: number;
+  estimated_cost_usd: number;
+}
+
 export interface AdminAIOverviewPayload {
   config: AIRuntimeConfigPayload;
   summary: {
@@ -249,7 +259,14 @@ export interface AdminAIOverviewPayload {
     cache_hit_rate_pct: number | null;
     rate_limited_today: number;
     active_users_30d: number;
+    error_count_30d?: number;
+    avg_latency_ms?: number | null;
+    total_registered_users?: number;
+    super_admin_count?: number;
+    ai_paused_users?: number;
+    custom_limit_users?: number;
   };
+  daily_series?: AdminDailySeriesPoint[];
   top_tools: Array<{ tool_name: string; calls: number }>;
   users: AdminAIUserRow[];
   recent_logs: AIUsageLogItem[];

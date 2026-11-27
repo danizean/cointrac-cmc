@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -75,9 +75,12 @@ async def get_admin_ai_overview(
     req_24h = 0
     req_30d = 0
     rate_limited_24h = 0
+    error_count_30d = 0
     tokens_30d = 0
     cost_30d = 0.0
     cache_hits = 0
+    latency_sum_30d = 0
+    latency_samples_30d = 0
     tool_counts: dict[str, int] = defaultdict(int)
 
     per_user_today_req: dict[str, int] = defaultdict(int)
@@ -86,23 +89,50 @@ async def get_admin_ai_overview(
     per_user_30d_tok: dict[str, int] = defaultdict(int)
     per_user_30d_cost: dict[str, float] = defaultdict(float)
 
+    daily_buckets: dict[str, dict[str, Any]] = {}
+    for offset in range(13, -1, -1):
+        day_key = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
+        daily_buckets[day_key] = {
+            "date_utc": day_key,
+            "requests": 0,
+            "cached": 0,
+            "rate_limited": 0,
+            "errors": 0,
+            "tokens": 0,
+            "estimated_cost_usd": 0.0,
+        }
+
     email_by_uid = {str(p["id"]): p.get("email") for p in profiles if p.get("id")}
 
     for row in logs:
         uid = str(row.get("user_id") or "")
         status = str(row.get("status") or "")
         created_at = str(row.get("created_at") or "")
+        log_day = created_at[:10]
         is_today = created_at.startswith(day_prefix)
         tot_tok = int(row.get("total_tokens") or 0)
         est_cost = float(row.get("estimated_cost_usd") or 0.0)
+        lat_ms = int(row.get("latency_ms") or 0)
 
-        if status == "RATE_LIMITED" and is_today:
-            rate_limited_24h += 1
+        if status == "RATE_LIMITED":
+            if is_today:
+                rate_limited_24h += 1
+            if log_day in daily_buckets:
+                daily_buckets[log_day]["rate_limited"] += 1
+
+        if status == "ERROR":
+            error_count_30d += 1
+            if log_day in daily_buckets:
+                daily_buckets[log_day]["errors"] += 1
 
         if status in {"OK", "CACHED"}:
             req_30d += 1
             tokens_30d += tot_tok
             cost_30d += est_cost
+            if lat_ms > 0:
+                latency_sum_30d += lat_ms
+                latency_samples_30d += 1
+            is_cached = row.get("cache_hit") is True or status == "CACHED"
             if is_today:
                 req_24h += 1
                 per_user_today_req[uid] += 1
@@ -110,10 +140,16 @@ async def get_admin_ai_overview(
             per_user_30d_req[uid] += 1
             per_user_30d_tok[uid] += tot_tok
             per_user_30d_cost[uid] += est_cost
-            if row.get("cache_hit") is True or status == "CACHED":
+            if is_cached:
                 cache_hits += 1
             for t in row.get("tools_called") or []:
                 tool_counts[str(t)] += 1
+            if log_day in daily_buckets:
+                daily_buckets[log_day]["requests"] += 1
+                daily_buckets[log_day]["tokens"] += tot_tok
+                daily_buckets[log_day]["estimated_cost_usd"] += est_cost
+                if is_cached:
+                    daily_buckets[log_day]["cached"] += 1
 
     users_rows: list[dict[str, Any]] = []
     seen_uids: set[str] = set()
@@ -212,8 +248,29 @@ async def get_admin_ai_overview(
             "error_code": r.get("error_code"),
             "created_at": r.get("created_at"),
         }
-        for r in logs[:30]
+        for r in logs[:100]
     ]
+
+    daily_series = [
+        {
+            **bucket,
+            "estimated_cost_usd": round(float(bucket["estimated_cost_usd"]), 6),
+        }
+        for bucket in daily_buckets.values()
+    ]
+
+    super_admin_count = sum(1 for u in users_rows if u["platform_role"] == "super_admin")
+    ai_paused_count = sum(1 for u in users_rows if not u["ai_enabled"])
+    custom_limit_count = sum(
+        1
+        for u in users_rows
+        if (
+            not u["ai_enabled"]
+            or u["rate_limit_per_min"] is not None
+            or u["daily_requests_limit"] is not None
+            or u["daily_tokens_limit"] is not None
+        )
+    )
 
     return {
         "config": public_cfg.model_dump(mode="json"),
@@ -225,7 +282,16 @@ async def get_admin_ai_overview(
             "cache_hit_rate_pct": round(100.0 * cache_hits / req_30d, 2) if req_30d > 0 else None,
             "rate_limited_today": rate_limited_24h,
             "active_users_30d": sum(1 for v in per_user_30d_req.values() if v > 0),
+            "error_count_30d": error_count_30d,
+            "avg_latency_ms": (
+                round(latency_sum_30d / latency_samples_30d) if latency_samples_30d > 0 else None
+            ),
+            "total_registered_users": len(users_rows),
+            "super_admin_count": super_admin_count,
+            "ai_paused_users": ai_paused_count,
+            "custom_limit_users": custom_limit_count,
         },
+        "daily_series": daily_series,
         "top_tools": [
             {"tool_name": name, "calls": count}
             for name, count in sorted(tool_counts.items(), key=lambda kv: (-kv[1], kv[0]))

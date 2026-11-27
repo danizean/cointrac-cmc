@@ -332,5 +332,51 @@ def test_super_admin_routes_strictly_protected_and_mask_api_key(ai_env):
     # Can view overview telemetry
     overview = client.get("/v1/admin/ai/overview", headers=hdr_admin)
     assert overview.status_code == 200
-    assert overview.json()["config"]["api_key_hint"] == "***9876"
-    assert len(overview.json()["users"]) == 2
+    ov_json = overview.json()
+    assert ov_json["config"]["api_key_hint"] == "***9876"
+    assert len(ov_json["users"]) == 2
+    assert ov_json["summary"]["total_registered_users"] == 2
+    assert ov_json["summary"]["super_admin_count"] == 1
+    assert len(ov_json["daily_series"]) == 14
+
+
+@pytest.mark.asyncio
+async def test_muse_length_empty_content_recovers_cleanly(ai_env):
+    class _LengthThenAnswerTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat_completion(self, **kwargs):
+            del kwargs
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "usage": {"prompt_tokens": 120, "completion_tokens": 900},
+                    "choices": [
+                        {
+                            "finish_reason": "length",
+                            "message": {"role": "assistant", "content": None},
+                        }
+                    ],
+                }
+            return {
+                "usage": {"prompt_tokens": 200, "completion_tokens": 60},
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "**Recovered:** BTC solid."},
+                    }
+                ],
+            }
+
+    svc = AIAnalystService(store=ai_env["store"], transport=_LengthThenAnswerTransport())
+    install_ai_analyst_service(svc)
+    client = ai_env["client"]
+    hdr_user = {"Authorization": f"Bearer {ai_env['tok_user']}"}
+    res = client.post(
+        "/v1/ai/chat",
+        headers=hdr_user,
+        json={"messages": [{"role": "user", "content": "Ringkas BTC"}], "locale": "id"},
+    )
+    assert res.status_code == 200
+    assert "Recovered" in res.json()["answer"]

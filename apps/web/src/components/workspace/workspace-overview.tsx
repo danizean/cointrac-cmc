@@ -17,6 +17,7 @@ import {
   Loader2,
   Plug,
   RefreshCw,
+  Sparkles,
   TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
@@ -367,6 +368,36 @@ export function WorkspaceOverview() {
           onRetry={() => void handleRefresh()}
         />
       ) : null}
+
+      {/* CoinTrac AI Spotlight */}
+      <Card className="ct-surface-featured p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-primary/40 bg-primary/14 text-link">
+              <Sparkles className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold text-foreground">CoinTrac AI Analyst</h2>
+                <Badge tone="brand">Muse Spark 1.3</Badge>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {locale === "id"
+                  ? "Tanya kondisi pasar, Hidden Gems, movers anti-FOMO, atau perbandingan koin dengan hasil ringkas berbasis bukti live."
+                  : "Ask for market regime, Hidden Gems, anti-chase movers, or coin comparisons backed by live deterministic evidence."}
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/app/ai"
+            className="tg-btn tg-btn-primary ct-btn-glow inline-flex min-h-10 items-center gap-1.5 px-4 text-xs"
+          >
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{locale === "id" ? "Buka CoinTrac AI" : "Launch CoinTrac AI"}</span>
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
+        </div>
+      </Card>
 
       {/* 2. Compact 4-Metric Telemetry Bar — zero bloated cards, skeleton only on numbers */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 const MAX_BODY_BYTES = 64 * 1024;
 const SAFE_TOKEN = /^[A-Za-z0-9_-]{8,128}$/;
 const UPSTREAM_JSON_TIMEOUT_MS = 25_000;
-const UPSTREAM_AI_TIMEOUT_MS = 55_000;
+const UPSTREAM_AI_TIMEOUT_MS = 75_000;
 
 export type IntelligenceProxyRouteContext = {
   params: Promise<{ path: string[] }>;

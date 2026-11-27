@@ -32,13 +32,14 @@ describe("sidebar collapse preference", () => {
 });
 
 describe("R3 Workspace Navigation Architecture", () => {
-  it("exposes exactly 7 top-level navigation items across 3 groups with unique routes", () => {
+  it("exposes exactly 8 top-level navigation items across 3 groups with unique routes", () => {
     assert.equal(WORKSPACE_GROUPS.length, 3);
-    assert.equal(WORKSPACE_NAV_ITEMS.length, 7);
+    assert.equal(WORKSPACE_NAV_ITEMS.length, 8);
     assert.deepEqual(
       WORKSPACE_NAV_ITEMS.map((item) => item.href),
       [
         "/app",
+        "/app/ai",
         "/app/market",
         "/app/keys",
         "/app/connections",
@@ -52,8 +53,8 @@ describe("R3 Workspace Navigation Architecture", () => {
 
   it("highlights Market Intelligence active for all 8 intelligence desk sub-routes", () => {
     const overview = WORKSPACE_NAV_ITEMS[0];
-    const market = WORKSPACE_NAV_ITEMS[1];
-    const keys = WORKSPACE_NAV_ITEMS[2];
+    const market = WORKSPACE_NAV_ITEMS[2];
+    const keys = WORKSPACE_NAV_ITEMS[3];
 
     assert.equal(isWorkspaceNavActive(overview, "/app"), true);
     assert.equal(isWorkspaceNavActive(overview, "/app/market"), false);

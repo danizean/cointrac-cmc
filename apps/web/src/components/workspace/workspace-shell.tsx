@@ -15,7 +15,6 @@ import {
   Plug,
   Search,
   Settings,
-  ShieldCheck,
   Sparkles,
   Sun,
   X,
@@ -27,7 +26,6 @@ import { useAppPreferences } from "@/components/app-preferences";
 import { EngineStatusPill } from "@/components/engine-status-pill";
 import { CoinTracMark } from "@/components/site-header";
 import { Breadcrumb } from "@/components/ui/primitives";
-import { fetchMyProfile } from "@/lib/control-plane-api";
 import { workspaceCopy } from "@/lib/workspace-copy";
 import {
   breadcrumbsForWorkspacePath,
@@ -44,6 +42,7 @@ import { CommandPalette } from "./command-palette";
 
 const NAV_ICONS: Record<WorkspaceNavId, ComponentType<{ className?: string }>> = {
   overview: LayoutDashboard,
+  ai: Sparkles,
   market: LineChart,
   keys: KeyRound,
   connections: Plug,
@@ -196,7 +195,6 @@ export function WorkspaceShell({
   const [collapsed, setCollapsed] = useState(false);
   const [collapseReady, setCollapseReady] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const asideRef = useRef<HTMLElement | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement | null>(null);
   const closeDrawerBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -204,19 +202,7 @@ export function WorkspaceShell({
   const breadcrumbs = breadcrumbsForWorkspacePath(pathname, locale);
   const currentBreadcrumbLabel = breadcrumbs[breadcrumbs.length - 1]?.label ?? "Workspace";
   const showMarketSubNav = isMarketIntelligencePath(pathname);
-
-  useEffect(() => {
-    let active = true;
-    void fetchMyProfile().then((res) => {
-      if (!active || !res.ok) return;
-      if (res.data.is_super_admin) {
-        setIsSuperAdmin(true);
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const fullBleedCanvas = pathname === "/app/ai" || pathname.startsWith("/app/ai/");
 
   useEffect(() => {
     // The server render stays expanded. The saved preference is applied after mount.
@@ -454,20 +440,6 @@ export function WorkspaceShell({
               <span className="hidden sm:inline">CoinTrac AI</span>
             </Link>
 
-            {isSuperAdmin ? (
-              <Link
-                href="/app/admin"
-                className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors ${
-                  pathname === "/app/admin" || pathname.startsWith("/app/admin/")
-                    ? "border-primary/50 bg-primary/14 text-link"
-                    : "border-border/90 bg-card/60 text-foreground hover:border-primary/40 hover:text-link"
-                }`}
-              >
-                <ShieldCheck className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
-                <span className="hidden md:inline">Super Admin</span>
-              </Link>
-            ) : null}
-
             <div className="hidden md:flex">
               <EngineStatusPill compact />
             </div>
@@ -532,10 +504,17 @@ export function WorkspaceShell({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className={fullBleedCanvas ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto"}>
           {showMarketSubNav ? <MarketSubNav pathname={pathname} /> : null}
-          <main id="content" className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+          <main
+            id="content"
+            className={
+              fullBleedCanvas ? "h-full min-w-0" : "min-w-0 px-4 py-6 sm:px-6 lg:px-8"
+            }
+          >
+            <div className={fullBleedCanvas ? "h-full w-full" : "mx-auto w-full max-w-[1440px]"}>
+              {children}
+            </div>
           </main>
         </div>
       </div>

@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { AdminOverviewView } from "@/components/admin/admin-overview-view";
 import { DeskSkeleton } from "@/components/ui/primitives";
-import { SuperAdminConsole } from "@/components/workspace/super-admin-console";
 
 export const metadata: Metadata = {
-  title: "Super Admin Governance",
+  title: "Executive Overview · Super Admin",
   description:
-    "Restricted Super Admin dashboard for CoinTrac AI usage monitoring, Muse Spark 1.3 runtime settings, and per-user rate limit management.",
+    "CoinTrac Super Admin executive overview: Muse Spark 1.3 performance, token spend, cache efficiency, and governance signals.",
 };
 
-export default function SuperAdminPage() {
+export default function SuperAdminOverviewPage() {
   return (
     <Suspense fallback={<DeskSkeleton />}>
-      <SuperAdminConsole />
+      <AdminOverviewView />
     </Suspense>
   );
 }

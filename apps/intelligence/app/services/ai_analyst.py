@@ -213,7 +213,7 @@ class _StoredConfig:
     default_daily_requests: int = 50
     default_daily_tokens: int = 150_000
     max_tool_rounds: int = 4
-    max_output_tokens: int = 900
+    max_output_tokens: int = 2048
     temperature: float = 0.2
     response_cache_ttl_seconds: int = 120
     system_directive: str = ""
@@ -800,7 +800,7 @@ class HttpxMuseTransport:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        async with httpx.AsyncClient(timeout=28.0) as client:
+        async with httpx.AsyncClient(timeout=38.0) as client:
             response = await client.post(
                 endpoint,
                 headers={
@@ -1560,6 +1560,10 @@ class AIAnalystService:
         final_answer = ""
 
         try:
+            is_reasoning_model = "muse" in cfg.model.lower()
+            effective_max_tokens = (
+                max(cfg.max_output_tokens, 1800) if is_reasoning_model else cfg.max_output_tokens
+            )
             for round_idx in range(cfg.max_tool_rounds + 1):
                 allow_tools = _TOOL_DEFINITIONS if round_idx < cfg.max_tool_rounds else []
                 raw = await self.transport.chat_completion(
@@ -1568,7 +1572,7 @@ class AIAnalystService:
                     model=cfg.model,
                     messages=conversation,
                     tools=allow_tools,
-                    max_tokens=cfg.max_output_tokens,
+                    max_tokens=effective_max_tokens,
                     temperature=cfg.temperature,
                 )
                 usage_raw = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
@@ -1584,6 +1588,7 @@ class AIAnalystService:
                 choices = raw.get("choices") if isinstance(raw.get("choices"), list) else []
                 if not choices or not isinstance(choices[0], dict):
                     raise RuntimeError("Muse response contained no choices")
+                finish_reason = str(choices[0].get("finish_reason") or "")
                 msg = choices[0].get("message")
                 if not isinstance(msg, dict):
                     raise RuntimeError("Muse choice contained no message")
@@ -1630,6 +1635,47 @@ class AIAnalystService:
                     continue
 
                 final_answer = str(msg.get("content") or "").strip()
+                if not final_answer and finish_reason == "length":
+                    # Reasoning token budget filled max_tokens before emitting text;
+                    # execute one direct synthesis turn with higher token headroom.
+                    retry_raw = await self.transport.chat_completion(
+                        base_url=cfg.base_url,
+                        api_key=key,
+                        model=cfg.model,
+                        messages=[
+                            *conversation,
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Output the concise final summary now with observed figures "
+                                    "and evidence_id citations directly; skip long reasoning."
+                                ),
+                            },
+                        ],
+                        tools=[],
+                        max_tokens=max(effective_max_tokens, 2600),
+                        temperature=cfg.temperature,
+                    )
+                    r_usage = (
+                        retry_raw.get("usage") if isinstance(retry_raw.get("usage"), dict) else {}
+                    )
+                    total_in += int(r_usage.get("prompt_tokens") or 0)
+                    r_details = (
+                        r_usage.get("prompt_tokens_details")
+                        if isinstance(r_usage.get("prompt_tokens_details"), dict)
+                        else {}
+                    )
+                    total_cached_in += int(r_details.get("cached_tokens") or 0)
+                    total_out += int(r_usage.get("completion_tokens") or 0)
+                    r_choices = (
+                        retry_raw.get("choices")
+                        if isinstance(retry_raw.get("choices"), list)
+                        else []
+                    )
+                    if r_choices and isinstance(r_choices[0], dict):
+                        r_msg = r_choices[0].get("message")
+                        if isinstance(r_msg, dict):
+                            final_answer = str(r_msg.get("content") or "").strip()
                 break
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)

@@ -18,6 +18,7 @@ export function readSidebarCollapsed(read: (key: string) => string | null): bool
 
 export type WorkspaceNavId =
   | "overview"
+  | "ai"
   | "market"
   | "keys"
   | "connections"
@@ -53,6 +54,16 @@ export const WORKSPACE_NAV_ITEMS: ReadonlyArray<WorkspaceNavItem> = [
     description: {
       en: "Workspace readiness, quickstart, and recent activity",
       id: "Kesiapan ruang kerja, panduan cepat, dan aktivitas terbaru",
+    },
+  },
+  {
+    id: "ai",
+    group: "workspace",
+    href: "/app/ai",
+    label: { en: "CoinTrac AI", id: "CoinTrac AI" },
+    description: {
+      en: "Precision Muse Spark 1.3 market analyst with live tool calling & evidence",
+      id: "Analis AI Muse Spark 1.3 presisi dengan tool calling langsung & bukti data",
     },
   },
   {

@@ -1,9 +1,9 @@
 import { LogOut, MailWarning } from "lucide-react";
 import { redirect } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
+import { AppRoleShell } from "@/components/app-role-shell";
 import { ResendVerificationButton } from "@/components/auth/resend-verification-button";
-import { WorkspaceShell } from "@/components/workspace/workspace-shell";
-import { getVerifiedServerIdentity } from "@/lib/supabase/server";
+import { getVerifiedServerIdentity, resolveServerPlatformRole } from "@/lib/supabase/server";
 
 async function AuthenticatedGate({ children }: { children: ReactNode }) {
   const { configured, user, emailVerified } = await getVerifiedServerIdentity();
@@ -51,7 +51,13 @@ async function AuthenticatedGate({ children }: { children: ReactNode }) {
     );
   }
 
-  return <WorkspaceShell email={user.email ?? ""}>{children}</WorkspaceShell>;
+  const platformRoleStatus = await resolveServerPlatformRole();
+
+  return (
+    <AppRoleShell email={user.email ?? ""} platformRoleStatus={platformRoleStatus}>
+      {children}
+    </AppRoleShell>
+  );
 }
 
 export default function ProtectedAppLayout({ children }: { children: ReactNode }) {
