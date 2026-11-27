@@ -56,6 +56,10 @@ Create a host `.env` from `.env.example`. The compose file reads it and does not
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only |
 | `SANDBOX_API_KEY` | Server-only `ct_live_` key, if the server playground path needs it |
 | `ENGINE_VERSION` | `cointrac-intelligence-v1.0.0` |
+| `MUSE_API_KEY` | Server-only Meta Muse Spark 1.3 credential (`dev.meta.ai`), or set in `/app/admin` |
+| `MUSE_BASE_URL` | `https://api.meta.ai/v1` |
+| `MUSE_MODEL` | `muse-spark-1.3` |
+| `SUPER_ADMIN_EMAILS` | Comma-separated verified emails granted Super Admin access (`/app/admin`) |
 
 The compose file sets these non-secret routing values itself:
 
@@ -109,5 +113,5 @@ These items block a safe public deployment. This repository does not perform the
 1. Make IDwebhost answer for the zone, then add the A records.
 2. Issue certificates and attach them to the existing Nginx. Port 443 was closed at audit time.
 3. Restrict SSH root login and password authentication, then enable a firewall that still allows the required HTTP ports.
-4. Publish the intelligence image, copy the host `.env`, and start the compose file.
+4. Apply SQL migrations through `supabase/migrations/015_cointrac_ai_admin.sql` on the target Supabase project, publish the intelligence image, copy the host `.env`, and start the compose file.
 5. Confirm `GET /health` on loopback returns `engine_version` `cointrac-intelligence-v1.0.0` before opening the proxy.

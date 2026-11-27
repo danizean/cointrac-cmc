@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     template: "%s · CoinTrac",
   },
   description:
-    "CoinTrac turns CoinMarketCap feeds into deterministic REST endpoints, Hidden Gem Discovery, and 11 MCP tools with audited provenance and null-safe responses.",
+    "CoinTrac turns CoinMarketCap feeds into deterministic REST endpoints, Hidden Gem Discovery, and 14 MCP tools with audited provenance and null-safe responses.",
   keywords: [
     "crypto market intelligence API",
     "CoinMarketCap MCP server",
@@ -72,7 +72,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "CoinTrac — Crypto Market Intelligence API & MCP Server",
     description:
-      "Deterministic crypto market intelligence via REST API, Hidden Gem Discovery, and 11 MCP tools.",
+      "Deterministic crypto market intelligence via REST API, Hidden Gem Discovery, and 14 MCP tools.",
     images: ["/brand/cointrac-logo.png"],
   },
   icons: {

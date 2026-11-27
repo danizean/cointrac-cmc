@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "MCP Integrations — ChatGPT, Claude, Gemini & Hermes",
   alternates: { canonical: "/integrations" },
   description:
-    "Connect ChatGPT, Claude, Gemini, Hermes, Cursor, or Antigravity to CoinTrac's Streamable HTTP MCP server with 11 tools, 5 resources, 3 prompts, and OAuth 2.1 + PKCE.",
+    "Connect ChatGPT, Claude, Gemini, Hermes, Cursor, or Antigravity to CoinTrac's Streamable HTTP MCP server with 14 tools, 6 resources, 3 prompts, and OAuth 2.1 + PKCE.",
   keywords: [
     "CoinTrac MCP integrations",
     "Streamable HTTP MCP server",
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     "crypto market tools MCP",
   ],
   openGraph: {
-    title: "CoinTrac MCP Integrations — 11 Tools, 5 Resources & 3 Prompts",
+    title: "CoinTrac MCP Integrations — 14 Tools, 6 Resources & 3 Prompts",
     description:
       "Connect AI assistants over HTTPS Streamable HTTP or local stdio using API key or OAuth 2.1 Authorization Code + PKCE.",
     url: new URL("/integrations", site),
@@ -54,7 +54,7 @@ export default function IntegrationsPage() {
         name: "CoinTrac MCP Integrations",
         isPartOf: { "@id": `${origin}/#website` },
         description:
-          "Streamable HTTP MCP integration catalog for ChatGPT, Claude, Gemini, and Hermes with 11 tools, 5 resources, and 3 prompts.",
+          "Streamable HTTP MCP integration catalog for ChatGPT, Claude, Gemini, and Hermes with 14 tools, 6 resources, and 3 prompts.",
       },
       {
         "@type": "BreadcrumbList",

@@ -30,14 +30,83 @@ class UsageReader(Protocol):
     async def read_user_plan(self, owner_id: str) -> str: ...
 
 
+def _normalize_scan_run_log(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Project an hg_scan_runs row into the request_logs ledger shape without duplication."""
+    status = str(row.get("status") or "").upper()
+    credits = int(row.get("cmc_credits_consumed") or 0)
+    terminal_statuses = {"COMPLETED", "PARTIAL", "FAILED", "CANCELLED"}
+    if status not in terminal_statuses and credits <= 0:
+        return None
+
+    started_dt = _parse_iso(row.get("started_at") or row.get("created_at"))
+    completed_dt = _parse_iso(row.get("completed_at"))
+    latency_ms = (
+        max(0, int((completed_dt - started_dt).total_seconds() * 1000))
+        if started_dt is not None and completed_dt is not None
+        else 0
+    )
+
+    source_meta = row.get("source_metadata") if isinstance(row.get("source_metadata"), dict) else {}
+    cache_hit = credits == 0 and bool(source_meta.get("reused_cache"))
+
+    if status in {"COMPLETED", "PARTIAL"}:
+        status_code = 200
+    elif status == "CANCELLED":
+        status_code = 499
+    elif status == "FAILED":
+        status_code = 500
+    else:
+        status_code = 202
+
+    created_at = str(
+        row.get("completed_at") or row.get("created_at") or row.get("started_at") or ""
+    )
+    return {
+        "surface": "rest",
+        "tool_name": "hidden_gem_scan",
+        "status_code": status_code,
+        "latency_ms": latency_ms,
+        "cache_hit": cache_hit,
+        "credit_cost": credits,
+        "evidence_id": None,
+        "created_at": created_at,
+    }
+
+
+def _summarize_rows(rows: list[dict[str, Any]]) -> dict[str, object]:
+    """Aggregate surface counts, cache efficiency, latency, and CMC credits from usage logs."""
+    counts = {"mcp": 0, "rest": 0, "playground": 0}
+    credits = 0
+    hits = 0
+    latency = 0
+    for row in rows:
+        surface = str(row.get("surface") or "")
+        if surface in counts:
+            counts[surface] += 1
+        credits += int(row.get("credit_cost") or 0)
+        latency += int(row.get("latency_ms") or 0)
+        if row.get("cache_hit") is True:
+            hits += 1
+    total = len(rows)
+    hit_rate = None if total == 0 else round(100 * hits / total, 2)
+    average = None if total == 0 else round(latency / total, 2)
+    return {
+        "calls_by_surface": counts,
+        "cache_hit_rate_pct": hit_rate,
+        "total_cmc_credits": credits,
+        "average_latency_ms": average,
+        "active_data_mode": None,
+    }
+
+
 class SupabaseUsageReader:
     async def read_user_logs(self, owner_id: str, limit: int = 1000) -> list[dict[str, Any]]:
         from app.core.db import supabase_client
 
         def read() -> list[dict[str, Any]]:
-            response = (
-                supabase_client()
-                .table("request_logs")
+            client = supabase_client()
+            req_response = (
+                client.table("request_logs")
                 .select(
                     "surface,tool_name,status_code,latency_ms,"
                     "cache_hit,credit_cost,evidence_id,created_at"
@@ -47,7 +116,29 @@ class SupabaseUsageReader:
                 .limit(limit)
                 .execute()
             )
-            return [dict(r) for r in (response.data or [])]
+            scan_response = (
+                client.table("hg_scan_runs")
+                .select(
+                    "id,status,cmc_credits_consumed,source_metadata,"
+                    "started_at,completed_at,created_at"
+                )
+                .eq("user_id", owner_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            combined: list[dict[str, Any]] = [dict(r) for r in (req_response.data or [])]
+            for raw_scan in scan_response.data or []:
+                normalized = _normalize_scan_run_log(dict(raw_scan))
+                if normalized is not None:
+                    combined.append(normalized)
+
+            epoch = datetime.min.replace(tzinfo=UTC)
+            combined.sort(
+                key=lambda item: _parse_iso(item.get("created_at")) or epoch,
+                reverse=True,
+            )
+            return combined[:limit]
 
         return await asyncio.to_thread(read)
 
@@ -105,48 +196,13 @@ async def summary(auth: AuthContext = Depends(require_api_key)) -> dict[str, obj
     if cached is not None and cached[0] > now:
         return dict(cached[1])
 
-    from app.core.db import supabase_client
-
     owner_id = auth.user_id
 
-    def read() -> dict[str, object]:
-        response = (
-            supabase_client()
-            .table("request_logs")
-            .select("surface,cache_hit,credit_cost,latency_ms")
-            .eq("user_id", owner_id)
-            .order("created_at", desc=True)
-            .limit(1000)
-            .execute()
-        )
-        rows = response.data or []
-        counts = {"mcp": 0, "rest": 0, "playground": 0}
-        credits = 0
-        hits = 0
-        latency = 0
-        for row in rows:
-            surface = str(row.get("surface") or "")
-            if surface in counts:
-                counts[surface] += 1
-            credits += int(row.get("credit_cost") or 0)
-            latency += int(row.get("latency_ms") or 0)
-            if row.get("cache_hit") is True:
-                hits += 1
-        total = len(rows)
-        hit_rate = None if total == 0 else round(100 * hits / total, 2)
-        average = None if total == 0 else round(latency / total, 2)
-        return {
-            "calls_by_surface": counts,
-            "cache_hit_rate_pct": hit_rate,
-            "total_cmc_credits": credits,
-            "average_latency_ms": average,
-            "active_data_mode": None,
-        }
-
     try:
-        payload = await asyncio.to_thread(read)
+        rows = await _usage_reader.read_user_logs(owner_id, limit=1000)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Telemetry store is unavailable") from exc
+    payload = _summarize_rows(rows)
     _cached_summary[auth.user_id] = (now + _CACHE_TTL_SECONDS, payload)
     return payload
 

@@ -167,6 +167,16 @@ export function createHiddenGemConfig(
   });
 }
 
+export function updateHiddenGemConfig(
+  configId: string,
+  body: Partial<ScanConfigCreate> & { is_active?: boolean },
+): Promise<ApiResult<ScanConfigItem>> {
+  return callHiddenGemsProxy<ScanConfigItem>(`/configs/${encodeURIComponent(configId)}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
 export function fetchHiddenGemWatchlist(): Promise<ApiResult<WatchlistItem[]>> {
   return callHiddenGemsProxy<WatchlistItem[]>("/watchlist");
 }

@@ -381,14 +381,14 @@ async def test_r6_engine_version_default_and_historical_evidence_readability() -
 
 
 async def test_r6_phase4b_boundaries_and_prepared_sql_migration_safety() -> None:
-    # MCP census is 11 tools after get_capabilities. Resources and prompts stay 3/2/3.
+    # MCP census is 14 tools (11 core + 3 Hidden Gems). Templates include candidate detail.
     tools = await mcp_server.list_tools()
     resources = await mcp_server.list_resources()
     templates = await mcp_server.list_resource_templates()
     prompts = await mcp_server.list_prompts()
-    assert len(tools) == 11
+    assert len(tools) == 14
     assert len(resources) == 3
-    assert len(templates) == 2
+    assert len(templates) == 3
     assert len(prompts) == 3
     assert all(str(r.uri).startswith("cointrac://") for r in resources)
     assert all(str(t.uri_template).startswith("cointrac://") for t in templates)

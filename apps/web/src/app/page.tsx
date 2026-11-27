@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     absolute: "CoinTrac — Crypto Market Intelligence API, Hidden Gem Discovery & MCP",
   },
   description:
-    "Structured CoinMarketCap data as 10 REST intelligence tools, deterministic Hidden Gem Discovery, and 11 MCP tools with audited evidence envelopes and null-safe responses.",
+    "Structured CoinMarketCap data as 10 REST intelligence tools, deterministic Hidden Gem Discovery, and 14 MCP tools with typed schemas, audited evidence envelopes, and null-safe responses.",
   alternates: {
     canonical: "/",
   },

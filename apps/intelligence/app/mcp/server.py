@@ -3,32 +3,68 @@ import json
 import logging
 import time
 from collections.abc import Awaitable
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, ValidationError
 
 from app.api.deps import check_mcp_tool_limit, current_mcp_auth
 from app.core.config import get_settings
 from app.schemas.envelope import EvidenceEnvelope
+from app.schemas.hidden_gems import (
+    DiscoveryTrackType,
+    HiddenGemCandidatesData,
+    HiddenGemCandidatesInput,
+    HiddenGemDetailData,
+    HiddenGemDetailInput,
+    HiddenGemQualityStatsData,
+    HiddenGemQualityStatsInput,
+    TradingHorizonType,
+)
 from app.schemas.tools import (
+    AnalyzeAssetData,
     AnalyzeAssetInput,
+    AnalyzeMomentumData,
     AnalyzeMomentumInput,
+    CapabilitiesData,
+    CompareAssetsData,
     CompareAssetsInput,
+    DerivativesAnalysisData,
     DerivativesAnalysisInput,
+    DetectAnomaliesData,
     DetectAnomaliesInput,
+    HistoricalPerformanceData,
     HistoricalPerformanceInput,
+    MarketOverviewData,
+    MarketRegimeData,
     RankBy,
+    ScanMoversData,
     ScanMoversInput,
+    SectorRotationData,
     SectorRotationInput,
     SectorSlug,
 )
 from app.services import intelligence as workflows
 from app.services.evidence import EvidenceWriter, RequestLog, SupabaseEvidenceWriter
+from app.services.hidden_gems import get_hidden_gem_service
 from app.services.intelligence import ServiceDeps
 
 logger = logging.getLogger("cointrac")
+
+_LOCAL_TOOL_ANNOTATIONS = ToolAnnotations(
+    read_only_hint=True,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=False,
+)
+_MARKET_TOOL_ANNOTATIONS = ToolAnnotations(
+    read_only_hint=True,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=True,
+)
 
 
 class CoinTracMCPServer(MCPServer):
@@ -43,7 +79,9 @@ mcp = CoinTracMCPServer(
         "detect_market_anomalies untuk outlier; compare_assets untuk 2-8 aset; "
         "analyze_asset untuk satu aset; analyze_momentum untuk beberapa ticker; "
         "analyze_sector_rotation untuk sektor; get_historical_performance untuk risiko "
-        "historis; analyze_derivatives untuk derivatif. Panggil get_capabilities dulu "
+        "historis; analyze_derivatives untuk derivatif; list_hidden_gem_candidates, "
+        "get_hidden_gem_detail, dan get_hidden_gem_quality_stats untuk riset & outcome "
+        "Hidden Gems milik akun pengguna. Panggil get_capabilities dulu "
         "bila perlu tahu tier, persentase budget, dan tool yang sedang fallback. "
         "Jangan sebut data sebagai realtime. Angka yang hilang tetap null."
     ),
@@ -90,6 +128,17 @@ def _validated_quote(tool_name: str, quote_currency: str) -> str:
         return validate_quote_currency(quote_currency)
     except ValueError as exc:
         raise ToolError(f"Invalid input for {tool_name}: quote_currency: {exc}") from None
+
+
+def _require_scoped_mcp_user(tool_name: str) -> str:
+    record = current_mcp_auth.get()
+    user_id = record.user_id.strip() if record is not None and record.user_id else ""
+    if not user_id:
+        raise ToolError(
+            f"Authentication required for '{tool_name}': provide an account-scoped API key "
+            "or OAuth session bound to a CoinTrac user account."
+        )
+    return user_id
 
 
 async def _tracked(name: str, awaitable: Awaitable[EvidenceEnvelope]) -> dict[str, object]:
@@ -157,18 +206,22 @@ async def _tracked(name: str, awaitable: Awaitable[EvidenceEnvelope]) -> dict[st
     description=(
         "Pakai tool ini untuk melihat tier, persentase budget, dan tool yang full atau fallback. "
         "Jangan pakai untuk harga atau analisis pasar. Tidak butuh input dan tidak memanggil CMC."
-    )
+    ),
+    annotations=_LOCAL_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
-async def get_capabilities() -> dict[str, object]:
+async def get_capabilities() -> EvidenceEnvelope[CapabilitiesData]:
     """Budget and tool mode. Zero CoinMarketCap credits."""
-    return await _tracked("get_capabilities", workflows.get_capabilities(deps=_deps))
+    return await _tracked("get_capabilities", workflows.get_capabilities(deps=_deps))  # type: ignore[return-value]
 
 
 @mcp.tool(
     description=(
         "Pakai tool ini untuk snapshot makro (market cap, dominasi, Fear and Greed). "
         "Jangan pakai untuk label regime. Butuh input quote_currency opsional."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def get_market_overview(
     quote_currency: Annotated[
@@ -182,10 +235,10 @@ async def get_market_overview(
             max_length=10,
         ),
     ] = "USD",
-) -> dict[str, object]:
+) -> EvidenceEnvelope[MarketOverviewData]:
     """Macro snapshot."""
     validated_quote = _validated_quote("get_market_overview", quote_currency)
-    return await _tracked(
+    return await _tracked(  # type: ignore[return-value]
         "get_market_overview",
         workflows.get_market_overview(validated_quote, deps=_deps),
     )
@@ -195,7 +248,9 @@ async def get_market_overview(
     description=(
         "Pakai tool ini untuk label regime deterministik. "
         "Jangan pakai untuk daftar koin yang naik. Butuh input quote_currency opsional."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def analyze_market_regime(
     quote_currency: Annotated[
@@ -208,10 +263,10 @@ async def analyze_market_regime(
             max_length=10,
         ),
     ] = "USD",
-) -> dict[str, object]:
+) -> EvidenceEnvelope[MarketRegimeData]:
     """Regime classification."""
     validated_quote = _validated_quote("analyze_market_regime", quote_currency)
-    return await _tracked(
+    return await _tracked(  # type: ignore[return-value]
         "analyze_market_regime",
         workflows.analyze_market_regime(
             deps=_deps,
@@ -224,7 +279,9 @@ async def analyze_market_regime(
     description=(
         "Pakai tool ini untuk menyaring mover dengan aturan likuiditas dan momentum. "
         "Jangan pakai untuk outlier statistik. Butuh input filter opsional dan universe_size."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def scan_market_movers(
     quote_currency: Annotated[
@@ -329,7 +386,7 @@ async def scan_market_movers(
             ),
         ),
     ] = False,
-) -> dict[str, object]:
+) -> EvidenceEnvelope[ScanMoversData]:
     """Rule-based mover screen."""
     params = _build_input(
         ScanMoversInput,
@@ -346,14 +403,18 @@ async def scan_market_movers(
         universe_size=universe_size,
         deep_scan=deep_scan,
     )
-    return await _tracked("scan_market_movers", workflows.scan_market_movers(params, deps=_deps))
+    return await _tracked(  # type: ignore[return-value]
+        "scan_market_movers", workflows.scan_market_movers(params, deps=_deps)
+    )
 
 
 @mcp.tool(
     description=(
         "Pakai tool ini untuk outlier volume dan divergensi terhadap BTC. "
         "Jangan pakai untuk filter momentum biasa. Butuh input universe_size opsional."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def detect_market_anomalies(
     quote_currency: Annotated[
@@ -381,7 +442,7 @@ async def detect_market_anomalies(
             ),
         ),
     ] = False,
-) -> dict[str, object]:
+) -> EvidenceEnvelope[DetectAnomaliesData]:
     """Statistical outlier scan."""
     params = _build_input(
         DetectAnomaliesInput,
@@ -390,7 +451,7 @@ async def detect_market_anomalies(
         universe_size=universe_size,
         deep_scan=deep_scan,
     )
-    return await _tracked(
+    return await _tracked(  # type: ignore[return-value]
         "detect_market_anomalies",
         workflows.detect_market_anomalies(params, deps=_deps),
     )
@@ -400,7 +461,9 @@ async def detect_market_anomalies(
     description=(
         "Pakai tool ini untuk membandingkan 2 sampai 8 aset. "
         "Jangan pakai untuk satu aset saja. Butuh input symbols."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def compare_assets(
     symbols: Annotated[
@@ -422,7 +485,7 @@ async def compare_assets(
             max_length=10,
         ),
     ] = "USD",
-) -> dict[str, object]:
+) -> EvidenceEnvelope[CompareAssetsData]:
     """Side-by-side asset comparison."""
     params = _build_input(
         CompareAssetsInput,
@@ -430,14 +493,18 @@ async def compare_assets(
         symbols=symbols,
         quote_currency=quote_currency,
     )
-    return await _tracked("compare_assets", workflows.compare_assets(params, deps=_deps))
+    return await _tracked(  # type: ignore[return-value]
+        "compare_assets", workflows.compare_assets(params, deps=_deps)
+    )
 
 
 @mcp.tool(
     description=(
         "Pakai tool ini untuk profil satu aset dan CMC ID kanonik. "
         "Jangan pakai untuk perbandingan banyak aset. Butuh input symbol."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def analyze_asset(
     symbol: Annotated[
@@ -461,7 +528,7 @@ async def analyze_asset(
             max_length=10,
         ),
     ] = "USD",
-) -> dict[str, object]:
+) -> EvidenceEnvelope[AnalyzeAssetData]:
     """Single-asset profile."""
     params = _build_input(
         AnalyzeAssetInput,
@@ -469,14 +536,18 @@ async def analyze_asset(
         symbol=symbol,
         quote_currency=quote_currency,
     )
-    return await _tracked("analyze_asset", workflows.analyze_asset(params, deps=_deps))
+    return await _tracked(  # type: ignore[return-value]
+        "analyze_asset", workflows.analyze_asset(params, deps=_deps)
+    )
 
 
 @mcp.tool(
     description=(
         "Pakai tool ini untuk momentum multi-horizon pada ticker yang disebut. "
         "Jangan pakai untuk menyaring seluruh pasar. Butuh input symbols."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def analyze_momentum(
     symbols: Annotated[
@@ -498,7 +569,7 @@ async def analyze_momentum(
             max_length=10,
         ),
     ] = "USD",
-) -> dict[str, object]:
+) -> EvidenceEnvelope[AnalyzeMomentumData]:
     """Multi-timeframe momentum."""
     params = _build_input(
         AnalyzeMomentumInput,
@@ -506,14 +577,18 @@ async def analyze_momentum(
         symbols=symbols,
         quote_currency=quote_currency,
     )
-    return await _tracked("analyze_momentum", workflows.analyze_momentum(params, deps=_deps))
+    return await _tracked(  # type: ignore[return-value]
+        "analyze_momentum", workflows.analyze_momentum(params, deps=_deps)
+    )
 
 
 @mcp.tool(
     description=(
         "Pakai tool ini untuk rotasi dan breadth sektor. "
         "Jangan pakai untuk profil satu koin. Butuh input sectors opsional."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def analyze_sector_rotation(
     quote_currency: Annotated[
@@ -535,7 +610,7 @@ async def analyze_sector_rotation(
             ),
         ),
     ] = None,
-) -> dict[str, object]:
+) -> EvidenceEnvelope[SectorRotationData]:
     """Sector breadth and rotation."""
     params = _build_input(
         SectorRotationInput,
@@ -543,7 +618,7 @@ async def analyze_sector_rotation(
         quote_currency=quote_currency,
         sectors=sectors,
     )
-    return await _tracked(
+    return await _tracked(  # type: ignore[return-value]
         "analyze_sector_rotation",
         workflows.analyze_sector_rotation(params, deps=_deps),
     )
@@ -553,7 +628,9 @@ async def analyze_sector_rotation(
     description=(
         "Pakai tool ini untuk volatilitas, drawdown, dan beta historis. "
         "Jangan pakai bila yang diminta hanya harga terkini. Butuh input symbol."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def get_historical_performance(
     symbol: Annotated[
@@ -582,7 +659,7 @@ async def get_historical_performance(
             le=90,
         ),
     ] = 30,
-) -> dict[str, object]:
+) -> EvidenceEnvelope[HistoricalPerformanceData]:
     """Historical risk versus BTC."""
     params = _build_input(
         HistoricalPerformanceInput,
@@ -591,7 +668,7 @@ async def get_historical_performance(
         quote_currency=quote_currency,
         count=count,
     )
-    return await _tracked(
+    return await _tracked(  # type: ignore[return-value]
         "get_historical_performance",
         workflows.get_historical_performance(params, deps=_deps),
     )
@@ -601,7 +678,9 @@ async def get_historical_performance(
     description=(
         "Pakai tool ini untuk open interest dan funding derivatif, atau proxy spot yang jujur. "
         "Jangan pakai untuk market cap spot saja. Butuh input symbol."
-    )
+    ),
+    annotations=_MARKET_TOOL_ANNOTATIONS,
+    structured_output=True,
 )
 async def analyze_derivatives(
     symbol: Annotated[
@@ -624,7 +703,7 @@ async def analyze_derivatives(
             max_length=10,
         ),
     ] = "USD",
-) -> dict[str, object]:
+) -> EvidenceEnvelope[DerivativesAnalysisData]:
     """Derivatives or spot-stress proxy."""
     params = _build_input(
         DerivativesAnalysisInput,
@@ -632,9 +711,165 @@ async def analyze_derivatives(
         symbol=symbol,
         quote_currency=quote_currency,
     )
-    return await _tracked(
+    return await _tracked(  # type: ignore[return-value]
         "analyze_derivatives",
         workflows.analyze_derivatives(params, deps=_deps),
+    )
+
+
+@mcp.tool(
+    description=(
+        "Pakai tool ini untuk daftar kandidat Hidden Gem yang sudah dipersist untuk akun "
+        "pengguna (read-only, tanpa memanggil CMC). Jangan pakai untuk menjalankan scan baru."
+    ),
+    annotations=_LOCAL_TOOL_ANNOTATIONS,
+    structured_output=True,
+)
+async def list_hidden_gem_candidates(
+    track: Annotated[
+        DiscoveryTrackType | None,
+        Field(description="Optional discovery track filter: 'EARLY' or 'CONFIRMED'."),
+    ] = None,
+    horizon: Annotated[
+        TradingHorizonType | None,
+        Field(description="Optional trading horizon filter: 'SHORT_TERM' or 'SWING'."),
+    ] = None,
+    min_score: Annotated[
+        float | None,
+        Field(
+            description="Optional minimum adjusted score filter (0.0 to 100.0).",
+            ge=0.0,
+            le=100.0,
+        ),
+    ] = None,
+    confidence: Annotated[
+        Literal["HIGH", "MEDIUM", "LOW", "INSUFFICIENT"] | None,
+        Field(
+            description=(
+                "Optional confidence level filter: 'HIGH', 'MEDIUM', 'LOW', or 'INSUFFICIENT'."
+            )
+        ),
+    ] = None,
+    classification: Annotated[
+        str | None,
+        Field(description="Optional classification filter, e.g. 'HIGH_QUALITY_CANDIDATE'."),
+    ] = None,
+    eligibility: Annotated[
+        str | None,
+        Field(description="Optional eligibility status filter, e.g. 'ELIGIBLE' or 'WATCH'."),
+    ] = None,
+    run_id: Annotated[
+        str | None,
+        Field(description="Optional scan run UUID to restrict results to a single scan."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of candidates to return (1-200). Default: 50.",
+            ge=1,
+            le=200,
+        ),
+    ] = 50,
+    offset: Annotated[
+        int,
+        Field(description="Zero-based pagination offset (>= 0). Default: 0.", ge=0),
+    ] = 0,
+) -> EvidenceEnvelope[HiddenGemCandidatesData]:
+    """Read-only list of persisted Hidden Gem candidates for the authenticated user."""
+    user_id = _require_scoped_mcp_user("list_hidden_gem_candidates")
+    params = _build_input(
+        HiddenGemCandidatesInput,
+        "list_hidden_gem_candidates",
+        track=track,
+        horizon=horizon,
+        min_score=min_score,
+        confidence=confidence,
+        classification=classification,
+        eligibility=eligibility,
+        run_id=run_id,
+        limit=limit,
+        offset=offset,
+    )
+    return await _tracked(  # type: ignore[return-value]
+        "list_hidden_gem_candidates",
+        get_hidden_gem_service().list_candidates_envelope(
+            user_id,
+            params,
+            evidence_writer=_evidence_writer(),
+        ),
+    )
+
+
+@mcp.tool(
+    description=(
+        "Pakai tool ini untuk detail lengkap kandidat Hidden Gem: breakdown skor komponen, "
+        "bobot efektif, penalti, evidence per metrik, histori skor, dan outcome checkpoint."
+    ),
+    annotations=_LOCAL_TOOL_ANNOTATIONS,
+    structured_output=True,
+)
+async def get_hidden_gem_detail(
+    candidate_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Persisted candidate result ID (UUID) returned by list_hidden_gem_candidates."
+            ),
+            min_length=1,
+            max_length=128,
+        ),
+    ],
+) -> EvidenceEnvelope[HiddenGemDetailData]:
+    """Read-only Hidden Gem candidate breakdown, evidence, and outcome checkpoint."""
+    user_id = _require_scoped_mcp_user("get_hidden_gem_detail")
+    params = _build_input(
+        HiddenGemDetailInput,
+        "get_hidden_gem_detail",
+        candidate_id=candidate_id,
+    )
+    return await _tracked(  # type: ignore[return-value]
+        "get_hidden_gem_detail",
+        get_hidden_gem_service().get_candidate_detail_envelope(
+            user_id,
+            params,
+            evidence_writer=_evidence_writer(),
+        ),
+    )
+
+
+@mcp.tool(
+    description=(
+        "Pakai tool ini untuk melihat metrik kualitas outcome historis Hidden Gem "
+        "(positive_7d_rate, avg_rel_btc_7d, mean_mae_30d) per versi skor, track, dan tier."
+    ),
+    annotations=_LOCAL_TOOL_ANNOTATIONS,
+    structured_output=True,
+)
+async def get_hidden_gem_quality_stats(
+    track: Annotated[
+        DiscoveryTrackType | None,
+        Field(description="Optional discovery track filter: 'EARLY' or 'CONFIRMED'."),
+    ] = None,
+    score_version: Annotated[
+        str | None,
+        Field(description="Optional scoring engine version filter, e.g. 'hg-v1.2.0'."),
+    ] = None,
+) -> EvidenceEnvelope[HiddenGemQualityStatsData]:
+    """Read-only aggregated forward outcome quality stats for the authenticated user."""
+    user_id = _require_scoped_mcp_user("get_hidden_gem_quality_stats")
+    params = _build_input(
+        HiddenGemQualityStatsInput,
+        "get_hidden_gem_quality_stats",
+        track=track,
+        score_version=score_version,
+    )
+    return await _tracked(  # type: ignore[return-value]
+        "get_hidden_gem_quality_stats",
+        get_hidden_gem_service().get_quality_stats_envelope(
+            user_id,
+            params,
+            evidence_writer=_evidence_writer(),
+        ),
     )
 
 
@@ -720,6 +955,83 @@ async def evidence_resource(evidence_id: str) -> str:
         )
     except Exception:
         logger.info("mcp evidence resource log skipped")
+    return json.dumps(payload)
+
+
+@mcp.resource("cointrac://hidden-gems/candidates/{candidate_id}", mime_type="application/json")
+async def hidden_gem_candidate_resource(candidate_id: str) -> str:
+    record = current_mcp_auth.get()
+    user_id = record.user_id.strip() if record is not None and record.user_id else ""
+    started = time.perf_counter()
+    if record is not None:
+        retry_after = await check_mcp_tool_limit(record)
+        if retry_after is not None:
+            try:
+                await _evidence_writer().log_request(
+                    RequestLog(
+                        api_key_id=record.persisted_key_id,
+                        user_id=record.user_id,
+                        surface="mcp",
+                        tool_name="resource:hidden_gem_candidate",
+                        status_code=429,
+                        latency_ms=int((time.perf_counter() - started) * 1000),
+                        cache_hit=False,
+                        credit_cost=0,
+                        evidence_id=None,
+                    )
+                )
+            except Exception:
+                logger.info("mcp hidden gem resource log skipped")
+            return json.dumps(
+                {
+                    "candidate_id": candidate_id,
+                    "status": "INSUFFICIENT_DATA",
+                    "limitations": [f"Rate limit exceeded. Retry after {retry_after} seconds."],
+                }
+            )
+    if not user_id:
+        return json.dumps(
+            {
+                "candidate_id": candidate_id,
+                "status": "INSUFFICIENT_DATA",
+                "limitations": [
+                    "Account-scoped authentication is required to read Hidden Gem candidates."
+                ],
+            }
+        )
+    try:
+        params = HiddenGemDetailInput(candidate_id=candidate_id)
+    except ValidationError:
+        return json.dumps(
+            {
+                "candidate_id": candidate_id,
+                "status": "INSUFFICIENT_DATA",
+                "limitations": ["candidate_id must be a non-empty identifier."],
+            }
+        )
+    envelope = await get_hidden_gem_service().get_candidate_detail_envelope(
+        user_id,
+        params,
+        evidence_writer=_evidence_writer(),
+    )
+    payload = envelope.model_dump(mode="json")
+    status_code = 200 if envelope.data.found else 404
+    try:
+        await _evidence_writer().log_request(
+            RequestLog(
+                api_key_id=record.persisted_key_id if record is not None else None,
+                user_id=record.user_id if record is not None else None,
+                surface="mcp",
+                tool_name="resource:hidden_gem_candidate",
+                status_code=status_code,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                cache_hit=True,
+                credit_cost=0,
+                evidence_id=envelope.evidence.evidence_id,
+            )
+        )
+    except Exception:
+        logger.info("mcp hidden gem resource log skipped")
     return json.dumps(payload)
 
 

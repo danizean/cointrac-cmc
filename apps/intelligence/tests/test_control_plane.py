@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -465,4 +465,153 @@ def test_profile_update_validates_display_name_and_blocks_extra_fields(cp_env):
         headers=hdr_a,
     )
     assert esc.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_supabase_usage_reader_merges_hidden_gem_scan_credits_without_double_counting(
+    monkeypatch,
+):
+    from app.api.v1.telemetry import SupabaseUsageReader
+
+    owner_id = cp_owner = "00000000-0000-0000-0000-000000000099"
+    now = datetime.now(UTC)
+    t_req = (now - timedelta(minutes=10)).isoformat()
+    t_scan_start = (now - timedelta(minutes=5)).isoformat()
+    t_scan_end = (now - timedelta(minutes=4)).isoformat()
+    t_cancel = (now - timedelta(minutes=2)).isoformat()
+    t_queued = (now - timedelta(minutes=1)).isoformat()
+
+    queries: list[tuple[str, list[tuple[str, object]]]] = []
+
+    class _FakeQuery:
+        def __init__(self, table_name: str) -> None:
+            self.table_name = table_name
+            self.filters: list[tuple[str, object]] = []
+
+        def select(self, _fields: str) -> _FakeQuery:
+            return self
+
+        def eq(self, key: str, value: object) -> _FakeQuery:
+            self.filters.append((key, value))
+            return self
+
+        def order(self, *_args: object, **_kwargs: object) -> _FakeQuery:
+            return self
+
+        def limit(self, _count: int) -> _FakeQuery:
+            return self
+
+        def execute(self) -> object:
+            queries.append((self.table_name, list(self.filters)))
+            if self.table_name == "request_logs":
+                payload = [
+                    {
+                        "surface": "rest",
+                        "tool_name": "analyze_sector_rotation",
+                        "status_code": 200,
+                        "latency_ms": 600,
+                        "cache_hit": False,
+                        "credit_cost": 7,
+                        "evidence_id": "ev_rot_1",
+                        "created_at": t_req,
+                    }
+                ]
+            else:
+                payload = [
+                    {
+                        "id": "scan-completed",
+                        "status": "COMPLETED",
+                        "cmc_credits_consumed": 108,
+                        "source_metadata": {"reused_cache": False},
+                        "started_at": t_scan_start,
+                        "completed_at": t_scan_end,
+                        "created_at": t_scan_start,
+                    },
+                    {
+                        "id": "scan-cancelled",
+                        "status": "CANCELLED",
+                        "cmc_credits_consumed": 12,
+                        "source_metadata": {},
+                        "started_at": t_cancel,
+                        "completed_at": t_cancel,
+                        "created_at": t_cancel,
+                    },
+                    {
+                        "id": "scan-queued-zero",
+                        "status": "QUEUED",
+                        "cmc_credits_consumed": 0,
+                        "source_metadata": {},
+                        "started_at": None,
+                        "completed_at": None,
+                        "created_at": t_queued,
+                    },
+                ]
+
+            class _Result:
+                data = payload
+
+            return _Result()
+
+    class _FakeClient:
+        def table(self, name: str) -> _FakeQuery:
+            return _FakeQuery(name)
+
+    monkeypatch.setattr("app.core.db.supabase_client", lambda: _FakeClient())
+
+    rows = await SupabaseUsageReader().read_user_logs(cp_owner, limit=50)
+    assert queries == [
+        ("request_logs", [("user_id", owner_id)]),
+        ("hg_scan_runs", [("user_id", owner_id)]),
+    ]
+    assert [r["tool_name"] for r in rows] == [
+        "hidden_gem_scan",
+        "hidden_gem_scan",
+        "analyze_sector_rotation",
+    ]
+    assert sum(int(r["credit_cost"]) for r in rows) == 127
+    assert rows[1]["credit_cost"] == 108
+    assert rows[1]["latency_ms"] == 60_000
+    assert rows[1]["status_code"] == 200
+    assert rows[0]["status_code"] == 499
+
+
+def test_telemetry_summary_and_usage_reflect_hidden_gem_scan_credits(cp_env):
+    # Ensure /v1/telemetry/summary and /v1/telemetry/usage both include hidden_gem_scan
+    # without leaking any unrelated tenant's credits.
+    client = cp_env["client"]
+    now_iso = datetime.now(UTC).isoformat()
+
+    from app.api.v1 import telemetry as telemetry_mod
+
+    reader = telemetry_mod._usage_reader
+    reader.logs_by_user[cp_env["user_a"]].append(  # type: ignore[attr-defined]
+        {
+            "surface": "rest",
+            "tool_name": "hidden_gem_scan",
+            "status_code": 200,
+            "latency_ms": 4200,
+            "cache_hit": False,
+            "credit_cost": 105,
+            "evidence_id": None,
+            "created_at": now_iso,
+        }
+    )
+    telemetry_mod._cached_summary.clear()
+
+    hdr_a = {"Authorization": f"Bearer {cp_env['tok_a']}"}
+    summary_res = client.get("/v1/telemetry/summary", headers=hdr_a)
+    usage_res = client.get("/v1/telemetry/usage", headers=hdr_a)
+    assert summary_res.status_code == 200
+    assert usage_res.status_code == 200
+    assert summary_res.json()["total_cmc_credits"] == 112
+    assert usage_res.json()["cmc_credits"]["credits_this_month"] == 112
+    by_tool = {row["tool_name"]: row for row in usage_res.json()["tool_breakdown"]}
+    assert by_tool["hidden_gem_scan"]["cmc_credits"] == 105
+    assert by_tool["hidden_gem_scan"]["calls"] == 1
+
+    # Bob stays isolated
+    bob_summary = client.get(
+        "/v1/telemetry/summary", headers={"Authorization": f"Bearer {cp_env['tok_b']}"}
+    )
+    assert bob_summary.json()["total_cmc_credits"] == 2
     assert client.patch("/v1/auth/profile", json={"display_name": "Anon"}).status_code == 401

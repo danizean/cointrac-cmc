@@ -8,6 +8,7 @@ import { useAppPreferences } from "./app-preferences";
 import { SiteFooter } from "./site-footer";
 import { CoinTracMark, SiteHeader } from "./site-header";
 import { CommandPalette } from "./workspace/command-palette";
+import { DemoLauncher } from "./demo-launcher";
 
 const AUTH_PATHS = new Set(["/login", "/signup", "/reset-password"]);
 
@@ -117,6 +118,7 @@ export function MarketingChrome({ children }: { children: ReactNode }) {
       <div className="flex-1">{children}</div>
       <SiteFooter />
       <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+      <DemoLauncher />
     </>
   );
 }

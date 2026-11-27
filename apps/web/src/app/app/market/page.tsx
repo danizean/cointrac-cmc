@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { DeskSkeleton } from "@/components/ui/primitives";
-import { AnalysisDesk } from "@/components/workspace/analysis-desk";
+import { MarketDesk } from "@/components/workspace/market-desk";
 
 export const metadata: Metadata = {
   title: "Market analysis",
@@ -11,11 +11,7 @@ export const metadata: Metadata = {
 export default function MarketPage() {
   return (
     <Suspense fallback={<DeskSkeleton />}>
-      <AnalysisDesk
-        pageKey="market"
-        tools={["get_market_overview", "analyze_market_regime"]}
-        fields={["quote"]}
-      />
+      <MarketDesk />
     </Suspense>
   );
 }

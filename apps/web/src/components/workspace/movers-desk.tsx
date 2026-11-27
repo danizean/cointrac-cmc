@@ -1,21 +1,14 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Play, RefreshCw, SlidersHorizontal, TrendingUp } from "lucide-react";
-import { useState } from "react";
-import { ApiNotice } from "@/components/api-notice";
+import { ChevronDown, ChevronUp, Play, SlidersHorizontal, TrendingUp } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useAppPreferences } from "@/components/app-preferences";
-import {
-  Button,
-  DeskSkeleton,
-  EmptyState,
-  PageHeader,
-} from "@/components/ui/primitives";
+import { Button, PageHeader } from "@/components/ui/primitives";
 import { runIntelligenceTool } from "@/lib/api";
+import { useDeskCache, writeDeskCache } from "@/lib/desk-cache";
 import type { EvidenceEnvelope, RankBy } from "@/lib/types";
 import { NAV_LABELS, workspaceCopy } from "@/lib/workspace-copy";
-import { ResultStack } from "./result-stack";
-
-const QUICK_QUOTES = ["USD", "EUR", "BTC"] as const;
+import { DeskHeaderActions, DeskResultArea, type DeskError } from "./desk-chrome";
 
 const INPUT =
   "mt-1.5 min-h-11 sm:min-h-10 w-full min-w-0 rounded-[10px] border border-border bg-input-bg px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none";
@@ -89,6 +82,18 @@ const MOVER_PRESETS: MoverPreset[] = [
   },
 ];
 
+interface MoversCachedPayload {
+  quote: string;
+  activePreset: string;
+  minCap: string;
+  minVol: string;
+  maxGain: string;
+  universe: string;
+  limit: string;
+  rankBy: RankBy;
+  envelopes: EvidenceEnvelope[];
+}
+
 function optionalNumber(raw: string): number | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -114,90 +119,125 @@ function formatCompactHint(raw: string): string | null {
 export function MoversDesk() {
   const { locale } = useAppPreferences();
   const copy = workspaceCopy(locale);
+  const cached = useDeskCache<MoversCachedPayload>("movers:last");
 
-  const [quote, setQuote] = useState("USD");
-  const [activePreset, setActivePreset] = useState<string>("anti-chase");
-  const [minCap, setMinCap] = useState("250000000");
-  const [minVol, setMinVol] = useState("15000000");
-  const [maxGain, setMaxGain] = useState("18");
-  const [universe, setUniverse] = useState("150");
-  const [limit, setLimit] = useState("15");
-  const [rankBy, setRankBy] = useState<RankBy>("composite_momentum_score");
+  const [quoteOverride, setQuoteOverride] = useState<string | null>(null);
+  const [presetOverride, setPresetOverride] = useState<string | null>(null);
+  const [minCapOverride, setMinCapOverride] = useState<string | null>(null);
+  const [minVolOverride, setMinVolOverride] = useState<string | null>(null);
+  const [maxGainOverride, setMaxGainOverride] = useState<string | null>(null);
+  const [universeOverride, setUniverseOverride] = useState<string | null>(null);
+  const [limitOverride, setLimitOverride] = useState<string | null>(null);
+  const [rankByOverride, setRankByOverride] = useState<RankBy | null>(null);
   const [showFilters, setShowFilters] = useState(false);
 
   const [running, setRunning] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
-  const [error, setError] = useState<{
-    status: number;
-    message: string;
-    retryAfterSeconds?: number;
-  } | null>(null);
-  const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
+  const [error, setError] = useState<DeskError | null>(null);
+  const [liveEnvelopes, setLiveEnvelopes] = useState<EvidenceEnvelope[] | null>(null);
+  const [liveCachedAt, setLiveCachedAt] = useState<number | null>(null);
 
-  async function run(overrides?: {
-    quote?: string;
-    minCap?: string;
-    minVol?: string;
-    maxGain?: string;
-    rankBy?: RankBy;
-    universe?: string;
-    limit?: string;
-  }) {
-    const parsedUniverse = optionalNumber(overrides?.universe ?? universe) ?? 150;
-    const parsedLimit = optionalNumber(overrides?.limit ?? limit) ?? 15;
-    if (parsedUniverse < 10 || parsedUniverse > 200) {
-      setValidation(
-        locale === "id"
-          ? "Koin Dipindai harus antara 10 hingga 200."
-          : "Coins Scanned must be between 10 and 200.",
-      );
-      return;
-    }
-    if (parsedLimit < 1 || parsedLimit > 50) {
-      setValidation(
-        locale === "id"
-          ? "Jumlah Hasil harus antara 1 hingga 50."
-          : "Max Results must be between 1 and 50.",
-      );
-      return;
-    }
-    setValidation(null);
-    setRunning(true);
-    setError(null);
+  const quote = quoteOverride ?? cached?.value.quote ?? "USD";
+  const activePreset = presetOverride ?? cached?.value.activePreset ?? "anti-chase";
+  const minCap = minCapOverride ?? cached?.value.minCap ?? "250000000";
+  const minVol = minVolOverride ?? cached?.value.minVol ?? "15000000";
+  const maxGain = maxGainOverride ?? cached?.value.maxGain ?? "18";
+  const universe = universeOverride ?? cached?.value.universe ?? "150";
+  const limit = limitOverride ?? cached?.value.limit ?? "15";
+  const rankBy = rankByOverride ?? cached?.value.rankBy ?? "composite_momentum_score";
+  const envelopes = liveEnvelopes ?? cached?.value.envelopes ?? [];
+  const cachedAt = liveCachedAt ?? cached?.cachedAt ?? null;
 
-    const params = {
-      quote_currency: (overrides?.quote ?? quote).trim().toUpperCase() || "USD",
-      min_market_cap_usd: optionalNumber(overrides?.minCap ?? minCap),
-      min_volume_24h_usd: optionalNumber(overrides?.minVol ?? minVol),
-      max_24h_gain_pct: optionalNumber(overrides?.maxGain ?? maxGain),
-      rank_by: overrides?.rankBy ?? rankBy,
-      limit: parsedLimit,
-      universe_size: parsedUniverse,
-    };
+  const run = useCallback(
+    async (overrides?: {
+      quote?: string;
+      activePreset?: string;
+      minCap?: string;
+      minVol?: string;
+      maxGain?: string;
+      rankBy?: RankBy;
+      universe?: string;
+      limit?: string;
+    }) => {
+      const nextUniverse = overrides?.universe ?? universe;
+      const nextLimit = overrides?.limit ?? limit;
+      const parsedUniverse = optionalNumber(nextUniverse) ?? 150;
+      const parsedLimit = optionalNumber(nextLimit) ?? 15;
+      if (parsedUniverse < 10 || parsedUniverse > 200) {
+        setValidation(
+          locale === "id"
+            ? "Koin Dipindai harus antara 10 hingga 200."
+            : "Coins Scanned must be between 10 and 200.",
+        );
+        return;
+      }
+      if (parsedLimit < 1 || parsedLimit > 50) {
+        setValidation(
+          locale === "id"
+            ? "Jumlah Hasil harus antara 1 hingga 50."
+            : "Max Results must be between 1 and 50.",
+        );
+        return;
+      }
+      setValidation(null);
+      setRunning(true);
+      setError(null);
 
-    const result = await runIntelligenceTool("scan_market_movers", params);
-    setRunning(false);
-    if (!result.ok) {
-      setError({
-        status: result.status,
-        message: result.message,
-        retryAfterSeconds: result.retryAfterSeconds,
+      const nextQuote = (overrides?.quote ?? quote).trim().toUpperCase() || "USD";
+      const nextMinCap = overrides?.minCap ?? minCap;
+      const nextMinVol = overrides?.minVol ?? minVol;
+      const nextMaxGain = overrides?.maxGain ?? maxGain;
+      const nextRankBy = overrides?.rankBy ?? rankBy;
+      const nextPreset = overrides?.activePreset ?? activePreset;
+
+      const result = await runIntelligenceTool("scan_market_movers", {
+        quote_currency: nextQuote,
+        min_market_cap_usd: optionalNumber(nextMinCap),
+        min_volume_24h_usd: optionalNumber(nextMinVol),
+        max_24h_gain_pct: optionalNumber(nextMaxGain),
+        rank_by: nextRankBy,
+        limit: parsedLimit,
+        universe_size: parsedUniverse,
       });
-      return;
-    }
-    setEnvelopes([result.data]);
-  }
+      setRunning(false);
+      if (!result.ok) {
+        setError({
+          status: result.status,
+          message: result.message,
+          retryAfterSeconds: result.retryAfterSeconds,
+        });
+        return;
+      }
+
+      const next = [result.data];
+      setLiveEnvelopes(next);
+      const ts = writeDeskCache<MoversCachedPayload>("movers:last", {
+        quote: nextQuote,
+        activePreset: nextPreset,
+        minCap: nextMinCap,
+        minVol: nextMinVol,
+        maxGain: nextMaxGain,
+        universe: nextUniverse,
+        limit: nextLimit,
+        rankBy: nextRankBy,
+        envelopes: next,
+      });
+      setLiveCachedAt(ts);
+    },
+    [activePreset, limit, locale, maxGain, minCap, minVol, quote, rankBy, universe],
+  );
 
   function applyPreset(preset: MoverPreset) {
-    setActivePreset(preset.id);
-    setMinCap(preset.minCap);
-    setMinVol(preset.minVol);
-    setMaxGain(preset.maxGain);
-    setRankBy(preset.rankBy);
-    setUniverse(preset.universe);
-    setLimit(preset.limit);
+    setPresetOverride(preset.id);
+    setMinCapOverride(preset.minCap);
+    setMinVolOverride(preset.minVol);
+    setMaxGainOverride(preset.maxGain);
+    setRankByOverride(preset.rankBy);
+    setUniverseOverride(preset.universe);
+    setLimitOverride(preset.limit);
     if (!running) {
       void run({
+        activePreset: preset.id,
         minCap: preset.minCap,
         minVol: preset.minVol,
         maxGain: preset.maxGain,
@@ -223,47 +263,15 @@ export function MoversDesk() {
         title={NAV_LABELS[locale].movers}
         description={copy.moversBody}
         actions={
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div
-              role="group"
-              aria-label={locale === "id" ? "Mata uang" : "Currency"}
-              className="inline-flex h-9 items-center rounded-full border border-border bg-card/80 p-0.5"
-            >
-              {QUICK_QUOTES.map((q) => {
-                const active = quote.trim().toUpperCase() === q;
-                return (
-                  <button
-                    key={q}
-                    type="button"
-                    disabled={running}
-                    onClick={() => {
-                      setQuote(q);
-                      if (!running) void run({ quote: q });
-                    }}
-                    className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors disabled:opacity-50 ${
-                      active
-                        ? "bg-primary text-white shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {q}
-                  </button>
-                );
-              })}
-            </div>
-
-            <Button
-              type="button"
-              variant="primary"
-              size="md"
-              loading={running}
-              onClick={() => void run()}
-              className="ct-btn-glow"
-            >
-              {!running ? <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> : null}
-              <span>{running ? copy.running : copy.refresh}</span>
-            </Button>
-          </div>
+          <DeskHeaderActions
+            quote={quote}
+            running={running}
+            onSelectQuote={(nextQuote) => {
+              setQuoteOverride(nextQuote);
+              if (!running) void run({ quote: nextQuote });
+            }}
+            onRefresh={() => void run()}
+          />
         }
       />
 
@@ -327,9 +335,9 @@ export function MoversDesk() {
                     type="button"
                     disabled={running}
                     onClick={() => {
-                      setRankBy(opt.value);
-                      setActivePreset("custom");
-                      if (!running) void run({ rankBy: opt.value });
+                      setRankByOverride(opt.value);
+                      setPresetOverride("custom");
+                      if (!running) void run({ rankBy: opt.value, activePreset: "custom" });
                     }}
                     className={`min-h-8 cursor-pointer rounded-full border px-3 font-mono text-[11px] font-medium transition-colors disabled:opacity-50 ${
                       active
@@ -371,8 +379,8 @@ export function MoversDesk() {
                 inputMode="numeric"
                 value={formatGroupedInteger(minCap)}
                 onChange={(event) => {
-                  setMinCap(event.target.value.replace(/\D/g, ""));
-                  setActivePreset("custom");
+                  setMinCapOverride(event.target.value.replace(/\D/g, ""));
+                  setPresetOverride("custom");
                 }}
               />
             </label>
@@ -389,8 +397,8 @@ export function MoversDesk() {
                 inputMode="numeric"
                 value={formatGroupedInteger(minVol)}
                 onChange={(event) => {
-                  setMinVol(event.target.value.replace(/\D/g, ""));
-                  setActivePreset("custom");
+                  setMinVolOverride(event.target.value.replace(/\D/g, ""));
+                  setPresetOverride("custom");
                 }}
               />
             </label>
@@ -402,8 +410,8 @@ export function MoversDesk() {
                 inputMode="decimal"
                 value={maxGain}
                 onChange={(event) => {
-                  setMaxGain(event.target.value);
-                  setActivePreset("custom");
+                  setMaxGainOverride(event.target.value);
+                  setPresetOverride("custom");
                 }}
               />
             </label>
@@ -418,8 +426,8 @@ export function MoversDesk() {
                 inputMode="numeric"
                 value={universe}
                 onChange={(event) => {
-                  setUniverse(event.target.value);
-                  setActivePreset("custom");
+                  setUniverseOverride(event.target.value);
+                  setPresetOverride("custom");
                   if (validation) setValidation(null);
                 }}
               />
@@ -435,21 +443,15 @@ export function MoversDesk() {
                 inputMode="numeric"
                 value={limit}
                 onChange={(event) => {
-                  setLimit(event.target.value);
-                  setActivePreset("custom");
+                  setLimitOverride(event.target.value);
+                  setPresetOverride("custom");
                   if (validation) setValidation(null);
                 }}
               />
             </label>
 
             <div className="flex items-end">
-              <Button
-                type="submit"
-                variant="primary"
-                size="md"
-                loading={running}
-                className="w-full"
-              >
+              <Button type="submit" variant="primary" size="md" loading={running} className="w-full">
                 {!running ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : null}
                 <span>{locale === "id" ? "Terapkan" : "Apply Scan"}</span>
               </Button>
@@ -458,52 +460,27 @@ export function MoversDesk() {
         ) : null}
       </div>
 
-      {validation ? (
-        <p
-          role="alert"
-          className="rounded-[10px] border border-destructive/40 bg-destructive-soft px-4 py-3 text-xs font-medium text-destructive"
-        >
-          {validation}
-        </p>
-      ) : null}
-
-      {error ? (
-        <ApiNotice
-          status={error.status}
-          message={error.message}
-          retryAfterSeconds={error.retryAfterSeconds}
-          onRetry={() => void run()}
-        />
-      ) : null}
-
-      {running && envelopes.length === 0 ? (
-        <div className="space-y-4">
-          <div className="h-[2px] w-full overflow-hidden rounded-full bg-border/40">
-            <div className="ct-progress-bar h-full w-2/5 rounded-full bg-primary" />
-          </div>
-          <DeskSkeleton />
-        </div>
-      ) : null}
-
-      {!running && !error && envelopes.length === 0 ? (
-        <EmptyState
-          icon={<TrendingUp className="h-5 w-5 text-link" aria-hidden="true" />}
-          title={locale === "id" ? "Siap memindai penggerak pasar" : "Ready to scan market movers"}
-          description={
-            locale === "id"
-              ? "Pilih strategi di atas untuk menemukan koin dengan momentum kuat tanpa mengejar lonjakan ekstrem."
-              : "Pick a strategy above to find coins with healthy momentum and liquidity."
-          }
-          action={
-            <Button variant="primary" size="md" onClick={() => void run()} className="ct-btn-glow">
-              <Play className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{copy.run}</span>
-            </Button>
-          }
-        />
-      ) : null}
-
-      <ResultStack envelopes={envelopes} />
+      <DeskResultArea
+        running={running}
+        error={error}
+        validation={validation}
+        envelopes={envelopes}
+        cachedAt={cachedAt}
+        onRetry={() => void run()}
+        emptyIcon={<TrendingUp className="h-5 w-5 text-link" aria-hidden="true" />}
+        emptyTitle={locale === "id" ? "Siap memindai penggerak pasar" : "Ready to scan market movers"}
+        emptyDescription={
+          locale === "id"
+            ? "Pilih strategi di atas untuk menemukan koin dengan momentum kuat tanpa mengejar lonjakan ekstrem."
+            : "Pick a strategy above to find coins with healthy momentum and liquidity."
+        }
+        emptyAction={
+          <Button variant="primary" size="md" onClick={() => void run()} className="ct-btn-glow">
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{copy.run}</span>
+          </Button>
+        }
+      />
     </div>
   );
 }

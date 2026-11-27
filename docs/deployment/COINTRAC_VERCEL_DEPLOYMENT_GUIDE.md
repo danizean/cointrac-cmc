@@ -38,6 +38,8 @@ Set these in the Vercel project. Values stay in Vercel. Do not commit them.
 | `INTELLIGENCE_API_URL` | Server only | `https://api.cointrac.xyz` |
 | `NEXT_PUBLIC_MCP_PUBLIC_URL` | Public, build time | `https://mcp.cointrac.xyz/mcp` |
 | `SANDBOX_API_KEY` | Server only | Server-side playground key. Never `NEXT_PUBLIC_`. |
+| `DEMO_LOGIN_EMAIL` | Server only (optional) | Verified demo account email for `/api/auth/demo` (returns `503` if omitted). |
+| `DEMO_LOGIN_PASSWORD` | Server only (optional) | Password for `/api/auth/demo`. Never `NEXT_PUBLIC_`. |
 
 `VERCEL_ENV=production` is set by Vercel. When `NEXT_PUBLIC_SITE_URL` is absent there, canonical metadata falls back to `https://cointrac.xyz`. Local `npm run dev` keeps `http://localhost:3000`.
 
@@ -58,7 +60,7 @@ The app already builds those callback URLs from `window.location.origin`. This r
 
 Vercel Hobby is a personal plan. Confirm the current Hobby terms before a commercial launch. This guide does not bypass plan limits.
 
-The dashboard proxy waits on the intelligence API. Check the current Hobby function duration in the project before expecting slow CoinMarketCap calls to finish inside a Vercel function. MCP clients do not use that function. They connect to `https://mcp.cointrac.xyz/mcp`.
+The dashboard proxy waits on the intelligence API (up to 25s for market tools and up to 55s for `/v1/ai/*` Muse Spark tool calling). Enable Fluid Compute or confirm a >=60s function duration in Vercel Project Settings before expecting multi-step CoinTrac AI calls to finish inside a Vercel function. MCP clients do not use that function. They connect to `https://mcp.cointrac.xyz/mcp`.
 
 No package in `apps/web` needs a native build toolchain beyond what `npm ci` and `next build` install. Remote images are limited to `s2.coinmarketcap.com` coin icons.
 

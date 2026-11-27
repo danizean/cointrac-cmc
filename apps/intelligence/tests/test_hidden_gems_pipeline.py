@@ -694,5 +694,13 @@ def test_rest_auth_idor_idempotency_and_lazy_explanation() -> None:
             headers={"x-cointrac-key": KEY_A},
         )
         assert qstats.status_code == 200
+
+        # Latest scan exposes honest stage-by-stage progress telemetry
+        scans_resp = client.get("/v1/hidden-gems/scans", headers={"x-cointrac-key": KEY_A})
+        assert scans_resp.status_code == 200
+        prog = scans_resp.json()[0]["source_metadata"]["progress"]
+        assert prog["stage_total"] == 5
+        assert prog["stage_pct"] == 100.0
+        assert len(prog["stages_completed"]) == 5
     finally:
         _cleanup()

@@ -218,6 +218,14 @@ export function breadcrumbsForWorkspacePath(pathname: string, locale: Locale): B
     ];
   }
 
+  if (pathname === "/app/ai" || pathname.startsWith("/app/ai/")) {
+    return [{ label: rootLabel, href: "/app" }, { label: "CoinTrac AI" }];
+  }
+
+  if (pathname === "/app/admin" || pathname.startsWith("/app/admin/")) {
+    return [{ label: rootLabel, href: "/app" }, { label: "Super Admin" }];
+  }
+
   return [{ label: rootLabel, href: "/app" }];
 }
 
@@ -326,6 +334,17 @@ export function buildWorkspaceCommands(locale: Locale): CommandItem[] {
   }));
 
   const docCommands: CommandItem[] = [
+    {
+      id: "workspace-cointrac-ai",
+      section: "Workspace",
+      title: "CoinTrac AI",
+      subtitle:
+        locale === "id"
+          ? "Analis AI Muse Spark 1.3 dengan tool calling & bukti audit"
+          : "Muse Spark 1.3 market analyst with deterministic tool calling",
+      href: "/app/ai",
+      keywords: ["ai", "cointrac ai", "muse", "spark", "chat", "copilot", "analyst"],
+    },
     {
       id: "tool-playground",
       section: "Tools & Documentation",

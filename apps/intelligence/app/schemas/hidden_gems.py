@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 
 from app.schemas.envelope import StrictModel
 
@@ -152,6 +152,26 @@ class ScoreHistoryItem(StrictModel):
     observed_at: str
 
 
+class OutcomeCheckpointSummary(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    entry_price: float | None = None
+    entry_btc_price: float | None = None
+    entry_observed_at: str
+    ret_1d: float | None = None
+    ret_3d: float | None = None
+    ret_7d: float | None = None
+    ret_14d: float | None = None
+    ret_30d: float | None = None
+    rel_btc_7d: float | None = None
+    rel_btc_30d: float | None = None
+    mfe_30d: float | None = None
+    mae_30d: float | None = None
+    invalidated_at: str | None = None
+    last_evaluated_at: str | None = None
+
+
 class CandidateDetail(StrictModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -163,6 +183,7 @@ class CandidateDetail(StrictModel):
     explanation: dict[str, object] | None = None
     evidence: list[EvidenceRecordItem] = Field(default_factory=list)
     score_history: list[ScoreHistoryItem] = Field(default_factory=list)
+    outcome_checkpoint: OutcomeCheckpointSummary | None = None
 
 
 class ScanConfigCreate(StrictModel):
@@ -261,3 +282,73 @@ class QualityStatsRow(StrictModel):
     positive_7d_rate: float | None = None
     avg_rel_btc_7d: float | None = None
     mean_mae_30d: float | None = None
+
+
+class HiddenGemCandidatesInput(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    track: DiscoveryTrackType | None = None
+    horizon: TradingHorizonType | None = None
+    min_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    confidence: Literal["HIGH", "MEDIUM", "LOW", "INSUFFICIENT"] | None = None
+    classification: str | None = Field(default=None, min_length=1, max_length=64)
+    eligibility: str | None = Field(default=None, min_length=1, max_length=64)
+    run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    limit: int = Field(default=50, ge=1, le=200, strict=True)
+    offset: int = Field(default=0, ge=0, strict=True)
+
+
+class HiddenGemDetailInput(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("candidate_id")
+    @classmethod
+    def _clean_candidate_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("candidate_id must not be blank")
+        return cleaned
+
+
+class HiddenGemQualityStatsInput(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    track: DiscoveryTrackType | None = None
+    score_version: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("score_version")
+    @classmethod
+    def _clean_score_version(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class HiddenGemCandidatesData(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[CandidateSummary] = Field(default_factory=list)
+    count: int = Field(ge=0)
+    limit: int = Field(ge=1)
+    offset: int = Field(ge=0)
+    has_more: bool = False
+    filters: dict[str, object] = Field(default_factory=dict)
+
+
+class HiddenGemDetailData(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    found: bool
+    detail: CandidateDetail | None = None
+
+
+class HiddenGemQualityStatsData(StrictModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[QualityStatsRow] = Field(default_factory=list)
+    total_groups: int = Field(ge=0)
+    total_tracked: int = Field(ge=0)
+    filters: dict[str, object] = Field(default_factory=dict)

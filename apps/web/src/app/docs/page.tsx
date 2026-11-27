@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "API & MCP Documentation — REST Reference, Hidden Gems & Auth",
   alternates: { canonical: "/docs" },
   description:
-    "Developer documentation for CoinTrac REST API endpoints, Hidden Gem Discovery Engine routes, 11 MCP tools, x-cointrac-key authentication, OAuth 2.1 + PKCE, and EvidenceEnvelope[T].",
+    "Developer documentation for CoinTrac REST API endpoints, Hidden Gem Discovery Engine routes, 14 MCP tools, x-cointrac-key authentication, OAuth 2.1 + PKCE, and EvidenceEnvelope[T].",
   keywords: [
     "CoinTrac API documentation",
     "crypto intelligence REST API",

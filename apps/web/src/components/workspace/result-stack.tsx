@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useAppPreferences } from "@/components/app-preferences";
 import { EnvelopeFormattedReport } from "@/components/envelope-report";
 import { JsonViewer } from "@/components/json-viewer";
-import { useAppPreferences } from "@/components/app-preferences";
 import type { EvidenceEnvelope } from "@/lib/types";
 import { workspaceCopy } from "@/lib/workspace-copy";
 

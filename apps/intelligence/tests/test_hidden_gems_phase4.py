@@ -124,11 +124,11 @@ def test_alert_deduplication_and_telegram_dispatch() -> None:
 
     clock, store, svc = _setup_phase4(send_hook=_mock_send, chat_id="123456")
     try:
-        # First scan emits NEW_DISCOVERY alert and delivers to Telegram
+        # First scan with track="BOTH", horizon="BOTH" must send AT MOST 1 Telegram message for GEMX
         asyncio.run(
             svc.enqueue_scan(
                 user_id=USER_A,
-                req=CreateScanRequest(track="EARLY", horizon="SWING", universe_limit=200),
+                req=CreateScanRequest(track="BOTH", horizon="BOTH", universe_limit=200),
                 run_inline=True,
             )
         )
@@ -136,16 +136,34 @@ def test_alert_deduplication_and_telegram_dispatch() -> None:
         assert len(alerts_t0) >= 1
         allowed_ev = ("NEW_DISCOVERY", "CONFIRMATION", "SCORE_UPGRADE")
         assert all(a.event_type in allowed_ev for a in alerts_t0)
-        assert any(
-            a.delivery_channel == "TELEGRAM" and a.delivery_status == "SENT"
+        tg_sent = [
+            a
             for a in alerts_t0
-        )
-        assert len(sent_messages) >= 1
+            if a.delivery_channel == "TELEGRAM" and a.delivery_status == "SENT"
+        ]
+        assert len(tg_sent) == 1
+        assert len(sent_messages) == 1
         assert "GEMX" in sent_messages[0][1]
+        assert "Price:" in sent_messages[0][1]
+        assert "RS vs BTC 7d:" in sent_messages[0][1]
 
-        # Re-scan 10 minutes later (< 6h dedup window, snapshot still fresh) must deduplicate alerts
+        # Re-scan 10 minutes later (< 6h dedup window): zero duplicate alerts & zero Telegram spam
         clock["now"] = NOW + timedelta(minutes=10)
         count_before = len(store.alerts)
+        asyncio.run(
+            svc.enqueue_scan(
+                user_id=USER_A,
+                req=CreateScanRequest(track="BOTH", horizon="BOTH", universe_limit=200),
+                run_inline=True,
+            )
+        )
+        assert len(store.alerts) == count_before
+        assert len(sent_messages) == 1
+
+        # Simulate 7h expiry while GEMX stays ELIGIBLE: still no NEW_DISCOVERY re-spam!
+        for existing in store.alerts:
+            existing["created_at"] = (clock["now"] - timedelta(hours=7)).isoformat()
+            existing["delivered_at"] = (clock["now"] - timedelta(hours=7)).isoformat()
         asyncio.run(
             svc.enqueue_scan(
                 user_id=USER_A,
@@ -153,20 +171,16 @@ def test_alert_deduplication_and_telegram_dispatch() -> None:
                 run_inline=True,
             )
         )
-        assert len(store.alerts) == count_before
+        assert len(sent_messages) == 1
 
-        # Simulate 7h expiry on previous alerts while market tick stays fresh
-        for existing in store.alerts:
-            existing["created_at"] = (clock["now"] - timedelta(hours=7)).isoformat()
-
-        # Failed Telegram dispatch records FAILED cleanly without crashing scan
+        # Failed Telegram dispatch on a new account/discovery records FAILED cleanly without crash
         async def _fail_send(_chat: str, _text: str) -> bool:
             return False
 
         svc._telegram = TelegramNotifier(send_hook=_fail_send, default_chat_id="123456")
         asyncio.run(
             svc.enqueue_scan(
-                user_id=USER_A,
+                user_id="00000000-0000-0000-0000-000000000099",
                 req=CreateScanRequest(track="EARLY", horizon="SWING", universe_limit=200),
                 run_inline=True,
             )

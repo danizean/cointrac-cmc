@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
 
 export const metadata: Metadata = {
   title: "Reset password — CoinTrac",
-  description: "Request a password reset or update your CoinTrac account password.",
+  description: "Request a 6-digit CoinTrac password reset code or set a new password.",
 };
 
 type ResetSearchParams = Promise<{ mode?: string }>;
@@ -13,7 +14,8 @@ type ResetSearchParams = Promise<{ mode?: string }>;
 async function ResetPasswordContent({ searchParams }: { searchParams: ResetSearchParams }) {
   const params = await searchParams;
   const configured = isSupabaseAuthConfigured();
-  const mode = params.mode === "update" ? "update" : "request";
+  const recovery = (await cookies()).get("ct_recovery")?.value === "1";
+  const mode = params.mode === "update" || recovery ? "update" : "request";
 
   return <ResetPasswordForm configured={configured} mode={mode} />;
 }

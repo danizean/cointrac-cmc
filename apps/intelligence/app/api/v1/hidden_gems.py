@@ -115,11 +115,12 @@ async def list_candidates(
     track: str | None = Query(default=None, pattern="^(EARLY|CONFIRMED)$"),
     horizon: str | None = Query(default=None, pattern="^(SHORT_TERM|SWING)$"),
     min_score: float | None = Query(default=None, ge=0.0, le=100.0),
-    confidence: str | None = Query(default=None, pattern="^(HIGH|MEDIUM|LOW)$"),
+    confidence: str | None = Query(default=None, pattern="^(HIGH|MEDIUM|LOW|INSUFFICIENT)$"),
     classification: str | None = Query(default=None),
     eligibility: str | None = Query(default=None),
     run_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     auth: AuthContext = Depends(require_api_key),
 ) -> list[CandidateSummary]:
     user_id = _require_scoped_user(auth)
@@ -133,6 +134,7 @@ async def list_candidates(
         eligibility=eligibility,
         run_id=run_id,
         limit=limit,
+        offset=offset,
     )
 
 
@@ -252,10 +254,16 @@ async def list_alerts(
     summary="Aggregate Discovery Forward Outcome Quality Metrics",
 )
 async def quality_stats(
+    track: str | None = Query(default=None, pattern="^(EARLY|CONFIRMED)$"),
+    score_version: str | None = Query(default=None),
     auth: AuthContext = Depends(require_api_key),
 ) -> list[QualityStatsRow]:
     user_id = _require_scoped_user(auth)
-    return await get_hidden_gem_service().get_quality_stats(user_id)
+    return await get_hidden_gem_service().get_quality_stats(
+        user_id,
+        track=track,
+        score_version=score_version,
+    )
 
 
 @router.post(

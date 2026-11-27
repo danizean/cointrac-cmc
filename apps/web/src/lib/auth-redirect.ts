@@ -44,15 +44,39 @@ export function sanitizeRedirectPath(
 
 export type PasswordValidationResult = {
   valid: boolean;
+  code?: "too_short" | "too_long" | "missing_classes";
   reason?: string;
 };
 
+export function passwordFailureCopy(
+  code: PasswordValidationResult["code"],
+  isId: boolean,
+): string {
+  if (code === "too_short") {
+    return isId ? "Kata sandi minimal 12 karakter." : "Password must be at least 12 characters long.";
+  }
+  if (code === "too_long") {
+    return isId ? "Kata sandi maksimal 128 karakter." : "Password must be 128 characters or fewer.";
+  }
+  return isId
+    ? "Kata sandi harus memuat huruf besar, huruf kecil, dan angka."
+    : "Password must include at least one uppercase letter, lowercase letter, and number.";
+}
+
 export function validatePasswordStrength(password: string): PasswordValidationResult {
   if (password.length < 12) {
-    return { valid: false, reason: "Password must be at least 12 characters long." };
+    return {
+      valid: false,
+      code: "too_short",
+      reason: "Password must be at least 12 characters long.",
+    };
   }
   if (password.length > 128) {
-    return { valid: false, reason: "Password must be 128 characters or fewer." };
+    return {
+      valid: false,
+      code: "too_long",
+      reason: "Password must be 128 characters or fewer.",
+    };
   }
   const hasLower = /[a-z]/.test(password);
   const hasUpper = /[A-Z]/.test(password);
@@ -60,8 +84,16 @@ export function validatePasswordStrength(password: string): PasswordValidationRe
   if (!hasLower || !hasUpper || !hasDigit) {
     return {
       valid: false,
+      code: "missing_classes",
       reason: "Password must include at least one uppercase letter, lowercase letter, and number.",
     };
   }
   return { valid: true };
+}
+
+export const EMAIL_OTP_LENGTH = 6;
+
+export function normalizeEmailOtp(value: string): string | null {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === EMAIL_OTP_LENGTH ? digits : null;
 }

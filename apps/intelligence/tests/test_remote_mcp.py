@@ -589,9 +589,9 @@ async def test_mcp_status_endpoint_reports_honest_deployment_state(
             assert body["remote_url"] is None
             assert body["deployment_status"] == "not_deployed"
             assert body["contracts"] == {
-                "tools": 11,
+                "tools": 14,
                 "static_resources": 3,
-                "resource_templates": 2,
+                "resource_templates": 3,
                 "prompts": 3,
             }
 

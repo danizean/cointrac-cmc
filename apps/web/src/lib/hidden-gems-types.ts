@@ -169,6 +169,24 @@ export interface ScoreHistoryItem {
   observed_at: string;
 }
 
+export interface OutcomeCheckpointSummary {
+  id: string;
+  entry_price: number | null;
+  entry_btc_price: number | null;
+  entry_observed_at: string;
+  ret_1d: number | null;
+  ret_3d: number | null;
+  ret_7d: number | null;
+  ret_14d: number | null;
+  ret_30d: number | null;
+  rel_btc_7d: number | null;
+  rel_btc_30d: number | null;
+  mfe_30d: number | null;
+  mae_30d: number | null;
+  invalidated_at: string | null;
+  last_evaluated_at: string | null;
+}
+
 export interface CandidateDetail {
   candidate: CandidateSummary;
   component_scores: Record<string, ComponentScoreItem>;
@@ -178,6 +196,7 @@ export interface CandidateDetail {
   explanation: DeterministicExplanation | null;
   evidence: EvidenceRecordItem[];
   score_history: ScoreHistoryItem[];
+  outcome_checkpoint?: OutcomeCheckpointSummary | null;
 }
 
 export interface ScanConfigCreate {
@@ -254,10 +273,16 @@ export interface CandidateFilterParams {
   track?: DiscoveryTrack | "";
   horizon?: TradingHorizon | "";
   min_score?: number | null;
-  confidence?: "HIGH" | "MEDIUM" | "LOW" | "";
+  confidence?: "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT" | "";
   eligibility?: string;
   run_id?: string;
   limit?: number;
+  offset?: number;
+}
+
+export interface GroupedCandidate {
+  primary: CandidateSummary;
+  variants: CandidateSummary[];
 }
 
 export function buildCandidateQueryString(filters: CandidateFilterParams): string {
@@ -273,13 +298,66 @@ export function buildCandidateQueryString(filters: CandidateFilterParams): strin
   if (typeof filters.limit === "number" && Number.isFinite(filters.limit)) {
     qs.set("limit", String(filters.limit));
   }
+  if (typeof filters.offset === "number" && Number.isFinite(filters.offset) && filters.offset > 0) {
+    qs.set("offset", String(filters.offset));
+  }
   const encoded = qs.toString();
   return encoded ? `?${encoded}` : "";
+}
+
+function eligibilityPriority(status: string): number {
+  if (status === "ELIGIBLE") return 3;
+  if (status === "WATCH" || status === "WATCHLIST_ONLY") return 2;
+  if (status === "INSUFFICIENT_DATA") return 1;
+  return 0;
+}
+
+function compareCandidatePriority(a: CandidateSummary, b: CandidateSummary): number {
+  const eligDiff =
+    eligibilityPriority(b.eligibility_status) - eligibilityPriority(a.eligibility_status);
+  if (eligDiff !== 0) return eligDiff;
+  const aScore = typeof a.adjusted_score === "number" ? a.adjusted_score : -1;
+  const bScore = typeof b.adjusted_score === "number" ? b.adjusted_score : -1;
+  if (bScore !== aScore) return bScore - aScore;
+  return 0;
+}
+
+export function dedupeCandidatesByAsset(candidates: CandidateSummary[]): GroupedCandidate[] {
+  const buckets = new Map<string, CandidateSummary[]>();
+  for (const row of candidates) {
+    const key = row.asset_id || row.canonical_provider_id || row.symbol;
+    const list = buckets.get(key);
+    if (list) {
+      list.push(row);
+    } else {
+      buckets.set(key, [row]);
+    }
+  }
+  const grouped: GroupedCandidate[] = [];
+  for (const variants of buckets.values()) {
+    const ordered = [...variants].sort(compareCandidatePriority);
+    const primary = ordered[0];
+    if (primary) {
+      grouped.push({ primary, variants: ordered });
+    }
+  }
+  return grouped.sort((a, b) => {
+    const aScore = typeof a.primary.adjusted_score === "number" ? a.primary.adjusted_score : -1;
+    const bScore = typeof b.primary.adjusted_score === "number" ? b.primary.adjusted_score : -1;
+    if (bScore !== aScore) return bScore - aScore;
+    return compareCandidatePriority(a.primary, b.primary);
+  });
+}
+
+export function pickDefaultScanRunId(scans: ScanRunSummary[]): string | null {
+  const completed = scans.find((s) => s.status === "COMPLETED" || s.status === "PARTIAL");
+  return completed?.id ?? scans[0]?.id ?? null;
 }
 
 export function confidenceBadgeTone(level: string): BadgeTone {
   if (level === "HIGH") return "positive";
   if (level === "MEDIUM") return "info";
+  if (level === "INSUFFICIENT") return "neutral";
   return "warning";
 }
 
@@ -300,6 +378,111 @@ export function scanStatusTone(status: string): BadgeTone {
 export function formatScore(score: number | null | undefined): string {
   if (typeof score !== "number" || !Number.isFinite(score)) return "—";
   return score.toFixed(1);
+}
+
+export const HIDDEN_GEM_PIPELINE_STAGES = [
+  "PREFLIGHT",
+  "INGESTION",
+  "HARD_GATES",
+  "ENRICHMENT",
+  "SCORING_PERSIST",
+] as const;
+
+export type HiddenGemStageCode = (typeof HIDDEN_GEM_PIPELINE_STAGES)[number];
+
+export interface ParsedScanProgress {
+  stageIndex: number;
+  stageTotal: number;
+  stageCode: string;
+  stagesCompleted: HiddenGemStageCode[];
+  completedCount: number;
+  stagePct: number;
+  universeIngested: number | null;
+  hardGatePassed: number | null;
+  hardGateRejected: number | null;
+  enrichmentTargets: number | null;
+  candidatesScored: number | null;
+  hasBackendTelemetry: boolean;
+}
+
+function asNullableInt(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+export function parseScanProgress(scan: ScanRunSummary): ParsedScanProgress {
+  const total = HIDDEN_GEM_PIPELINE_STAGES.length;
+  const rawProgress = scan.source_metadata?.progress;
+  const record =
+    rawProgress && typeof rawProgress === "object"
+      ? (rawProgress as Record<string, unknown>)
+      : null;
+
+  if (!record) {
+    if (scan.status === "COMPLETED" || scan.status === "PARTIAL") {
+      return {
+        stageIndex: total,
+        stageTotal: total,
+        stageCode: "COMPLETED",
+        stagesCompleted: [...HIDDEN_GEM_PIPELINE_STAGES],
+        completedCount: total,
+        stagePct: 100,
+        universeIngested: scan.universe_scanned > 0 ? scan.universe_scanned : null,
+        hardGatePassed: null,
+        hardGateRejected: scan.candidates_rejected > 0 ? scan.candidates_rejected : null,
+        enrichmentTargets: null,
+        candidatesScored: scan.candidates_discovered > 0 ? scan.candidates_discovered : null,
+        hasBackendTelemetry: false,
+      };
+    }
+    return {
+      stageIndex: scan.status === "QUEUED" ? 1 : 1,
+      stageTotal: total,
+      stageCode: scan.status === "RUNNING" ? "PREFLIGHT" : scan.status,
+      stagesCompleted: [],
+      completedCount: 0,
+      stagePct: 0,
+      universeIngested: scan.universe_scanned > 0 ? scan.universe_scanned : null,
+      hardGatePassed: null,
+      hardGateRejected: scan.candidates_rejected > 0 ? scan.candidates_rejected : null,
+      enrichmentTargets: null,
+      candidatesScored: scan.candidates_discovered > 0 ? scan.candidates_discovered : null,
+      hasBackendTelemetry: false,
+    };
+  }
+
+  const rawCompleted = Array.isArray(record.stages_completed)
+    ? record.stages_completed.filter((s): s is HiddenGemStageCode =>
+        (HIDDEN_GEM_PIPELINE_STAGES as readonly string[]).includes(String(s)),
+      )
+    : [];
+  const completedCount = rawCompleted.length;
+  const exactPct = Math.round((completedCount / total) * 100);
+  const rawIdx = asNullableInt(record.stage_index) ?? 1;
+
+  return {
+    stageIndex: Math.max(1, Math.min(total, rawIdx)),
+    stageTotal: total,
+    stageCode: typeof record.stage_code === "string" ? record.stage_code : scan.status,
+    stagesCompleted: rawCompleted,
+    completedCount,
+    stagePct: exactPct,
+    universeIngested: asNullableInt(record.universe_ingested),
+    hardGatePassed: asNullableInt(record.hard_gate_passed),
+    hardGateRejected: asNullableInt(record.hard_gate_rejected),
+    enrichmentTargets: asNullableInt(record.enrichment_targets),
+    candidatesScored: asNullableInt(record.candidates_scored),
+    hasBackendTelemetry: true,
+  };
+}
+
+export function formatElapsedDuration(startedIso: string | null, nowMs: number): string {
+  if (!startedIso) return "00:00";
+  const startMs = Date.parse(startedIso);
+  if (!Number.isFinite(startMs)) return "00:00";
+  const totalSec = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 export function formatWeightCoverage(coverage: number | null | undefined): string {

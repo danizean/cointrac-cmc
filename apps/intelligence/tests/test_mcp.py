@@ -67,6 +67,9 @@ async def test_mcp_registers_tools_resources_and_prompts() -> None:
         "get_historical_performance",
         "analyze_derivatives",
         "get_capabilities",
+        "list_hidden_gem_candidates",
+        "get_hidden_gem_detail",
+        "get_hidden_gem_quality_stats",
     }
     resource_uris = {resource.uri for resource in resources}
     template_uris = {template.uri_template for template in templates}
@@ -78,6 +81,7 @@ async def test_mcp_registers_tools_resources_and_prompts() -> None:
     assert template_uris == {
         "cointrac://assets/{symbol}/profile",
         "cointrac://evidence/{evidence_id}",
+        "cointrac://hidden-gems/candidates/{candidate_id}",
     }
     assert {prompt.name for prompt in prompts} == {
         "daily-market-briefing",
@@ -123,7 +127,7 @@ async def test_mcp_tool_schemas_have_parameter_descriptions_and_clear_validation
     from mcp.server.mcpserver.exceptions import ToolError
 
     tools = await mcp.list_tools()
-    assert len(tools) == 11
+    assert len(tools) == 14
     for tool in tools:
         schema = tool.input_schema or {}
         props = schema.get("properties") or {}
@@ -341,3 +345,133 @@ async def test_mcp_stage_4_3_additive_fields_and_backward_compatibility() -> Non
     sector_rows = _payload(sectors_res)["data"]["sectors"]
     assert all("excess_change_24h_vs_market_pct" in row for row in sector_rows)
     assert all("excess_change_7d_vs_market_pct" in row for row in sector_rows)
+
+
+async def test_mcp_all_tools_expose_typed_output_schemas_and_annotations() -> None:
+    expected_data_defs = {
+        "get_capabilities": "CapabilitiesData",
+        "get_market_overview": "MarketOverviewData",
+        "analyze_market_regime": "MarketRegimeData",
+        "scan_market_movers": "ScanMoversData",
+        "detect_market_anomalies": "DetectAnomaliesData",
+        "compare_assets": "CompareAssetsData",
+        "analyze_asset": "AnalyzeAssetData",
+        "analyze_momentum": "AnalyzeMomentumData",
+        "analyze_sector_rotation": "SectorRotationData",
+        "get_historical_performance": "HistoricalPerformanceData",
+        "analyze_derivatives": "DerivativesAnalysisData",
+        "list_hidden_gem_candidates": "HiddenGemCandidatesData",
+        "get_hidden_gem_detail": "HiddenGemDetailData",
+        "get_hidden_gem_quality_stats": "HiddenGemQualityStatsData",
+    }
+    local_tools = {
+        "get_capabilities",
+        "list_hidden_gem_candidates",
+        "get_hidden_gem_detail",
+        "get_hidden_gem_quality_stats",
+    }
+    tools = await mcp.list_tools()
+    by_name = {tool.name: tool for tool in tools}
+    assert set(by_name) == set(expected_data_defs)
+
+    for name, expected_def in expected_data_defs.items():
+        tool = by_name[name]
+        schema = tool.output_schema
+        assert schema is not None, f"{name} missing output_schema"
+        assert schema.get("type") == "object"
+        assert schema.get("additionalProperties") is False
+        assert set(schema.get("required") or []) >= {
+            "tool",
+            "engine_version",
+            "status",
+            "summary",
+            "data",
+            "methodology",
+            "evidence",
+        }
+        assert schema["properties"]["data"] == {"$ref": f"#/$defs/{expected_def}"}
+        assert expected_def in (schema.get("$defs") or {})
+
+        ann = tool.annotations
+        assert ann is not None, f"{name} missing ToolAnnotations"
+        assert ann.read_only_hint is True
+        assert ann.destructive_hint is False
+        assert ann.idempotent_hint is True
+        assert ann.open_world_hint is (name not in local_tools)
+
+
+async def test_mcp_structured_content_preserves_nulls_and_statuses() -> None:
+    import json
+
+    from mcp.client.streamable_http import streamable_http_client
+
+    from app.api.deps import ApiKeyRecord, MemoryKeyDirectory, install_keys, key_hash
+    from app.main import create_app
+    from mcp import ClientSession
+
+    deps, _evidence = research_deps()
+    deps.gateway.handlers["/v1/cryptocurrency/map"] = {  # type: ignore[attr-defined]
+        "data": [],
+        "status": {"timestamp": "2026-11-22T15:00:00.000Z", "error_code": 0, "credit_count": 1},
+    }
+    logs = MemoryEvidence()
+    set_service_deps(deps)
+    set_evidence_writer(logs)
+    try:
+        # Unknown asset yields INSUFFICIENT_DATA with null fields and valid structured_content
+        unknown = await mcp.call_tool("analyze_asset", {"symbol": "NOTACOIN123"})
+        assert unknown.is_error is False
+        assert unknown.structured_content is not None
+        text_json = json.loads(unknown.content[0].text)  # type: ignore[attr-defined]
+        assert unknown.structured_content == text_json
+        assert unknown.structured_content["status"] == "INSUFFICIENT_DATA"
+        assert unknown.structured_content["data"]["price"] is None
+        assert unknown.structured_content["limitations"]
+        assert unknown.structured_content["methodology"]["annualization_basis"] == "365d"
+
+        # Valid market tool over Streamable HTTP ClientSession emits structuredContent + JSON text
+        key_val = "ct_live_phase2_structured_output_key"
+        install_keys(
+            MemoryKeyDirectory(
+                [
+                    ApiKeyRecord(
+                        key_id="p2-key",
+                        key_hash=key_hash(key_val),
+                        rate_limit_per_min=60,
+                        is_active=True,
+                        user_id="00000000-0000-0000-0000-000000000042",
+                    )
+                ]
+            )
+        )
+        test_app = create_app()
+        try:
+            async with test_app.router.lifespan_context(test_app):
+                transport = httpx.ASGITransport(app=test_app)
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    base_url="http://127.0.0.1:8000",
+                    headers={"x-cointrac-key": key_val},
+                ) as http_client:
+                    async with streamable_http_client(
+                        "http://127.0.0.1:8000/mcp",
+                        http_client=http_client,
+                    ) as (read, write):
+                        async with ClientSession(read, write) as session:
+                            await session.initialize()
+                            listed = await session.list_tools()
+                            assert all(
+                                t.output_schema is not None and t.annotations is not None
+                                for t in listed.tools
+                            )
+                            res = await session.call_tool("get_market_overview", {})
+                            assert res.is_error is False
+                            assert res.structured_content is not None
+                            assert res.structured_content == json.loads(res.content[0].text)
+                            assert res.structured_content["tool"] == "get_market_overview"
+                            assert res.structured_content["status"] in {"OK", "PARTIAL"}
+        finally:
+            install_keys(None)
+    finally:
+        set_service_deps(None)
+        set_evidence_writer(None)

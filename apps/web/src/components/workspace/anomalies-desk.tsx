@@ -1,21 +1,14 @@
 "use client";
 
-import { Activity, Play, RefreshCw } from "lucide-react";
-import { useState } from "react";
-import { ApiNotice } from "@/components/api-notice";
+import { Activity, Play } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useAppPreferences } from "@/components/app-preferences";
-import {
-  Button,
-  DeskSkeleton,
-  EmptyState,
-  PageHeader,
-} from "@/components/ui/primitives";
+import { Button, PageHeader } from "@/components/ui/primitives";
 import { runIntelligenceTool } from "@/lib/api";
+import { useDeskCache, writeDeskCache } from "@/lib/desk-cache";
 import type { EvidenceEnvelope } from "@/lib/types";
 import { NAV_LABELS, workspaceCopy } from "@/lib/workspace-copy";
-import { ResultStack } from "./result-stack";
-
-const QUICK_QUOTES = ["USD", "EUR", "BTC"] as const;
+import { DeskHeaderActions, DeskResultArea, type DeskError } from "./desk-chrome";
 
 interface ScopeOption {
   size: number;
@@ -56,38 +49,60 @@ const SCOPE_OPTIONS: ScopeOption[] = [
   },
 ];
 
+interface AnomaliesCachedPayload {
+  quote: string;
+  universe: number;
+  envelopes: EvidenceEnvelope[];
+}
+
 export function AnomaliesDesk() {
   const { locale } = useAppPreferences();
   const copy = workspaceCopy(locale);
+  const cached = useDeskCache<AnomaliesCachedPayload>("anomalies:last");
 
-  const [quote, setQuote] = useState("USD");
-  const [universe, setUniverse] = useState(150);
+  const [quoteOverride, setQuoteOverride] = useState<string | null>(null);
+  const [universeOverride, setUniverseOverride] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<{
-    status: number;
-    message: string;
-    retryAfterSeconds?: number;
-  } | null>(null);
-  const [envelopes, setEnvelopes] = useState<EvidenceEnvelope[]>([]);
+  const [error, setError] = useState<DeskError | null>(null);
+  const [liveEnvelopes, setLiveEnvelopes] = useState<EvidenceEnvelope[] | null>(null);
+  const [liveCachedAt, setLiveCachedAt] = useState<number | null>(null);
 
-  async function run(overrides?: { quote?: string; universe?: number }) {
-    setRunning(true);
-    setError(null);
-    const result = await runIntelligenceTool("detect_market_anomalies", {
-      quote_currency: (overrides?.quote ?? quote).trim().toUpperCase() || "USD",
-      universe_size: overrides?.universe ?? universe,
-    });
-    setRunning(false);
-    if (!result.ok) {
-      setError({
-        status: result.status,
-        message: result.message,
-        retryAfterSeconds: result.retryAfterSeconds,
+  const quote = quoteOverride ?? cached?.value.quote ?? "USD";
+  const universe = universeOverride ?? cached?.value.universe ?? 150;
+  const envelopes = liveEnvelopes ?? cached?.value.envelopes ?? [];
+  const cachedAt = liveCachedAt ?? cached?.cachedAt ?? null;
+
+  const run = useCallback(
+    async (overrides?: { quote?: string; universe?: number }) => {
+      const nextQuote = (overrides?.quote ?? quote).trim().toUpperCase() || "USD";
+      const nextUniverse = overrides?.universe ?? universe;
+      setRunning(true);
+      setError(null);
+      const result = await runIntelligenceTool("detect_market_anomalies", {
+        quote_currency: nextQuote,
+        universe_size: nextUniverse,
       });
-      return;
-    }
-    setEnvelopes([result.data]);
-  }
+      setRunning(false);
+      if (!result.ok) {
+        setError({
+          status: result.status,
+          message: result.message,
+          retryAfterSeconds: result.retryAfterSeconds,
+        });
+        return;
+      }
+
+      const next = [result.data];
+      setLiveEnvelopes(next);
+      const ts = writeDeskCache<AnomaliesCachedPayload>("anomalies:last", {
+        quote: nextQuote,
+        universe: nextUniverse,
+        envelopes: next,
+      });
+      setLiveCachedAt(ts);
+    },
+    [quote, universe],
+  );
 
   return (
     <div className="space-y-6">
@@ -95,47 +110,15 @@ export function AnomaliesDesk() {
         title={NAV_LABELS[locale].anomalies}
         description={copy.anomaliesBody}
         actions={
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div
-              role="group"
-              aria-label={locale === "id" ? "Mata uang" : "Currency"}
-              className="inline-flex h-9 items-center rounded-full border border-border bg-card/80 p-0.5"
-            >
-              {QUICK_QUOTES.map((q) => {
-                const active = quote.trim().toUpperCase() === q;
-                return (
-                  <button
-                    key={q}
-                    type="button"
-                    disabled={running}
-                    onClick={() => {
-                      setQuote(q);
-                      if (!running) void run({ quote: q });
-                    }}
-                    className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors disabled:opacity-50 ${
-                      active
-                        ? "bg-primary text-white shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {q}
-                  </button>
-                );
-              })}
-            </div>
-
-            <Button
-              type="button"
-              variant="primary"
-              size="md"
-              loading={running}
-              onClick={() => void run()}
-              className="ct-btn-glow"
-            >
-              {!running ? <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> : null}
-              <span>{running ? copy.running : copy.refresh}</span>
-            </Button>
-          </div>
+          <DeskHeaderActions
+            quote={quote}
+            running={running}
+            onSelectQuote={(nextQuote) => {
+              setQuoteOverride(nextQuote);
+              if (!running) void run({ quote: nextQuote });
+            }}
+            onRefresh={() => void run()}
+          />
         }
       />
 
@@ -160,7 +143,7 @@ export function AnomaliesDesk() {
                 type="button"
                 disabled={running}
                 onClick={() => {
-                  setUniverse(opt.size);
+                  setUniverseOverride(opt.size);
                   if (!running) void run({ universe: opt.size });
                 }}
                 className={`cursor-pointer rounded-[12px] border p-3 text-left transition-all disabled:opacity-60 ${
@@ -181,43 +164,26 @@ export function AnomaliesDesk() {
         </div>
       </div>
 
-      {error ? (
-        <ApiNotice
-          status={error.status}
-          message={error.message}
-          retryAfterSeconds={error.retryAfterSeconds}
-          onRetry={() => void run()}
-        />
-      ) : null}
-
-      {running && envelopes.length === 0 ? (
-        <div className="space-y-4">
-          <div className="h-[2px] w-full overflow-hidden rounded-full bg-border/40">
-            <div className="ct-progress-bar h-full w-2/5 rounded-full bg-primary" />
-          </div>
-          <DeskSkeleton />
-        </div>
-      ) : null}
-
-      {!running && !error && envelopes.length === 0 ? (
-        <EmptyState
-          icon={<Activity className="h-5 w-5 text-link" aria-hidden="true" />}
-          title={locale === "id" ? "Siap mendeteksi anomali pasar" : "Ready to scan market anomalies"}
-          description={
-            locale === "id"
-              ? "Pilih cakupan koin di atas untuk mendeteksi lonjakan volume dan pergerakan harga tidak wajar."
-              : "Select a scan scope above to spot unusual volume spikes and price moves."
-          }
-          action={
-            <Button variant="primary" size="md" onClick={() => void run()} className="ct-btn-glow">
-              <Play className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{copy.run}</span>
-            </Button>
-          }
-        />
-      ) : null}
-
-      <ResultStack envelopes={envelopes} />
+      <DeskResultArea
+        running={running}
+        error={error}
+        envelopes={envelopes}
+        cachedAt={cachedAt}
+        onRetry={() => void run()}
+        emptyIcon={<Activity className="h-5 w-5 text-link" aria-hidden="true" />}
+        emptyTitle={locale === "id" ? "Siap mendeteksi anomali pasar" : "Ready to scan market anomalies"}
+        emptyDescription={
+          locale === "id"
+            ? "Pilih cakupan koin di atas untuk mendeteksi lonjakan volume dan pergerakan harga tidak wajar."
+            : "Select a scan scope above to spot unusual volume spikes and price moves."
+        }
+        emptyAction={
+          <Button variant="primary" size="md" onClick={() => void run()} className="ct-btn-glow">
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{copy.run}</span>
+          </Button>
+        }
+      />
     </div>
   );
 }

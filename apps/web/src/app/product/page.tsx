@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "Product & Capabilities — Crypto REST Endpoints, Hidden Gems & MCP",
   alternates: { canonical: "/product" },
   description:
-    "Explore CoinTrac's 10 deterministic crypto market intelligence REST endpoints, 11 MCP tools, Hidden Gem Discovery Engine, and transparent TIER_RESTRICTED status reporting.",
+    "Explore CoinTrac's 10 deterministic crypto market intelligence REST endpoints, 14 MCP tools, Hidden Gem Discovery Engine, and transparent TIER_RESTRICTED status reporting.",
   keywords: [
     "crypto intelligence API endpoints",
     "CoinMarketCap MCP tools",
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     "EvidenceEnvelope status modes",
   ],
   openGraph: {
-    title: "CoinTrac Product & Capabilities — 10 REST Tools, Hidden Gems & 11 MCP Tools",
+    title: "CoinTrac Product & Capabilities — 10 REST Tools, Hidden Gems & 14 MCP Tools",
     description:
       "Full reference of CoinTrac intelligence endpoints, deterministic scoring formulas, status flags (OK, PARTIAL, TIER_RESTRICTED, INSUFFICIENT_DATA), and MCP contracts.",
     url: new URL("/product", site),
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "CoinTrac Product & Capabilities — REST API, Hidden Gems & MCP",
     description:
-      "Ten deterministic intelligence tools, Hidden Gem Discovery Engine, and 11 MCP tools with audited evidence envelopes.",
+      "Ten deterministic intelligence tools, Hidden Gem Discovery Engine, and 14 MCP tools with audited evidence envelopes.",
     images: ["/brand/cointrac-logo.png"],
   },
 };
@@ -53,7 +53,7 @@ export default function ProductPage() {
         name: "CoinTrac Product & Capabilities",
         isPartOf: { "@id": `${origin}/#website` },
         description:
-          "Catalog of CoinTrac's 10 deterministic market intelligence REST endpoints, Hidden Gem Discovery Engine, and 11 MCP tools.",
+          "Catalog of CoinTrac's 10 deterministic market intelligence REST endpoints, Hidden Gem Discovery Engine, and 14 MCP tools.",
       },
       {
         "@type": "BreadcrumbList",

@@ -3,16 +3,20 @@
 import {
   Activity,
   AlertCircle,
+  ArrowUpDown,
   Bell,
   ChevronDown,
   ChevronUp,
   Gem,
+  Layers,
   Play,
   RefreshCw,
+  Search,
   SlidersHorizontal,
   Square,
   Star,
   Trash2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiNotice } from "@/components/api-notice";
@@ -26,6 +30,7 @@ import {
   PageHeader,
 } from "@/components/ui/primitives";
 import { formatCompactUsd, formatPct, formatUsd, formatUtc, pctToneClass } from "@/lib/format";
+import { useDeskCache, writeDeskCache } from "@/lib/desk-cache";
 import {
   addToHiddenGemWatchlist,
   cancelHiddenGemScan,
@@ -43,9 +48,11 @@ import {
 } from "@/lib/hidden-gems-api";
 import {
   confidenceBadgeTone,
+  dedupeCandidatesByAsset,
   eligibilityBadgeTone,
   formatScore,
   formatWeightCoverage,
+  pickDefaultScanRunId,
   scanStatusTone,
   type AlertEventItem,
   type CandidateDetail,
@@ -61,11 +68,17 @@ import {
   type WatchlistItem,
 } from "@/lib/hidden-gems-types";
 import { HiddenGemDetailModal } from "./hidden-gem-detail-modal";
+import { HiddenGemScanProgress } from "./hidden-gem-scan-progress";
 
 type DeskTab = "feed" | "watchlist" | "rejections" | "alerts";
+type SortMetric = "score" | "return_24h" | "return_7d" | "rs_btc_7d" | "market_cap";
+type ConfidenceFilter = "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT" | "";
 
 const INPUT_CLASS =
   "mt-1 min-h-10 w-full min-w-0 rounded-[10px] border border-border bg-input-bg px-3 py-2 font-mono text-xs text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none";
+
+const COMPACT_SELECT_CLASS =
+  "min-h-9 rounded-[8px] border border-border bg-input-bg px-2.5 py-1.5 font-mono text-[11px] text-foreground focus:border-primary focus:outline-none";
 
 function optionalFloat(raw: string): number | null {
   const trimmed = raw.trim();
@@ -74,8 +87,42 @@ function optionalFloat(raw: string): number | null {
   return Number.isFinite(val) ? val : null;
 }
 
+function scoreBarColor(score: number | null): string {
+  if (score === null) return "bg-muted-foreground/40";
+  if (score >= 80) return "bg-positive";
+  if (score >= 65) return "bg-primary";
+  return "bg-warning";
+}
+
+function sortMetricValue(cand: CandidateSummary, sortBy: SortMetric): number {
+  if (sortBy === "return_24h") return cand.return_24h ?? Number.NEGATIVE_INFINITY;
+  if (sortBy === "return_7d") return cand.return_7d ?? Number.NEGATIVE_INFINITY;
+  if (sortBy === "rs_btc_7d") return cand.rs_btc_7d ?? Number.NEGATIVE_INFINITY;
+  if (sortBy === "market_cap") return cand.market_cap ?? Number.POSITIVE_INFINITY;
+  return cand.adjusted_score ?? -1;
+}
+
+interface HiddenGemsWorkspaceCache {
+  scans: ScanRunSummary[];
+  configs: ScanConfigItem[];
+  watchlist: WatchlistItem[];
+  alerts: AlertEventItem[];
+  qualityStats: QualityStatsRow[];
+  candidates: CandidateSummary[];
+  rejections: RejectionSummary[];
+}
+
+const EMPTY_SCANS: ScanRunSummary[] = [];
+const EMPTY_CANDIDATES: CandidateSummary[] = [];
+const EMPTY_REJECTIONS: RejectionSummary[] = [];
+const EMPTY_CONFIGS: ScanConfigItem[] = [];
+const EMPTY_WATCHLIST: WatchlistItem[] = [];
+const EMPTY_ALERTS: AlertEventItem[] = [];
+const EMPTY_QUALITY: QualityStatsRow[] = [];
+
 export function HiddenGemsDesk() {
   const { locale } = useAppPreferences();
+  const cachedWorkspace = useDeskCache<HiddenGemsWorkspaceCache>("hidden-gems:workspace");
   const [activeTab, setActiveTab] = useState<DeskTab>("feed");
   const [showBuilder, setShowBuilder] = useState(false);
 
@@ -94,11 +141,15 @@ export function HiddenGemsDesk() {
   const [presetName, setPresetName] = useState("");
   const [scheduleMinutes, setScheduleMinutes] = useState("0");
 
-  // Candidate feed filters
+  // Feed scope, grouping, search & quant filters
+  const [runScope, setRunScope] = useState<string>("latest_completed");
+  const [groupByAsset, setGroupByAsset] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortMetric>("score");
   const [filterTrack, setFilterTrack] = useState<DiscoveryTrack | "">("");
   const [filterHorizon, setFilterHorizon] = useState<TradingHorizon | "">("");
   const [filterMinScore, setFilterMinScore] = useState("");
-  const [filterConfidence, setFilterConfidence] = useState<"HIGH" | "MEDIUM" | "LOW" | "">("");
+  const [filterConfidence, setFilterConfidence] = useState<ConfidenceFilter>("");
   const [filterEligibility, setFilterEligibility] = useState("");
 
   // Server state
@@ -109,24 +160,75 @@ export function HiddenGemsDesk() {
   const [savingPreset, setSavingPreset] = useState(false);
   const [notice, setNotice] = useState<{ status: number; message: string } | null>(null);
 
-  const [scans, setScans] = useState<ScanRunSummary[]>([]);
-  const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
-  const [rejections, setRejections] = useState<RejectionSummary[]>([]);
-  const [configs, setConfigs] = useState<ScanConfigItem[]>([]);
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [alerts, setAlerts] = useState<AlertEventItem[]>([]);
-  const [qualityStats, setQualityStats] = useState<QualityStatsRow[]>([]);
+  const [liveScans, setScans] = useState<ScanRunSummary[] | null>(null);
+  const [liveCandidates, setCandidates] = useState<CandidateSummary[] | null>(null);
+  const [liveRejections, setRejections] = useState<RejectionSummary[] | null>(null);
+  const [liveConfigs, setConfigs] = useState<ScanConfigItem[] | null>(null);
+  const [liveWatchlist, setWatchlist] = useState<WatchlistItem[] | null>(null);
+  const [liveAlerts, setAlerts] = useState<AlertEventItem[] | null>(null);
+  const [liveQualityStats, setQualityStats] = useState<QualityStatsRow[] | null>(null);
+
+  const scans = liveScans ?? cachedWorkspace?.value.scans ?? EMPTY_SCANS;
+  const candidates = liveCandidates ?? cachedWorkspace?.value.candidates ?? EMPTY_CANDIDATES;
+  const rejections = liveRejections ?? cachedWorkspace?.value.rejections ?? EMPTY_REJECTIONS;
+  const configs = liveConfigs ?? cachedWorkspace?.value.configs ?? EMPTY_CONFIGS;
+  const watchlist = liveWatchlist ?? cachedWorkspace?.value.watchlist ?? EMPTY_WATCHLIST;
+  const alerts = liveAlerts ?? cachedWorkspace?.value.alerts ?? EMPTY_ALERTS;
+  const qualityStats = liveQualityStats ?? cachedWorkspace?.value.qualityStats ?? EMPTY_QUALITY;
 
   // Detail modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detail, setDetail] = useState<CandidateDetail | null>(null);
+  const [modalVariants, setModalVariants] = useState<CandidateSummary[]>([]);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bootstrapDone = useRef(false);
+  const filterStateRef = useRef({
+    runScope,
+    filterTrack,
+    filterHorizon,
+    filterMinScore,
+    filterConfidence,
+    filterEligibility,
+  });
+
+  useEffect(() => {
+    filterStateRef.current = {
+      runScope,
+      filterTrack,
+      filterHorizon,
+      filterMinScore,
+      filterConfidence,
+      filterEligibility,
+    };
+  }, [
+    runScope,
+    filterTrack,
+    filterHorizon,
+    filterMinScore,
+    filterConfidence,
+    filterEligibility,
+  ]);
 
   const latestScan = scans[0] ?? null;
   const activeScan = scans.find((s) => s.status === "QUEUED" || s.status === "RUNNING") ?? null;
+
+  const resolvedRunId = useMemo(() => {
+    if (runScope === "all") return undefined;
+    if (runScope === "latest_completed") {
+      return pickDefaultScanRunId(scans) ?? undefined;
+    }
+    return runScope;
+  }, [runScope, scans]);
+
+  const inspectedScan = useMemo(() => {
+    if (resolvedRunId) {
+      return scans.find((s) => s.id === resolvedRunId) ?? latestScan;
+    }
+    return latestScan;
+  }, [latestScan, resolvedRunId, scans]);
 
   const watchlistByAsset = useMemo(() => {
     const map = new Map<string, WatchlistItem>();
@@ -136,80 +238,148 @@ export function HiddenGemsDesk() {
     return map;
   }, [watchlist]);
 
-  const loadWorkspaceData = useCallback(async () => {
-    try {
-      const minScoreVal = optionalFloat(filterMinScore);
-      const [
-        scansRes,
-        candidatesRes,
-        configsRes,
-        watchlistRes,
-        alertsRes,
-        qualityRes,
-      ] = await Promise.all([
-        fetchHiddenGemScans(15),
+  const fetchFilteredCandidatesOnly = useCallback(
+    async (scansSource: ScanRunSummary[]) => {
+      const targetRunId =
+        runScope === "all"
+          ? undefined
+          : runScope === "latest_completed"
+            ? (pickDefaultScanRunId(scansSource) ?? undefined)
+            : runScope;
+      const detailRunId = targetRunId ?? scansSource[0]?.id;
+      const [candidatesRes, scanDetailRes] = await Promise.all([
         fetchHiddenGemCandidates({
           track: filterTrack,
           horizon: filterHorizon,
-          min_score: minScoreVal,
+          min_score: optionalFloat(filterMinScore),
           confidence: filterConfidence,
           eligibility: filterEligibility || undefined,
-          limit: 80,
+          run_id: targetRunId,
+          limit: 120,
         }),
+        detailRunId && scansSource.find((s) => s.id === detailRunId)?.status !== "QUEUED"
+          ? fetchHiddenGemScanDetail(detailRunId)
+          : Promise.resolve(null),
+      ]);
+      if (candidatesRes.ok) {
+        setCandidates(candidatesRes.data);
+      } else {
+        setNotice({ status: candidatesRes.status, message: candidatesRes.message });
+      }
+      if (scanDetailRes && scanDetailRes.ok) {
+        setRejections(scanDetailRes.data.rejections);
+      } else {
+        setRejections([]);
+      }
+    },
+    [
+      filterConfidence,
+      filterEligibility,
+      filterHorizon,
+      filterMinScore,
+      filterTrack,
+      runScope,
+    ],
+  );
+
+  const loadWorkspaceData = useCallback(async () => {
+    const filters = filterStateRef.current;
+    try {
+      const minScoreVal = optionalFloat(filters.filterMinScore);
+      const [scansRes, configsRes, watchlistRes, alertsRes, qualityRes] = await Promise.all([
+        fetchHiddenGemScans(20),
         fetchHiddenGemConfigs(),
         fetchHiddenGemWatchlist(),
         fetchHiddenGemAlerts(40),
         fetchHiddenGemQualityStats(),
       ]);
 
-      const firstError = [
-        scansRes,
-        candidatesRes,
-        configsRes,
-        watchlistRes,
-        alertsRes,
-        qualityRes,
-      ].find((res) => !res.ok);
-
       if (!scansRes.ok) {
         setNotice({ status: scansRes.status, message: scansRes.message });
         return;
       }
-      if (firstError && !firstError.ok) {
-        setNotice({ status: firstError.status, message: firstError.message });
-      } else {
-        setNotice(null);
-      }
+
       setScans(scansRes.data);
-      if (candidatesRes.ok) setCandidates(candidatesRes.data);
       if (configsRes.ok) setConfigs(configsRes.data);
       if (watchlistRes.ok) setWatchlist(watchlistRes.data);
       if (alertsRes.ok) setAlerts(alertsRes.data);
       if (qualityRes.ok) setQualityStats(qualityRes.data);
 
-      const newest = scansRes.data[0];
-      if (newest && newest.status !== "QUEUED") {
-        const detailRes = await fetchHiddenGemScanDetail(newest.id);
-        if (detailRes.ok) {
-          setRejections(detailRes.data.rejections);
-        }
+      const targetRunId =
+        filters.runScope === "all"
+          ? undefined
+          : filters.runScope === "latest_completed"
+            ? (pickDefaultScanRunId(scansRes.data) ?? undefined)
+            : filters.runScope;
+
+      const detailRunId = targetRunId ?? scansRes.data[0]?.id;
+      const [candidatesRes, scanDetailRes] = await Promise.all([
+        fetchHiddenGemCandidates({
+          track: filters.filterTrack,
+          horizon: filters.filterHorizon,
+          min_score: minScoreVal,
+          confidence: filters.filterConfidence,
+          eligibility: filters.filterEligibility || undefined,
+          run_id: targetRunId,
+          limit: 120,
+        }),
+        detailRunId && scansRes.data.find((s) => s.id === detailRunId)?.status !== "QUEUED"
+          ? fetchHiddenGemScanDetail(detailRunId)
+          : Promise.resolve(null),
+      ]);
+
+      const firstError = [
+        configsRes,
+        watchlistRes,
+        alertsRes,
+        qualityRes,
+        candidatesRes,
+      ].find((res) => !res.ok);
+
+      if (firstError && !firstError.ok) {
+        setNotice({ status: firstError.status, message: firstError.message });
       } else {
-        setRejections([]);
+        setNotice(null);
       }
+
+      const nextCandidates = candidatesRes.ok ? candidatesRes.data : [];
+      const nextRejections = scanDetailRes && scanDetailRes.ok ? scanDetailRes.data.rejections : [];
+      if (candidatesRes.ok) setCandidates(nextCandidates);
+      setRejections(nextRejections);
+
+      writeDeskCache("hidden-gems:workspace", {
+        scans: scansRes.data,
+        configs: configsRes.ok ? configsRes.data : [],
+        watchlist: watchlistRes.ok ? watchlistRes.data : [],
+        alerts: alertsRes.ok ? alertsRes.data : [],
+        qualityStats: qualityRes.ok ? qualityRes.data : [],
+        candidates: nextCandidates,
+        rejections: nextRejections,
+      });
     } finally {
+      bootstrapDone.current = true;
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [filterConfidence, filterEligibility, filterHorizon, filterMinScore, filterTrack]);
+  }, []);
 
   useEffect(() => {
-    void loadWorkspaceData();
-  }, [loadWorkspaceData]);
+    void Promise.resolve().then(() => void loadWorkspaceData());
+    // Intentionally run once on mount; filter updates use fetchFilteredCandidatesOnly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!bootstrapDone.current) return;
+    void Promise.resolve().then(() => void fetchFilteredCandidatesOnly(scans));
+    // Only re-fetch candidates when filter state changes (never re-fetch configs/alerts/quality).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchFilteredCandidatesOnly]);
 
   useEffect(() => {
     if (!activeScan) return;
     pollTimer.current = setTimeout(() => {
-      void fetchHiddenGemScans(15).then((res) => {
+      void fetchHiddenGemScans(20).then((res) => {
         if (!res.ok) {
           setNotice({ status: res.status, message: res.message });
           return;
@@ -222,7 +392,7 @@ export function HiddenGemsDesk() {
           void loadWorkspaceData();
         }
       });
-    }, 5000);
+    }, 2500);
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };
@@ -263,6 +433,7 @@ export function HiddenGemsDesk() {
       setNotice({ status: res.status, message: res.message });
       return;
     }
+    setRunScope("latest_completed");
     await loadWorkspaceData();
   }
 
@@ -314,10 +485,18 @@ export function HiddenGemsDesk() {
     setSelectedConfigId(configId);
     const found = configs.find((c) => c.id === configId);
     if (!found) return;
-    if (found.discovery_track === "EARLY" || found.discovery_track === "CONFIRMED" || found.discovery_track === "BOTH") {
+    if (
+      found.discovery_track === "EARLY" ||
+      found.discovery_track === "CONFIRMED" ||
+      found.discovery_track === "BOTH"
+    ) {
       setScanTrack(found.discovery_track);
     }
-    if (found.trading_horizon === "SHORT_TERM" || found.trading_horizon === "SWING" || found.trading_horizon === "BOTH") {
+    if (
+      found.trading_horizon === "SHORT_TERM" ||
+      found.trading_horizon === "SWING" ||
+      found.trading_horizon === "BOTH"
+    ) {
       setScanHorizon(found.trading_horizon);
     }
     const uLimit = found.universe_config?.limit;
@@ -328,12 +507,26 @@ export function HiddenGemsDesk() {
     if (typeof f.min_volume_24h_usd === "number") setMinVol(String(f.min_volume_24h_usd));
     if (typeof f.min_vol_to_mcap === "number") setMinVolRatio(String(f.min_vol_to_mcap));
     if (typeof f.min_listing_age_days === "number") setMinListingDays(String(f.min_listing_age_days));
-    if (typeof f.max_early_return_24h_pct === "number") setMaxEarly24h(String(f.max_early_return_24h_pct));
-    if (typeof f.max_early_return_7d_pct === "number") setMaxEarly7d(String(f.max_early_return_7d_pct));
+    if (typeof f.max_early_return_24h_pct === "number") {
+      setMaxEarly24h(String(f.max_early_return_24h_pct));
+    }
+    if (typeof f.max_early_return_7d_pct === "number") {
+      setMaxEarly7d(String(f.max_early_return_7d_pct));
+    }
+    const sched = found.schedule_config ?? {};
+    if (sched.enabled && typeof sched.interval_minutes === "number") {
+      setScheduleMinutes(String(sched.interval_minutes));
+    } else {
+      setScheduleMinutes("0");
+    }
   }
 
-  async function handleInspectCandidate(candidateId: string) {
+  async function handleInspectCandidate(
+    candidateId: string,
+    variants: CandidateSummary[] = [],
+  ) {
     setModalOpen(true);
+    setModalVariants(variants);
     setDetailLoading(true);
     setDetailError(null);
     setDetail(null);
@@ -354,7 +547,7 @@ export function HiddenGemsDesk() {
         setNotice({ status: res.status, message: res.message });
         return;
       }
-      setWatchlist((prev) => prev.filter((item) => item.id !== existing.id));
+      setWatchlist((prev) => (prev ?? watchlist).filter((item) => item.id !== existing.id));
       return;
     }
     const res = await addToHiddenGemWatchlist({
@@ -365,7 +558,7 @@ export function HiddenGemsDesk() {
       setNotice({ status: res.status, message: res.message });
       return;
     }
-    setWatchlist((prev) => [res.data, ...prev.filter((w) => w.asset_id !== res.data.asset_id)]);
+    setWatchlist((prev) => [res.data, ...(prev ?? watchlist).filter((w) => w.asset_id !== res.data.asset_id)]);
   }
 
   async function handleRemoveWatchlistItem(itemId: string) {
@@ -374,17 +567,82 @@ export function HiddenGemsDesk() {
       setNotice({ status: res.status, message: res.message });
       return;
     }
-    setWatchlist((prev) => prev.filter((item) => item.id !== itemId));
+    setWatchlist((prev) => (prev ?? watchlist).filter((item) => item.id !== itemId));
+  }
+
+  const displayedRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = q
+      ? candidates.filter(
+          (c) =>
+            c.symbol.toLowerCase().includes(q) ||
+            c.name.toLowerCase().includes(q) ||
+            c.canonical_provider_id.toLowerCase().includes(q),
+        )
+      : candidates;
+
+    const groups = groupByAsset
+      ? dedupeCandidatesByAsset(filtered)
+      : filtered.map((row) => ({ primary: row, variants: [row] }));
+
+    return [...groups].sort((a, b) => {
+      const va = sortMetricValue(a.primary, sortBy);
+      const vb = sortMetricValue(b.primary, sortBy);
+      if (sortBy === "market_cap") return va - vb;
+      return vb - va;
+    });
+  }, [candidates, groupByAsset, searchQuery, sortBy]);
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+      filterTrack ||
+      filterHorizon ||
+      filterConfidence ||
+      filterEligibility ||
+      filterMinScore.trim() ||
+      sortBy !== "score",
+  );
+
+  function resetAllFilters() {
+    setSearchQuery("");
+    setFilterTrack("");
+    setFilterHorizon("");
+    setFilterConfidence("");
+    setFilterEligibility("");
+    setFilterMinScore("");
+    setSortBy("score");
   }
 
   const latestLimitations = useMemo(() => {
-    const raw = latestScan?.source_metadata?.limitations;
+    const raw = inspectedScan?.source_metadata?.limitations;
     return Array.isArray(raw) ? raw.map(String) : [];
-  }, [latestScan]);
+  }, [inspectedScan]);
 
-  if (initialLoading) {
+  const outcomeOverview = useMemo(() => {
+    const totalTracked = qualityStats.reduce((sum, r) => sum + r.total_tracked, 0);
+    const totalEval7d = qualityStats.reduce((sum, r) => sum + r.evaluated_7d, 0);
+    let weightedHits = 0;
+    for (const row of qualityStats) {
+      if (row.positive_7d_rate !== null && row.evaluated_7d > 0) {
+        weightedHits += row.positive_7d_rate * row.evaluated_7d;
+      }
+    }
+    const hitRatePct = totalEval7d > 0 ? (weightedHits / totalEval7d) * 100 : null;
+    return { totalTracked, totalEval7d, hitRatePct };
+  }, [qualityStats]);
+
+  if (initialLoading && !cachedWorkspace) {
     return <DeskSkeleton />;
   }
+
+  const funnelTotal = Math.max(1, inspectedScan?.universe_scanned ?? 0);
+  const eligiblePct = inspectedScan
+    ? Math.min(100, (inspectedScan.candidates_eligible / funnelTotal) * 100)
+    : 0;
+  const watchCount = inspectedScan
+    ? Math.max(0, inspectedScan.candidates_discovered - inspectedScan.candidates_eligible)
+    : 0;
+  const watchPct = inspectedScan ? Math.min(100 - eligiblePct, (watchCount / funnelTotal) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -392,8 +650,8 @@ export function HiddenGemsDesk() {
         title="Hidden Gem Discovery"
         description={
           locale === "id"
-            ? "Penemuan altcoin asimetris deterministik untuk jalur Early Asymmetric & Confirmed Momentum dengan bukti teraudit."
-            : "Deterministic Early Asymmetric & Confirmed Momentum altcoin discovery with confidence separation and audited evidence."
+            ? "Terminal riset altcoin deterministik untuk jalur Early Asymmetric & Confirmed Momentum dengan rincian komponen, penolakan hard-gate, dan audit bukti."
+            : "Deterministic Early Asymmetric & Confirmed Momentum research desk with component scoring, hard-gate rejection audit, and forward outcome tracking."
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -403,7 +661,7 @@ export function HiddenGemsDesk() {
               onClick={() => setShowBuilder((prev) => !prev)}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-              {locale === "id" ? "Konfigurasi Scan" : "Scan Builder"}
+              {locale === "id" ? "Parameter Scan" : "Scan Parameters"}
               {showBuilder ? (
                 <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
               ) : (
@@ -437,7 +695,7 @@ export function HiddenGemsDesk() {
                 onClick={() => void handleRunScan()}
               >
                 <Play className="h-3.5 w-3.5" aria-hidden="true" />
-                {locale === "id" ? "Jalankan Discovery Scan" : "Run Discovery Scan"}
+                {locale === "id" ? "Jalankan Scan" : "Run Discovery Scan"}
               </Button>
             )}
           </div>
@@ -452,58 +710,116 @@ export function HiddenGemsDesk() {
         />
       ) : null}
 
-      {/* Telemetry & Engine Status Strip */}
+      {/* Institutional 4-Card Telemetry Strip */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="p-4">
-          <p className="text-[11px] uppercase tracking-wider text-subtle-foreground">
-            {locale === "id" ? "Status Scan Terbaru" : "Latest Scan Status"}
-          </p>
-          <div className="mt-2 flex items-center justify-between gap-2">
+        <Card className="p-4 flex flex-col justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-subtle-foreground">
+              {locale === "id" ? "Status Scan Terbaru" : "Latest Scan Run"}
+            </p>
             {latestScan ? (
-              <Badge tone={scanStatusTone(latestScan.status)}>{latestScan.status}</Badge>
+              <span className="font-mono text-[10px] text-subtle-foreground">
+                #{latestScan.id.slice(0, 8)}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            {latestScan ? (
+              <Badge tone={scanStatusTone(latestScan.status)}>
+                {(latestScan.status === "RUNNING" || latestScan.status === "QUEUED") && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+                )}
+                {latestScan.status}
+              </Badge>
             ) : (
               <Badge tone="neutral">IDLE</Badge>
             )}
             <span className="font-mono text-xs tabular-nums text-muted-foreground">
-              {latestScan ? `${latestScan.universe_scanned} scanned` : "No runs yet"}
+              {latestScan ? `${latestScan.universe_scanned} scanned` : "No runs"}
             </span>
+          </div>
+          {latestScan?.error_summary ? (
+            <p className="truncate font-mono text-[10px] text-destructive" title={latestScan.error_summary}>
+              {latestScan.error_summary}
+            </p>
+          ) : (
+            <p className="font-mono text-[10px] text-subtle-foreground">
+              {latestScan ? formatUtc(latestScan.completed_at ?? latestScan.created_at) : "Ready"}
+            </p>
+          )}
+        </Card>
+
+        <Card className="p-4 flex flex-col justify-between gap-2">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-subtle-foreground">
+            {locale === "id" ? "Tier & Rezim Pasar" : "Capability & Regime"}
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone="brand">{inspectedScan?.effective_tier ?? "BASIC"}</Badge>
+            <Badge tone="neutral">{inspectedScan?.market_regime ?? "UNKNOWN"}</Badge>
+          </div>
+          <p className="truncate font-mono text-[10px] text-subtle-foreground">
+            {inspectedScan?.evaluation_profile ?? "BASIC_CAPABILITY_PROFILE"}
+          </p>
+        </Card>
+
+        <Card className="p-4 flex flex-col justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-subtle-foreground">
+              {locale === "id" ? "Funnel Seleksi" : "Screening Yield"}
+            </p>
+            {inspectedScan ? (
+              <span className="font-mono text-[10px] text-subtle-foreground">
+                #{inspectedScan.id.slice(0, 8)}
+              </span>
+            ) : null}
+          </div>
+          <p className="font-mono text-base font-semibold tabular-nums text-foreground">
+            <span className="text-positive">{inspectedScan?.candidates_eligible ?? 0}</span>
+            <span className="mx-1 text-xs font-normal text-muted-foreground">eligible</span>
+            <span className="text-xs font-normal text-subtle-foreground">
+              / {inspectedScan?.candidates_discovered ?? 0} scored ·{" "}
+              {inspectedScan?.candidates_rejected ?? 0} rejected
+            </span>
+          </p>
+          <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-positive" style={{ width: `${eligiblePct}%` }} />
+            <div className="h-full bg-primary/60" style={{ width: `${watchPct}%` }} />
           </div>
         </Card>
 
-        <Card className="p-4">
-          <p className="text-[11px] uppercase tracking-wider text-subtle-foreground">
-            {locale === "id" ? "Profil Kapabilitas & Rezim" : "Capability & Macro Regime"}
+        <Card className="p-4 flex flex-col justify-between gap-2">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-subtle-foreground">
+            {locale === "id" ? "Kredit & Track Record" : "Credits & Outcome Hit Rate"}
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Badge tone="brand">{latestScan?.effective_tier ?? "BASIC"}</Badge>
-            <Badge tone="neutral">{latestScan?.market_regime ?? "UNKNOWN"}</Badge>
+          <div className="flex items-baseline justify-between gap-2 font-mono tabular-nums">
+            <span className="text-base font-semibold text-foreground">
+              {inspectedScan?.cmc_credits_consumed ?? 0}{" "}
+              <span className="text-xs font-normal text-muted-foreground">cr</span>
+            </span>
+            <span className="text-xs text-muted-foreground">
+              7d Hit:{" "}
+              <span className="font-semibold text-foreground">
+                {outcomeOverview.hitRatePct !== null
+                  ? `${outcomeOverview.hitRatePct.toFixed(1)}%`
+                  : "—"}
+              </span>
+            </span>
           </div>
-        </Card>
-
-        <Card className="p-4">
-          <p className="text-[11px] uppercase tracking-wider text-subtle-foreground">
-            {locale === "id" ? "Kandidat Lolos / Ditemukan" : "Eligible / Discovered"}
-          </p>
-          <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums text-foreground">
-            {latestScan?.candidates_eligible ?? 0}
-            <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-              / {latestScan?.candidates_discovered ?? 0} total ({latestScan?.candidates_rejected ?? 0} rejected)
-            </span>
-          </p>
-        </Card>
-
-        <Card className="p-4">
-          <p className="text-[11px] uppercase tracking-wider text-subtle-foreground">
-            {locale === "id" ? "Kredit CMC & Watchlist" : "CMC Credits & Watchlist"}
-          </p>
-          <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums text-foreground">
-            {latestScan?.cmc_credits_consumed ?? 0} cr
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              · {watchlist.length} watchlist · {alerts.length} alerts
-            </span>
+          <p className="font-mono text-[10px] text-subtle-foreground">
+            {watchlist.length} watchlist · {outcomeOverview.totalTracked} tracked ({outcomeOverview.totalEval7d} eval 7d)
           </p>
         </Card>
       </div>
+
+      {/* Live Transparent Progress Panel while QUEUED or RUNNING */}
+      {activeScan ? (
+        <HiddenGemScanProgress
+          scan={activeScan}
+          locale={locale}
+          cancelling={cancellingId === activeScan.id}
+          onCancel={(scanId) => void handleCancelScan(scanId)}
+        />
+      ) : null}
 
       {/* Collapsible Scan Builder */}
       {showBuilder ? (
@@ -511,12 +827,12 @@ export function HiddenGemsDesk() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-foreground">
-                {locale === "id" ? "Parameter Discovery Scan" : "Discovery Scan Builder"}
+                {locale === "id" ? "Parameter Discovery Scan" : "Discovery Scan Parameters"}
               </h2>
               <p className="text-xs text-muted-foreground">
                 {locale === "id"
                   ? "Atur jalur riset, horizon perdagangan, dan batas penyaring likuiditas/anti-chase."
-                  : "Configure discovery track, trading horizon, universe cap, and hard-gate overrides."}
+                  : "Configure discovery track, trading horizon, universe limit, and hard-gate overrides."}
               </p>
             </div>
             {configs.length > 0 ? (
@@ -726,28 +1042,31 @@ export function HiddenGemsDesk() {
           [
             {
               id: "feed",
-              label: locale === "id" ? `Kandidat (${candidates.length})` : `Discovery Feed (${candidates.length})`,
+              label:
+                locale === "id"
+                  ? `Kandidat (${displayedRows.length})`
+                  : `Discovery Feed (${displayedRows.length})`,
               icon: Gem,
             },
             {
               id: "watchlist",
-              label: locale === "id" ? `Watchlist (${watchlist.length})` : `Watchlist (${watchlist.length})`,
+              label: `Watchlist (${watchlist.length})`,
               icon: Star,
             },
             {
               id: "rejections",
               label:
                 locale === "id"
-                  ? `Penolakan & Log (${rejections.length})`
-                  : `Rejections & Runs (${rejections.length})`,
+                  ? `Riwayat Scan & Penolakan (${rejections.length})`
+                  : `Runs & Rejections (${rejections.length})`,
               icon: AlertCircle,
             },
             {
               id: "alerts",
               label:
                 locale === "id"
-                  ? `Alert & Track Record (${alerts.length})`
-                  : `Alerts & Track Record (${alerts.length})`,
+                  ? `Track Record & Event (${alerts.length})`
+                  : `Outcomes & Events (${alerts.length})`,
               icon: Bell,
             },
           ] as const
@@ -777,8 +1096,111 @@ export function HiddenGemsDesk() {
       {/* TAB 1: DISCOVERY FEED */}
       {activeTab === "feed" ? (
         <div className="space-y-4">
-          <Card className="p-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <Card className="p-4 space-y-3">
+            {/* Toolbar Row 1: Scope, View Mode, Quick Search & Sort */}
+            <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="f-run-scope" className="text-[11px] font-medium text-muted-foreground">
+                    {locale === "id" ? "Sumber Scan:" : "Scan Scope:"}
+                  </label>
+                  <select
+                    id="f-run-scope"
+                    value={runScope}
+                    onChange={(e) => setRunScope(e.target.value)}
+                    className={COMPACT_SELECT_CLASS}
+                  >
+                    <option value="latest_completed">
+                      {locale === "id" ? "Scan Selesai Terbaru" : "Latest Completed Run"}
+                    </option>
+                    <option value="all">
+                      {locale === "id" ? "Semua Riwayat Scan" : "All Historical Runs"}
+                    </option>
+                    {scans.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        #{run.id.slice(0, 8)} · {run.status} ({run.candidates_eligible} elig)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Group 1 Row per Asset vs All Pairs */}
+                <div
+                  role="group"
+                  aria-label="Candidate row grouping"
+                  className="inline-flex rounded-[8px] border border-border bg-background p-0.5"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setGroupByAsset(true)}
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      groupByAsset
+                        ? "bg-card-elevated text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Layers className="h-3 w-3" aria-hidden="true" />
+                    {locale === "id" ? "1 Baris / Koin" : "Best / Asset"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGroupByAsset(false)}
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      !groupByAsset
+                        ? "bg-card-elevated text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {locale === "id" ? "Semua Track × Horizon" : "All Track × Horizon"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 sm:w-52 sm:flex-none">
+                  <Search
+                    className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle-foreground"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="search"
+                    aria-label="Filter ticker or asset name"
+                    placeholder={locale === "id" ? "Cari ticker / nama..." : "Filter symbol / name..."}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="min-h-9 w-full rounded-[8px] border border-border bg-input-bg pl-8 pr-2.5 font-mono text-[11px] text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <ArrowUpDown className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden="true" />
+                  <select
+                    aria-label="Sort candidates by"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as SortMetric)}
+                    className={COMPACT_SELECT_CLASS}
+                  >
+                    <option value="score">Score ↓</option>
+                    <option value="rs_btc_7d">RS vs BTC 7d ↓</option>
+                    <option value="return_7d">7d Return ↓</option>
+                    <option value="return_24h">24h Return ↓</option>
+                    <option value="market_cap">Market Cap ↑</option>
+                  </select>
+                </div>
+                {hasActiveFilters ? (
+                  <button
+                    type="button"
+                    onClick={resetAllFilters}
+                    className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-[8px] border border-border bg-card px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                    Reset
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Toolbar Row 2: Quantitative Filters */}
+            <div className="grid grid-cols-2 gap-2.5 border-t border-border pt-3 sm:grid-cols-3 lg:grid-cols-5">
               <div>
                 <label htmlFor="f-track" className="text-[11px] text-muted-foreground">
                   Track
@@ -816,15 +1238,14 @@ export function HiddenGemsDesk() {
                 <select
                   id="f-conf"
                   value={filterConfidence}
-                  onChange={(e) =>
-                    setFilterConfidence(e.target.value as "HIGH" | "MEDIUM" | "LOW" | "")
-                  }
+                  onChange={(e) => setFilterConfidence(e.target.value as ConfidenceFilter)}
                   className={INPUT_CLASS}
                 >
                   <option value="">All Levels</option>
                   <option value="HIGH">HIGH</option>
                   <option value="MEDIUM">MEDIUM</option>
                   <option value="LOW">LOW</option>
+                  <option value="INSUFFICIENT">INSUFFICIENT</option>
                 </select>
               </div>
               <div>
@@ -840,10 +1261,11 @@ export function HiddenGemsDesk() {
                   <option value="">All Statuses</option>
                   <option value="ELIGIBLE">ELIGIBLE</option>
                   <option value="WATCH">WATCH</option>
+                  <option value="REJECTED">REJECTED</option>
                   <option value="INSUFFICIENT_DATA">INSUFFICIENT_DATA</option>
                 </select>
               </div>
-              <div>
+              <div className="col-span-2 sm:col-span-1">
                 <label htmlFor="f-min" className="text-[11px] text-muted-foreground">
                   Min Adjusted Score
                 </label>
@@ -852,7 +1274,7 @@ export function HiddenGemsDesk() {
                   type="number"
                   min={0}
                   max={100}
-                  placeholder="e.g. 60"
+                  placeholder="e.g. 65"
                   value={filterMinScore}
                   onChange={(e) => setFilterMinScore(e.target.value)}
                   className={INPUT_CLASS}
@@ -861,27 +1283,43 @@ export function HiddenGemsDesk() {
             </div>
           </Card>
 
-          {candidates.length === 0 ? (
+          {displayedRows.length === 0 ? (
             <EmptyState
               icon={<Gem className="h-5 w-5" aria-hidden="true" />}
               title={
-                locale === "id" ? "Belum Ada Kandidat Hidden Gem" : "No Hidden Gem Candidates Yet"
+                hasActiveFilters
+                  ? locale === "id"
+                    ? "Tidak Ada Kandidat yang Cocok dengan Filter"
+                    : "No Candidates Match Active Filters"
+                  : locale === "id"
+                    ? "Belum Ada Kandidat pada Scan Ini"
+                    : "No Hidden Gem Candidates Found"
               }
               description={
-                locale === "id"
-                  ? "Jalankan Discovery Scan untuk memindai pasar dan menghitung skor deterministik Early & Confirmed."
-                  : "Run a Discovery Scan to ingest snapshots, apply hard gates, and score Early & Confirmed candidates."
+                hasActiveFilters
+                  ? locale === "id"
+                    ? "Reset filter atau ubah cakupan scan ke Semua Riwayat Scan."
+                    : "Reset active filters or switch Scan Scope to inspect older runs."
+                  : locale === "id"
+                    ? "Jalankan Discovery Scan untuk memindai pasar dan menghitung skor deterministik Early & Confirmed."
+                    : "Run a Discovery Scan to ingest snapshots, apply hard gates, and score Early & Confirmed candidates."
               }
               action={
-                <Button size="md" onClick={() => void handleRunScan()} loading={submittingScan}>
-                  <Play className="h-4 w-4" aria-hidden="true" />
-                  {locale === "id" ? "Jalankan Scan Pertama" : "Run First Scan"}
-                </Button>
+                hasActiveFilters ? (
+                  <Button size="md" variant="secondary" onClick={resetAllFilters}>
+                    Reset Filters
+                  </Button>
+                ) : (
+                  <Button size="md" onClick={() => void handleRunScan()} loading={submittingScan}>
+                    <Play className="h-4 w-4" aria-hidden="true" />
+                    {locale === "id" ? "Jalankan Scan Pertama" : "Run Discovery Scan"}
+                  </Button>
+                )
               }
             />
           ) : (
             <>
-              {/* Desktop Table */}
+              {/* Desktop Institutional Table */}
               <Card className="hidden overflow-hidden md:block">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
@@ -899,7 +1337,7 @@ export function HiddenGemsDesk() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {candidates.map((cand) => {
+                      {displayedRows.map(({ primary: cand, variants }) => {
                         const isWatched = watchlistByAsset.has(cand.asset_id);
                         return (
                           <tr
@@ -909,7 +1347,7 @@ export function HiddenGemsDesk() {
                             <td className="px-4 py-3">
                               <button
                                 type="button"
-                                onClick={() => void handleInspectCandidate(cand.id)}
+                                onClick={() => void handleInspectCandidate(cand.id, variants)}
                                 className="cursor-pointer text-left font-semibold text-foreground hover:text-link"
                               >
                                 {cand.symbol}
@@ -917,21 +1355,43 @@ export function HiddenGemsDesk() {
                                   {cand.name}
                                 </span>
                               </button>
-                              <p className="font-mono text-[10px] text-subtle-foreground">
-                                CMC #{cand.canonical_provider_id}
-                              </p>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-subtle-foreground">
+                                <span>CMC #{cand.canonical_provider_id}</span>
+                                {runScope === "all" && cand.created_at ? (
+                                  <span>· {formatUtc(cand.created_at)}</span>
+                                ) : null}
+                                {variants.length > 1 ? (
+                                  <span className="rounded bg-muted px-1.5 py-0.2 text-muted-foreground">
+                                    +{variants.length - 1} tracks
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="px-3 py-3 font-mono text-[11px] text-foreground">
                               <span className="block font-semibold">{cand.discovery_track}</span>
                               <span className="text-muted-foreground">{cand.trading_horizon}</span>
                             </td>
                             <td className="px-3 py-3 text-right font-mono tabular-nums">
-                              <span className="text-sm font-semibold text-foreground">
-                                {formatScore(cand.adjusted_score)}
-                              </span>
-                              <span className="block text-[10px] text-muted-foreground">
-                                Raw {formatScore(cand.raw_score)} · {formatWeightCoverage(cand.valid_weight_coverage)}
-                              </span>
+                              <div className="ml-auto flex max-w-[96px] flex-col items-end gap-1">
+                                <span className="text-sm font-semibold text-foreground">
+                                  {formatScore(cand.adjusted_score)}
+                                </span>
+                                <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                                  <div
+                                    className={`h-full rounded-full ${scoreBarColor(cand.adjusted_score)}`}
+                                    style={{
+                                      width: `${
+                                        cand.adjusted_score !== null
+                                          ? Math.max(0, Math.min(100, cand.adjusted_score))
+                                          : 0
+                                      }%`,
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-[10px] text-subtle-foreground">
+                                  {formatWeightCoverage(cand.valid_weight_coverage)} cov
+                                </span>
+                              </div>
                             </td>
                             <td className="px-3 py-3">
                               <Badge tone={confidenceBadgeTone(cand.confidence_level)}>
@@ -957,14 +1417,22 @@ export function HiddenGemsDesk() {
                                 {formatPct(cand.return_7d, { signed: true })}
                               </span>
                             </td>
-                            <td className={`px-3 py-3 text-right font-mono tabular-nums ${pctToneClass(cand.rs_btc_7d)}`}>
-                              {formatPct(cand.rs_btc_7d, { signed: true })}
+                            <td
+                              className={`px-3 py-3 text-right font-mono tabular-nums ${pctToneClass(cand.rs_btc_7d)}`}
+                            >
+                              {cand.rs_btc_7d !== null
+                                ? `${cand.rs_btc_7d >= 0 ? "+" : ""}${cand.rs_btc_7d.toFixed(1)} pp`
+                                : "—"}
                             </td>
                             <td className="px-4 py-3 text-right">
                               <div className="inline-flex items-center gap-1.5">
                                 <button
                                   type="button"
-                                  aria-label={isWatched ? `Remove ${cand.symbol} from watchlist` : `Watch ${cand.symbol}`}
+                                  aria-label={
+                                    isWatched
+                                      ? `Remove ${cand.symbol} from watchlist`
+                                      : `Watch ${cand.symbol}`
+                                  }
                                   onClick={() => void handleToggleWatchlist(cand)}
                                   className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] border transition-colors ${
                                     isWatched
@@ -977,7 +1445,7 @@ export function HiddenGemsDesk() {
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  onClick={() => void handleInspectCandidate(cand.id)}
+                                  onClick={() => void handleInspectCandidate(cand.id, variants)}
                                 >
                                   Inspect
                                 </Button>
@@ -993,20 +1461,25 @@ export function HiddenGemsDesk() {
 
               {/* Mobile / Small-Tablet Cards */}
               <div className="space-y-3 md:hidden">
-                {candidates.map((cand) => {
+                {displayedRows.map(({ primary: cand, variants }) => {
                   const isWatched = watchlistByAsset.has(cand.asset_id);
                   return (
                     <Card key={cand.id} className="p-4 space-y-3">
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">
+                        <button
+                          type="button"
+                          onClick={() => void handleInspectCandidate(cand.id, variants)}
+                          className="cursor-pointer text-left"
+                        >
+                          <p className="text-sm font-semibold text-foreground hover:text-link">
                             {cand.symbol}{" "}
                             <span className="font-normal text-muted-foreground">{cand.name}</span>
                           </p>
                           <p className="font-mono text-[11px] text-muted-foreground">
                             {cand.discovery_track} · {cand.trading_horizon}
+                            {variants.length > 1 ? ` · +${variants.length - 1} tracks` : ""}
                           </p>
-                        </div>
+                        </button>
                         <div className="text-right font-mono">
                           <span className="text-base font-semibold tabular-nums text-foreground">
                             {formatScore(cand.adjusted_score)}
@@ -1016,6 +1489,7 @@ export function HiddenGemsDesk() {
                           </span>
                         </div>
                       </div>
+
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge tone={eligibilityBadgeTone(cand.eligibility_status)}>
                           {cand.eligibility_status}
@@ -1024,24 +1498,36 @@ export function HiddenGemsDesk() {
                           {cand.confidence_level}
                         </Badge>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 font-mono text-[11px] tabular-nums">
+
+                      <div className="grid grid-cols-2 gap-2 font-mono text-[11px] tabular-nums sm:grid-cols-4">
                         <div>
-                          <span className="text-subtle-foreground block">MCap</span>
+                          <span className="block text-subtle-foreground">Price</span>
+                          <span className="text-foreground">{formatUsd(cand.price)}</span>
+                        </div>
+                        <div>
+                          <span className="block text-subtle-foreground">MCap</span>
                           <span className="text-foreground">{formatCompactUsd(cand.market_cap)}</span>
                         </div>
                         <div>
-                          <span className="text-subtle-foreground block">7d Ret</span>
+                          <span className="block text-subtle-foreground">24h / 7d</span>
+                          <span className={pctToneClass(cand.return_24h)}>
+                            {formatPct(cand.return_24h, { signed: true })}
+                          </span>
+                          <span className="text-subtle-foreground"> / </span>
                           <span className={pctToneClass(cand.return_7d)}>
                             {formatPct(cand.return_7d, { signed: true })}
                           </span>
                         </div>
                         <div>
-                          <span className="text-subtle-foreground block">RS BTC</span>
+                          <span className="block text-subtle-foreground">RS BTC 7d</span>
                           <span className={pctToneClass(cand.rs_btc_7d)}>
-                            {formatPct(cand.rs_btc_7d, { signed: true })}
+                            {cand.rs_btc_7d !== null
+                              ? `${cand.rs_btc_7d >= 0 ? "+" : ""}${cand.rs_btc_7d.toFixed(1)} pp`
+                              : "—"}
                           </span>
                         </div>
                       </div>
+
                       <div className="flex items-center justify-end gap-2">
                         <Button
                           size="sm"
@@ -1054,7 +1540,7 @@ export function HiddenGemsDesk() {
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => void handleInspectCandidate(cand.id)}
+                          onClick={() => void handleInspectCandidate(cand.id, variants)}
                         >
                           Inspect
                         </Button>
@@ -1130,7 +1616,7 @@ export function HiddenGemsDesk() {
           {latestLimitations.length > 0 ? (
             <Card className="border-warning/40 bg-warning-soft p-4 text-xs text-foreground">
               <p className="font-semibold">
-                {locale === "id" ? "Batasan Data Scan Terbaru" : "Latest Scan Data Limitations"}
+                {locale === "id" ? "Batasan Data Scan Aktif" : "Selected Scan Data Limitations"}
               </p>
               <ul className="mt-1.5 list-disc pl-5 space-y-1">
                 {latestLimitations.map((lim) => (
@@ -1141,9 +1627,16 @@ export function HiddenGemsDesk() {
           ) : null}
 
           <Card className="p-4 space-y-3">
-            <h2 className="text-sm font-semibold text-foreground">
-              {locale === "id" ? "Riwayat Eksekusi Scan" : "Recent Scan Runs"}
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-foreground">
+                {locale === "id" ? "Riwayat Eksekusi Scan" : "Recent Scan Runs"}
+              </h2>
+              <span className="text-[11px] text-muted-foreground">
+                {locale === "id"
+                  ? "Klik 'Lihat Feed' untuk memeriksa hasil run tertentu."
+                  : "Select 'View Feed' to inspect candidates from a run."}
+              </span>
+            </div>
             {scans.length === 0 ? (
               <p className="text-xs text-muted-foreground">No scans recorded yet.</p>
             ) : (
@@ -1156,12 +1649,13 @@ export function HiddenGemsDesk() {
                       <th className="py-2 px-3">Tier / Profile</th>
                       <th className="py-2 px-3">Regime</th>
                       <th className="py-2 px-3 text-right">Eligible / Rejected</th>
-                      <th className="py-2 pl-3 text-right">Timestamp</th>
+                      <th className="py-2 px-3 text-right">Timestamp</th>
+                      <th className="py-2 pl-3 text-right">Feed</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border font-mono text-[11px]">
                     {scans.map((run) => (
-                      <tr key={run.id}>
+                      <tr key={run.id} className="hover:bg-muted/35">
                         <td className="py-2.5 pr-3 text-foreground">#{run.id.slice(0, 8)}</td>
                         <td className="py-2.5 px-3">
                           <Badge tone={scanStatusTone(run.status)}>{run.status}</Badge>
@@ -1173,8 +1667,20 @@ export function HiddenGemsDesk() {
                         <td className="py-2.5 px-3 text-right tabular-nums text-foreground">
                           {run.candidates_eligible} / {run.candidates_rejected}
                         </td>
-                        <td className="py-2.5 pl-3 text-right text-muted-foreground">
+                        <td className="py-2.5 px-3 text-right text-muted-foreground">
                           {formatUtc(run.completed_at ?? run.created_at)}
+                        </td>
+                        <td className="py-2.5 pl-3 text-right">
+                          <Button
+                            size="sm"
+                            variant={resolvedRunId === run.id ? "primary" : "secondary"}
+                            onClick={() => {
+                              setRunScope(run.id);
+                              setActiveTab("feed");
+                            }}
+                          >
+                            {locale === "id" ? "Lihat Feed" : "View Feed"}
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -1186,16 +1692,21 @@ export function HiddenGemsDesk() {
 
           <Card className="p-4 space-y-3">
             <h2 className="text-sm font-semibold text-foreground">
-              {locale === "id" ? "Audit Log Penolakan Hard-Gate" : "Latest Hard-Gate Rejections"}
+              {locale === "id"
+                ? `Audit Log Penolakan Hard-Gate (${inspectedScan ? `#${inspectedScan.id.slice(0, 8)}` : "—"})`
+                : `Hard-Gate Rejections (${inspectedScan ? `#${inspectedScan.id.slice(0, 8)}` : "—"})`}
             </h2>
             {rejections.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                No rejections logged for the latest scan run.
+                No rejections logged for the inspected scan run.
               </p>
             ) : (
               <div className="max-h-96 overflow-y-auto divide-y divide-border">
                 {rejections.slice(0, 60).map((rej) => (
-                  <div key={rej.id} className="py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div
+                    key={rej.id}
+                    className="py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs"
+                  >
                     <div>
                       <span className="font-mono font-semibold text-foreground">
                         {rej.symbol ?? rej.asset_id?.slice(0, 8) ?? "ASSET"}
@@ -1213,7 +1724,7 @@ export function HiddenGemsDesk() {
         </div>
       ) : null}
 
-      {/* TAB 4: ALERTS & TRACK RECORD */}
+      {/* TAB 4: OUTCOMES & EVENTS */}
       {activeTab === "alerts" ? (
         <div className="space-y-4">
           <Card className="p-4 space-y-3">
@@ -1221,7 +1732,7 @@ export function HiddenGemsDesk() {
               <Activity className="h-4 w-4 text-link" aria-hidden="true" />
               <h2 className="text-sm font-semibold text-foreground">
                 {locale === "id"
-                  ? "Track Record Outcome (T+7d Evaluasi)"
+                  ? "Track Record Forward Outcome (T+7d / T+30d)"
                   : "Discovery Forward Quality Track Record"}
               </h2>
             </div>
@@ -1242,7 +1753,8 @@ export function HiddenGemsDesk() {
                       <th className="py-2 px-3 text-right">Tracked</th>
                       <th className="py-2 px-3 text-right">Evaluated 7d</th>
                       <th className="py-2 px-3 text-right">Hit Rate 7d</th>
-                      <th className="py-2 pl-3 text-right">Avg Rel BTC 7d</th>
+                      <th className="py-2 px-3 text-right">Avg Rel BTC 7d</th>
+                      <th className="py-2 pl-3 text-right">Mean MAE 30d</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border font-mono text-[11px] tabular-nums">
@@ -1251,15 +1763,24 @@ export function HiddenGemsDesk() {
                         <td className="py-2.5 pr-3 text-foreground">{row.score_version}</td>
                         <td className="py-2.5 px-3 text-foreground">{row.discovery_track}</td>
                         <td className="py-2.5 px-3 text-muted-foreground">{row.effective_tier}</td>
-                        <td className="py-2.5 px-3 text-right text-foreground">{row.total_tracked}</td>
-                        <td className="py-2.5 px-3 text-right text-muted-foreground">{row.evaluated_7d}</td>
+                        <td className="py-2.5 px-3 text-right text-foreground">
+                          {row.total_tracked}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-muted-foreground">
+                          {row.evaluated_7d}
+                        </td>
                         <td className="py-2.5 px-3 text-right text-foreground">
                           {row.positive_7d_rate !== null
                             ? `${(row.positive_7d_rate * 100).toFixed(1)}%`
                             : "—"}
                         </td>
-                        <td className={`py-2.5 pl-3 text-right ${pctToneClass(row.avg_rel_btc_7d)}`}>
-                          {formatPct(row.avg_rel_btc_7d, { signed: true })}
+                        <td className={`py-2.5 px-3 text-right ${pctToneClass(row.avg_rel_btc_7d)}`}>
+                          {row.avg_rel_btc_7d !== null
+                            ? `${row.avg_rel_btc_7d >= 0 ? "+" : ""}${row.avg_rel_btc_7d.toFixed(2)}%`
+                            : "—"}
+                        </td>
+                        <td className={`py-2.5 pl-3 text-right ${pctToneClass(row.mean_mae_30d)}`}>
+                          {formatPct(row.mean_mae_30d, { signed: true })}
                         </td>
                       </tr>
                     ))}
@@ -1271,44 +1792,51 @@ export function HiddenGemsDesk() {
 
           <Card className="p-4 space-y-3">
             <h2 className="text-sm font-semibold text-foreground">
-              {locale === "id" ? "Alert Discovery Terakhir (Dedup 6 Jam)" : "In-App Discovery Alerts"}
+              {locale === "id" ? "Log Event Perubahan Kandidat" : "Candidate State Transition Log"}
             </h2>
             {alerts.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No alerts emitted yet.</p>
+              <p className="text-xs text-muted-foreground">No events recorded yet.</p>
             ) : (
               <div className="space-y-2">
-                {alerts.map((al) => (
-                  <div
-                    key={al.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card-elevated px-3.5 py-2.5 text-xs"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge
-                        tone={
-                          al.severity === "HIGH"
-                            ? "destructive"
-                            : al.severity === "MEDIUM"
-                              ? "warning"
-                              : "info"
-                        }
-                      >
-                        {al.severity}
-                      </Badge>
-                      <span className="font-mono font-semibold text-foreground">
-                        {al.event_type}
-                      </span>
-                      <span className="font-mono text-muted-foreground">
-                        {String(al.payload?.symbol ?? "")}
-                        {typeof al.payload?.adjusted_score === "number"
-                          ? ` · Score ${al.payload.adjusted_score.toFixed(1)}`
-                          : ""}
+                {alerts.map((al) => {
+                  const track =
+                    typeof al.payload?.track === "string" ? al.payload.track : null;
+                  const horizon =
+                    typeof al.payload?.horizon === "string" ? al.payload.horizon : null;
+                  return (
+                    <div
+                      key={al.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card-elevated px-3.5 py-2.5 text-xs"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          tone={
+                            al.severity === "HIGH" || al.severity === "CRITICAL"
+                              ? "destructive"
+                              : al.severity === "MEDIUM"
+                                ? "warning"
+                                : "info"
+                          }
+                        >
+                          {al.severity}
+                        </Badge>
+                        <span className="font-mono font-semibold text-foreground">
+                          {al.event_type}
+                        </span>
+                        <span className="font-mono text-muted-foreground">
+                          {String(al.payload?.symbol ?? al.asset_id.slice(0, 8))}
+                          {track ? ` · ${track}${horizon ? `/${horizon}` : ""}` : ""}
+                          {typeof al.payload?.adjusted_score === "number"
+                            ? ` · Score ${al.payload.adjusted_score.toFixed(1)}`
+                            : ""}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[10px] text-subtle-foreground">
+                        {formatUtc(al.created_at)}
                       </span>
                     </div>
-                    <span className="font-mono text-[10px] text-subtle-foreground">
-                      {formatUtc(al.created_at)}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>
@@ -1320,8 +1848,10 @@ export function HiddenGemsDesk() {
         loading={detailLoading}
         error={detailError}
         detail={detail}
+        variants={modalVariants}
         locale={locale}
         watched={Boolean(detail && watchlistByAsset.has(detail.candidate.asset_id))}
+        onSelectVariant={(cid) => void handleInspectCandidate(cid, modalVariants)}
         onToggleWatchlist={(c) => void handleToggleWatchlist(c)}
         onClose={() => setModalOpen(false)}
       />

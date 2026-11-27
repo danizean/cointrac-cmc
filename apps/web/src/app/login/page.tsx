@@ -38,6 +38,7 @@ type LoginSearchParams = Promise<{
   next?: string;
   error?: string;
   signed_out?: string;
+  password_updated?: string;
 }>;
 
 async function LoginContent({ searchParams }: { searchParams: LoginSearchParams }) {
@@ -50,6 +51,7 @@ async function LoginContent({ searchParams }: { searchParams: LoginSearchParams 
       nextPath={params.next ?? "/app"}
       initialError={params.error}
       signedOut={params.signed_out === "1"}
+      passwordUpdated={params.password_updated === "1"}
     />
   );
 }

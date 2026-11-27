@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sanitizeRedirectPath, validatePasswordStrength } from "./auth-redirect.ts";
+import {
+  normalizeEmailOtp,
+  sanitizeRedirectPath,
+  validatePasswordStrength,
+} from "./auth-redirect.ts";
 
 test("sanitizeRedirectPath allows safe internal workspace routes", () => {
   assert.equal(sanitizeRedirectPath("/app"), "/app");
@@ -35,6 +39,14 @@ test("sanitizeRedirectPath blocks redirect loops to auth or api endpoints", () =
   assert.equal(sanitizeRedirectPath("/signup"), "/app");
   assert.equal(sanitizeRedirectPath("/auth/callback?code=123"), "/app");
   assert.equal(sanitizeRedirectPath("/api/auth/me"), "/app");
+});
+
+test("normalizeEmailOtp keeps a 6-digit code and rejects anything else", () => {
+  assert.equal(normalizeEmailOtp("123456"), "123456");
+  assert.equal(normalizeEmailOtp(" 123-456 "), "123456");
+  assert.equal(normalizeEmailOtp("12345"), null);
+  assert.equal(normalizeEmailOtp("12345678"), null);
+  assert.equal(normalizeEmailOtp("12ab56"), null);
 });
 
 test("validatePasswordStrength enforces minimum length and character classes", () => {

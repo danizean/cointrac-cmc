@@ -23,5 +23,6 @@ export async function POST(request: NextRequest) {
     },
   });
   await supabase.auth.signOut();
+  response.cookies.set("ct_recovery", "", { path: "/", maxAge: 0, sameSite: "lax" });
   return response;
 }

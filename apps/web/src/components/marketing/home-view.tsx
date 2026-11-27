@@ -288,7 +288,7 @@ export function HomeView() {
                   <span className="text-link">POST</span>{" "}
                   <span className="text-foreground">https://mcp.cointrac.xyz/mcp</span>
                   <span className="mx-2 text-border-strong">·</span>
-                  <span>11 tools</span>
+                  <span>14 tools · typed schemas</span>
                 </div>
                 <p className="mt-3 text-xs leading-relaxed text-subtle-foreground">
                   {copy.mcpNote}

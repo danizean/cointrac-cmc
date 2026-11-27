@@ -45,6 +45,15 @@ class AuthenticatedUser:
     display_name: str | None = None
     created_at: str | None = None
     profile_provisioned: bool = False
+    platform_role: str = "user"
+
+    @property
+    def is_super_admin(self) -> bool:
+        if self.platform_role == "super_admin":
+            return True
+        if self.email_verified and self.email:
+            return self.email.strip().lower() in get_settings().super_admin_email_set()
+        return False
 
 
 class JWKSProvider(Protocol):
@@ -109,17 +118,30 @@ class SupabaseProfileDirectory:
         from app.core.db import supabase_client
 
         def read() -> dict[str, Any] | None:
-            response = (
-                supabase_client()
-                .table("profiles")
-                .select(
-                    "id,email,display_name,base_plan_code,account_status,"
-                    "email_verified_at,created_at"
+            client = supabase_client()
+            try:
+                response = (
+                    client.table("profiles")
+                    .select(
+                        "id,email,display_name,base_plan_code,account_status,"
+                        "platform_role,email_verified_at,created_at"
+                    )
+                    .eq("id", user_id)
+                    .limit(1)
+                    .execute()
                 )
-                .eq("id", user_id)
-                .limit(1)
-                .execute()
-            )
+            except Exception:
+                # Backward-compatible fallback if migration 015 has not added platform_role yet.
+                response = (
+                    client.table("profiles")
+                    .select(
+                        "id,email,display_name,base_plan_code,account_status,"
+                        "email_verified_at,created_at"
+                    )
+                    .eq("id", user_id)
+                    .limit(1)
+                    .execute()
+                )
             rows = response.data or []
             return dict(rows[0]) if rows else None
 
@@ -292,6 +314,9 @@ async def require_supabase_user(
             # base_plan_code can never be elevated above 'free'.
             base_plan_code = "free"
         account_status = str(profile.get("account_status") or "active")
+        platform_role = (
+            "super_admin" if str(profile.get("platform_role") or "") == "super_admin" else "user"
+        )
         email_verified = profile.get("email_verified_at") is not None
         display_name = (
             str(profile["display_name"]) if profile.get("display_name") is not None else None
@@ -309,6 +334,7 @@ async def require_supabase_user(
             display_name=display_name,
             created_at=str(profile["created_at"]) if profile.get("created_at") else None,
             profile_provisioned=True,
+            platform_role=platform_role,
         )
 
     # Profile row absent (e.g., before migration 003 is applied): remain conservative.
@@ -330,4 +356,13 @@ async def require_verified_supabase_user(
     """Require both a valid Supabase JWT and server-verified email confirmation."""
     if not user.email_verified:
         raise HTTPException(status_code=403, detail="Email verification required")
+    return user
+
+
+async def require_super_admin(
+    user: AuthenticatedUser = Depends(require_verified_supabase_user),
+) -> AuthenticatedUser:
+    """Require server-verified super_admin role or configured SUPER_ADMIN_EMAILS allowlist."""
+    if not user.is_super_admin:
+        raise HTTPException(status_code=403, detail="Super admin access required")
     return user

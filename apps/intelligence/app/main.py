@@ -30,6 +30,8 @@ from app.api.deps import (
     resolve_api_key_headers,
 )
 from app.api.docs import render_swagger_docs
+from app.api.v1.admin_ai import router as admin_ai_router
+from app.api.v1.ai import router as ai_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.evidence import router as evidence_router
 from app.api.v1.hidden_gems import router as hidden_gems_router
@@ -130,6 +132,7 @@ async def lifespan(_app: FastAPI):
         settings.cmc_api_key.get_secret_value(),
         settings.supabase_service_role_key.get_secret_value(),
         settings.telegram_bot_token.get_secret_value(),
+        settings.muse_api_key.get_secret_value(),
     )
     configure_logging()
     budget_store = SupabaseBudgetStore() if settings.supabase_url else MemoryBudgetStore()
@@ -468,7 +471,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list(),
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
             "Authorization",
             "Content-Type",
@@ -575,6 +578,8 @@ def create_app() -> FastAPI:
     app.include_router(evidence_router)
     app.include_router(telemetry_router)
     app.include_router(auth_router)
+    app.include_router(ai_router)
+    app.include_router(admin_ai_router)
     app.include_router(keys_router)
     app.include_router(mcp_status_router)
     app.router.routes.append(_McpExactRoute(MCPAuthMiddleware(mcp_http)))

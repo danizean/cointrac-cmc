@@ -4,9 +4,10 @@ import { proxyAuthHeaders } from "@/lib/proxy-auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
-const MAX_BODY_BYTES = 32 * 1024;
+const MAX_BODY_BYTES = 64 * 1024;
 const SAFE_TOKEN = /^[A-Za-z0-9_-]{8,128}$/;
 const UPSTREAM_JSON_TIMEOUT_MS = 25_000;
+const UPSTREAM_AI_TIMEOUT_MS = 55_000;
 
 export type IntelligenceProxyRouteContext = {
   params: Promise<{ path: string[] }>;
@@ -117,6 +118,9 @@ export async function handleIntelligenceProxy(
     }
   }
 
+  const isAiRoute = path[0] === "v1" && path[1] === "ai";
+  const timeoutMs = isAiRoute ? UPSTREAM_AI_TIMEOUT_MS : UPSTREAM_JSON_TIMEOUT_MS;
+
   const init: RequestInit = {
     method: request.method,
     headers,
@@ -124,10 +128,10 @@ export async function handleIntelligenceProxy(
     redirect: "manual",
     signal: wantsEventStream
       ? request.signal
-      : AbortSignal.any([request.signal, AbortSignal.timeout(UPSTREAM_JSON_TIMEOUT_MS)]),
+      : AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]),
   };
 
-  if (request.method === "POST" || request.method === "PATCH") {
+  if (request.method === "POST" || request.method === "PATCH" || request.method === "PUT") {
     const contentType = request.headers.get("content-type") ?? "";
     const declaredLength = Number(request.headers.get("content-length") ?? "0");
     if (declaredLength > 0 || contentType !== "") {

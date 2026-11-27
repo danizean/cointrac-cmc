@@ -5,7 +5,7 @@ import { publicMcpUrl, publicOpenApiDocsUrl } from "@/lib/catalog";
 export const metadata: Metadata = {
   title: "Connect MCP",
   description:
-    "Connect ChatGPT, Claude, Gemini, Hermes, Python, or cURL to CoinTrac MCP over HTTPS (11 Tools, 5 Resources, 3 Prompts).",
+    "Connect ChatGPT, Claude, Gemini, Hermes, Python, or cURL to CoinTrac MCP over HTTPS (14 Tools, 6 Resources, 3 Prompts).",
 };
 
 export default function ConnectPage() {

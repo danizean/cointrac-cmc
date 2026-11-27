@@ -147,6 +147,12 @@ export const RESOURCE_CATALOG: ResourceCatalogEntry[] = [
     description: "Persisted audit provenance record for any prior tool invocation.",
     backedBy: "evidence_records",
   },
+  {
+    uri: "cointrac://hidden-gems/candidates/{candidate_id}",
+    description:
+      "Hidden Gem candidate detail with factor contributions, hard-gate outcomes, and audit provenance.",
+    backedBy: "get_hidden_gem_detail",
+  },
 ];
 
 export const PROMPT_CATALOG: PromptCatalogEntry[] = [

@@ -200,7 +200,8 @@ def test_evidence_list_and_detail_are_owner_scoped(monkeypatch: pytest.MonkeyPat
 
 def test_telemetry_ignores_spoofed_owner_headers(monkeypatch: pytest.MonkeyPatch) -> None:
     class LogQuery:
-        def __init__(self) -> None:
+        def __init__(self, table_name: str) -> None:
+            self.table_name = table_name
             self.filters: list[tuple[str, str]] = []
 
         def select(self, _columns: str) -> "LogQuery":
@@ -217,8 +218,14 @@ def test_telemetry_ignores_spoofed_owner_headers(monkeypatch: pytest.MonkeyPatch
             return self
 
         def execute(self) -> object:
+            rows = (
+                [{"surface": "rest", "cache_hit": True, "credit_cost": 2, "latency_ms": 10}]
+                if self.table_name == "request_logs"
+                else []
+            )
+
             class Result:
-                data = [{"surface": "rest", "cache_hit": True, "credit_cost": 2, "latency_ms": 10}]
+                data = rows
 
             return Result()
 
@@ -226,8 +233,8 @@ def test_telemetry_ignores_spoofed_owner_headers(monkeypatch: pytest.MonkeyPatch
 
     class Client:
         def table(self, name: str) -> LogQuery:
-            assert name == "request_logs"
-            query = LogQuery()
+            assert name in {"request_logs", "hg_scan_runs"}
+            query = LogQuery(name)
             queries.append(query)
             return query
 
@@ -248,11 +255,12 @@ def test_telemetry_ignores_spoofed_owner_headers(monkeypatch: pytest.MonkeyPatch
         install_deps(None)
     assert scoped.status_code == 200
     assert scoped.json()["calls_by_surface"]["rest"] == 1
-    assert queries[0].filters == [("user_id", USER_A)]
+    assert [q.table_name for q in queries] == ["request_logs", "hg_scan_runs"]
+    assert all(q.filters == [("user_id", USER_A)] for q in queries)
     assert empty.json()["calls_by_surface"] == {"mcp": 0, "rest": 0, "playground": 0}
     assert empty.json()["cache_hit_rate_pct"] is None
     assert empty.json()["average_latency_ms"] is None
-    assert len(queries) == 1
+    assert len(queries) == 2
 
 
 def test_two_keys_share_one_tenant_window_and_store_failure_is_closed() -> None:

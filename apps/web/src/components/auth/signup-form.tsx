@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -8,12 +9,17 @@ import {
   EyeOff,
   Mail,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAppPreferences } from "@/components/app-preferences";
-import { validatePasswordStrength } from "@/lib/auth-redirect";
+import { EMAIL_OTP_LENGTH, normalizeEmailOtp, passwordFailureCopy, validatePasswordStrength } from "@/lib/auth-redirect";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
+const OTP_NOTICE_MS = 4000;
+
+type OtpNotice = { tone: "error" | "success"; message: string };
+
 export function SignupForm({ configured }: { configured: boolean }) {
+  const router = useRouter();
   const { locale } = useAppPreferences();
   const isId = locale === "id";
   const [email, setEmail] = useState("");
@@ -22,14 +28,40 @@ export function SignupForm({ configured }: { configured: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
-  const [resendNote, setResendNote] = useState<string | null>(null);
+  const [otp, setOtp] = useState("");
+  const [otpNotice, setOtpNotice] = useState<OtpNotice | null>(null);
+  const otpNoticeTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (otpNoticeTimer.current !== null) window.clearTimeout(otpNoticeTimer.current);
+    };
+  }, []);
+
+  function clearOtpNotice() {
+    if (otpNoticeTimer.current !== null) {
+      window.clearTimeout(otpNoticeTimer.current);
+      otpNoticeTimer.current = null;
+    }
+    setOtpNotice(null);
+  }
+
+  function showOtpNotice(notice: OtpNotice) {
+    if (otpNoticeTimer.current !== null) window.clearTimeout(otpNoticeTimer.current);
+    setOtpNotice(notice);
+    otpNoticeTimer.current = window.setTimeout(() => {
+      setOtpNotice(null);
+      otpNoticeTimer.current = null;
+    }, OTP_NOTICE_MS);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setResendNote(null);
+    clearOtpNotice();
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !normalizedEmail.includes("@")) {
@@ -42,10 +74,10 @@ export function SignupForm({ configured }: { configured: boolean }) {
     const strength = validatePasswordStrength(password);
     if (!strength.valid) {
       setError(
-        strength.reason ??
-          (isId
-            ? "Kata sandi belum memenuhi syarat keamanan."
-            : "Password does not meet security requirements."),
+        passwordFailureCopy(
+          strength.code,
+          isId,
+        ),
       );
       return;
     }
@@ -95,7 +127,11 @@ export function SignupForm({ configured }: { configured: boolean }) {
               : "An account with this email already exists. Sign in or reset your password.",
           );
         } else {
-          setError(signUpError.message);
+          setError(
+            isId
+              ? "Pendaftaran belum bisa diselesaikan. Coba lagi sebentar lagi."
+              : "The account could not be created. Please try again in a moment.",
+          );
         }
         return;
       }
@@ -113,15 +149,84 @@ export function SignupForm({ configured }: { configured: boolean }) {
         return;
       }
 
+      if (data.session) {
+        router.replace("/app");
+        router.refresh();
+        return;
+      }
+
+      setOtp("");
       setPendingEmail(normalizedEmail);
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function handleVerify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pendingEmail) return;
+    clearOtpNotice();
+    const token = normalizeEmailOtp(otp);
+    if (!token) {
+      showOtpNotice({
+        tone: "error",
+        message: isId ? "Masukkan kode 6 digit dari email." : "Enter the 6-digit code from the email.",
+      });
+      return;
+    }
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      showOtpNotice({
+        tone: "error",
+        message: isId
+          ? "Layanan autentikasi belum dikonfigurasi untuk environment ini."
+          : "Authentication service is not configured for this environment.",
+      });
+      return;
+    }
+    setVerifying(true);
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: pendingEmail,
+        token,
+        type: "signup",
+      });
+      if (verifyError) {
+        const lower = verifyError.message.toLowerCase();
+        if (lower.includes("rate limit") || verifyError.status === 429) {
+          showOtpNotice({
+            tone: "error",
+            message: isId
+              ? "Terlalu banyak percobaan. Mohon tunggu beberapa menit."
+              : "Too many attempts. Please wait a few minutes.",
+          });
+        } else if (lower.includes("expired") || lower.includes("invalid")) {
+          showOtpNotice({
+            tone: "error",
+            message: isId
+              ? "Kode tidak valid atau sudah kedaluwarsa. Kirim ulang kode, lalu coba lagi."
+              : "That code is invalid or expired. Send a new code and try again.",
+          });
+        } else {
+          showOtpNotice({
+            tone: "error",
+            message: isId
+              ? "Kode belum bisa dikonfirmasi. Coba lagi atau buka tautan di email."
+              : "The code could not be confirmed. Try again or open the link in the email.",
+          });
+        }
+        return;
+      }
+      router.replace("/app");
+      router.refresh();
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   async function handleResend() {
     if (!pendingEmail) return;
-    setResendNote(null);
+    clearOtpNotice();
     const supabase = createSupabaseBrowserClient();
     if (!supabase) return;
     const { error: resendError } = await supabase.auth.resend({
@@ -132,20 +237,24 @@ export function SignupForm({ configured }: { configured: boolean }) {
       },
     });
     if (resendError) {
-      setResendNote(
-        resendError.status === 429
-          ? isId
-            ? "Mohon tunggu sebelum meminta email verifikasi lagi."
-            : "Please wait before requesting another verification email."
-          : resendError.message,
-      );
+      showOtpNotice({
+        tone: "error",
+        message:
+          resendError.status === 429
+            ? isId
+              ? "Mohon tunggu sebelum meminta email verifikasi lagi."
+              : "Please wait before requesting another verification email."
+            : resendError.message,
+      });
       return;
     }
-    setResendNote(
-      isId
-        ? "Email verifikasi terkirim. Periksa kotak masuk atau folder spam Anda."
-        : "Verification email sent. Check your inbox and spam folder.",
-    );
+    setOtp("");
+    showOtpNotice({
+      tone: "success",
+      message: isId
+        ? "Kode baru terkirim. Periksa kotak masuk atau folder spam Anda."
+        : "A new code was sent. Check your inbox and spam folder.",
+    });
   }
 
   if (pendingEmail) {
@@ -157,34 +266,85 @@ export function SignupForm({ configured }: { configured: boolean }) {
           </span>
           <div>
             <h1 className="text-lg font-semibold text-foreground">
-              {isId ? "Periksa kotak masuk Anda" : "Verify your email"}
+              {isId ? "Masukkan kode email" : "Enter your email code"}
             </h1>
             <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-              {isId ? "Tautan verifikasi dikirim ke " : "We sent a verification link to "}
+              {isId ? "Kode 6 digit dikirim ke " : "A 6-digit code was sent to "}
               <span className="font-mono text-foreground">{pendingEmail}</span>.{" "}
               {isId
-                ? "Konfirmasi email untuk membuka workspace CoinTrac Anda."
-                : "Confirm your email to access your CoinTrac workspace."}
+                ? "Tautan di email yang sama juga tetap membuka akun."
+                : "The link in the same email still confirms the account."}
             </p>
           </div>
         </div>
 
-        {resendNote && (
-          <p className="mt-4 rounded-[12px] border border-border bg-muted/40 px-3.5 py-2.5 text-xs text-foreground">
-            {resendNote}
-          </p>
+        {otpNotice && (
+          <div
+            role={otpNotice.tone === "error" ? "alert" : "status"}
+            aria-live="polite"
+            className={
+              otpNotice.tone === "error"
+                ? "mt-4 flex items-start gap-2.5 rounded-[12px] border border-destructive/40 bg-destructive/10 p-3.5 text-xs text-foreground"
+                : "mt-4 flex items-start gap-2.5 rounded-[12px] border border-positive/30 bg-positive/10 p-3.5 text-xs text-foreground"
+            }
+          >
+            {otpNotice.tone === "error" ? (
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-positive" aria-hidden="true" />
+            )}
+            <span>{otpNotice.message}</span>
+          </div>
         )}
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
+        <form onSubmit={handleVerify} className="mt-6 space-y-4" noValidate>
+          <div>
+            <label htmlFor="signup-otp" className="mb-1.5 block text-xs font-semibold text-foreground">
+              {isId ? "Kode verifikasi" : "Verification code"}
+            </label>
+            <input
+              id="signup-otp"
+              name="otp"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={EMAIL_OTP_LENGTH}
+              required
+              value={otp}
+              onChange={(event) => {
+                clearOtpNotice();
+                setOtp(event.target.value.replace(/\D/g, "").slice(0, EMAIL_OTP_LENGTH));
+              }}
+              placeholder="000000"
+              className="min-h-11 w-full rounded-[10px] border border-border bg-input-bg px-3.5 py-2.5 text-center font-mono text-lg tracking-[0.22em] text-foreground placeholder:text-subtle-foreground focus:border-primary focus:outline-none"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={verifying || normalizeEmailOtp(otp) === null}
+            className="tg-btn tg-btn-primary ct-btn-glow flex min-h-11 w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {verifying
+              ? isId
+                ? "Memeriksa kode..."
+                : "Checking code..."
+              : isId
+                ? "Konfirmasi kode"
+                : "Confirm code"}
+          </button>
+        </form>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={handleResend}
             className="tg-btn tg-btn-secondary inline-flex cursor-pointer text-xs"
           >
-            {isId ? "Kirim ulang email" : "Resend verification email"}
+            {isId ? "Kirim ulang kode" : "Send a new code"}
           </button>
-          <Link href="/login" className="tg-btn tg-btn-primary ct-btn-glow inline-flex text-xs">
-            {isId ? "Lanjut masuk" : "Continue to sign in"}
+          <Link href="/login" className="text-xs font-semibold text-link hover:underline">
+            {isId ? "Sudah punya akun? Masuk" : "Already confirmed? Sign in"}
           </Link>
         </div>
       </div>

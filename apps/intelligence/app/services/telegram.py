@@ -23,25 +23,79 @@ class TelegramDispatchResult:
     error: str | None = None
 
 
+def _fmt_usd(value: object) -> str | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    num = float(value)
+    if num >= 1_000_000_000:
+        return f"${num / 1_000_000_000:.2f}B"
+    if num >= 1_000_000:
+        return f"${num / 1_000_000:.2f}M"
+    if num >= 1_000:
+        return f"${num / 1_000:.1f}K"
+    if num >= 1.0:
+        return f"${num:,.2f}"
+    return f"${num:.6g}"
+
+
 def format_hidden_gem_alert_html(alert: dict[str, object]) -> str:
     """Format an hg_alert_events row as HTML-escaped Telegram message text."""
-    event_type = html.escape(str(alert.get("event_type") or "NEW_DISCOVERY"))
+    event_type = str(alert.get("event_type") or "NEW_DISCOVERY")
+    event_labels = {
+        "NEW_DISCOVERY": "New Discovery",
+        "CONFIRMATION": "Confidence Upgraded",
+        "SCORE_UPGRADE": "Score Upgrade",
+        "INVALIDATION": "Invalidated",
+    }
+    label = html.escape(event_labels.get(event_type, event_type))
     severity = html.escape(str(alert.get("severity") or "MEDIUM"))
     payload = alert.get("payload") if isinstance(alert.get("payload"), dict) else {}
     symbol = html.escape(str(payload.get("symbol") or alert.get("asset_id") or "ASSET"))
+    name_raw = str(payload.get("name") or "").strip()
+    name_part = f" ({html.escape(name_raw)})" if name_raw and name_raw.upper() != symbol else ""
     track = html.escape(str(payload.get("track") or "EARLY"))
     horizon = html.escape(str(payload.get("horizon") or "SWING"))
+    conf = str(payload.get("confidence_level") or "").strip()
+    conf_part = f" · Confidence: <b>{html.escape(conf)}</b>" if conf else ""
+
     score = payload.get("adjusted_score")
-    score_line = f"{float(score):.1f}/100" if isinstance(score, (int, float)) else "—"
+    score_line = (
+        f"{float(score):.1f}/100"
+        if isinstance(score, (int, float)) and not isinstance(score, bool)
+        else "—"
+    )
     delta = payload.get("score_delta")
     delta_part = (
-        f" (delta {float(delta):+.1f})" if isinstance(delta, (int, float)) else ""
+        f" (delta {float(delta):+.1f})"
+        if isinstance(delta, (int, float)) and not isinstance(delta, bool)
+        else ""
     )
-    return (
-        f"<b>CoinTrac Hidden Gem · {event_type}</b>\n"
-        f"Asset: <code>{symbol}</code> · Track: <code>{track}/{horizon}</code>\n"
-        f"Severity: <b>{severity}</b> · Score: <b>{score_line}</b>{delta_part}"
-    )
+
+    stats: list[str] = []
+    price_str = _fmt_usd(payload.get("price"))
+    if price_str:
+        stats.append(f"Price: <code>{price_str}</code>")
+    ret_24h = payload.get("return_24h")
+    if isinstance(ret_24h, (int, float)) and not isinstance(ret_24h, bool):
+        stats.append(f"24h: <code>{float(ret_24h):+.2f}%</code>")
+    ret_7d = payload.get("return_7d")
+    if isinstance(ret_7d, (int, float)) and not isinstance(ret_7d, bool):
+        stats.append(f"7d: <code>{float(ret_7d):+.2f}%</code>")
+    rs_7d = payload.get("rs_btc_7d")
+    if isinstance(rs_7d, (int, float)) and not isinstance(rs_7d, bool):
+        stats.append(f"RS vs BTC 7d: <code>{float(rs_7d):+.1f} pp</code>")
+    mcap_str = _fmt_usd(payload.get("market_cap"))
+    if mcap_str:
+        stats.append(f"MCap: <code>{mcap_str}</code>")
+
+    lines = [
+        f"<b>CoinTrac · {label}</b> [{severity}]",
+        f"<b>{symbol}</b>{name_part} · <code>{track}/{horizon}</code>",
+        f"Score: <b>{score_line}</b>{delta_part}{conf_part}",
+    ]
+    if stats:
+        lines.append(" | ".join(stats))
+    return "\n".join(lines)
 
 
 class TelegramNotifier:

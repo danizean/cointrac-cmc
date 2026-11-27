@@ -46,6 +46,18 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (request.cookies.get("ct_recovery")?.value === "1" && user && isProtectedAppPath(pathname)) {
+    const resetUrl = request.nextUrl.clone();
+    resetUrl.pathname = "/reset-password";
+    resetUrl.search = "";
+    resetUrl.searchParams.set("mode", "update");
+    const resetResponse = NextResponse.redirect(resetUrl);
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      resetResponse.cookies.set(cookie);
+    });
+    return resetResponse;
+  }
+
   if ((!user || !user.email_confirmed_at) && isProtectedAppPath(pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";

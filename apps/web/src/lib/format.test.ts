@@ -53,9 +53,9 @@ describe("format helpers preserve missing market values", () => {
 });
 
 describe("MCP control plane catalog completeness", () => {
-  it("registers 10 tools, 5 resources, 3 prompts, 4 presets, and 7 sectors including RWA", () => {
+  it("registers 10 tools, 6 resources, 3 prompts, 4 presets, and 7 sectors including RWA", () => {
     assert.equal(TOOL_CATALOG.length, 10);
-    assert.equal(RESOURCE_CATALOG.length, 5);
+    assert.equal(RESOURCE_CATALOG.length, 6);
     assert.equal(
       RESOURCE_CATALOG.every((r) => r.uri.startsWith("cointrac://")),
       true,

@@ -132,6 +132,127 @@ export interface AuthProfilePayload {
   display_name: string | null;
   created_at: string | null;
   profile_provisioned: boolean;
+  platform_role?: string;
+  is_super_admin?: boolean;
+}
+
+export interface AIQuotaSnapshot {
+  ai_enabled: boolean;
+  user_ai_enabled: boolean;
+  key_configured: boolean;
+  model: string;
+  rate_limit_per_min: number;
+  used_last_minute: number;
+  remaining_this_minute: number;
+  daily_requests_limit: number;
+  used_today_requests: number;
+  remaining_today_requests: number;
+  daily_tokens_limit: number;
+  used_today_tokens: number;
+  remaining_today_tokens: number;
+  reset_in_seconds: number;
+}
+
+export interface AIUsageLogItem {
+  id: string;
+  user_id: string;
+  user_email?: string | null;
+  model: string;
+  status: string;
+  prompt_summary: string;
+  tools_called: string[];
+  evidence_ids: string[];
+  total_tokens: number;
+  estimated_cost_usd: number;
+  latency_ms: number;
+  cache_hit: boolean;
+  error_code?: string | null;
+  created_at: string;
+}
+
+export interface AIStatusPayload {
+  quota: AIQuotaSnapshot;
+  recent_logs: AIUsageLogItem[];
+}
+
+export interface AIChatResponsePayload {
+  answer: string;
+  model: string;
+  locale: "en" | "id";
+  tools_used: string[];
+  evidence_refs: Array<{
+    evidence_id: string;
+    tool: string;
+    data_mode: string | null;
+    freshness: string | null;
+  }>;
+  tool_calls_count: number;
+  usage: {
+    input_tokens: number;
+    cached_input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    estimated_cost_usd: number;
+  };
+  latency_ms: number;
+  cache_hit: boolean;
+  quota: AIQuotaSnapshot;
+}
+
+export interface AIRuntimeConfigPayload {
+  enabled: boolean;
+  provider: string;
+  base_url: string;
+  model: string;
+  default_rate_limit_per_min: number;
+  default_daily_requests: number;
+  default_daily_tokens: number;
+  max_tool_rounds: number;
+  max_output_tokens: number;
+  temperature: number;
+  response_cache_ttl_seconds: number;
+  system_directive: string;
+  api_key_configured: boolean;
+  api_key_source: "db" | "env" | "none";
+  api_key_hint: string | null;
+  updated_at: string | null;
+}
+
+export interface AdminAIUserRow {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  base_plan_code: string;
+  platform_role: "user" | "super_admin";
+  ai_enabled: boolean;
+  rate_limit_per_min: number | null;
+  daily_requests_limit: number | null;
+  daily_tokens_limit: number | null;
+  effective_rate_limit_per_min: number;
+  effective_daily_requests_limit: number;
+  effective_daily_tokens_limit: number;
+  notes: string | null;
+  used_today_requests: number;
+  used_today_tokens: number;
+  used_30d_requests: number;
+  used_30d_tokens: number;
+  estimated_cost_30d_usd: number;
+}
+
+export interface AdminAIOverviewPayload {
+  config: AIRuntimeConfigPayload;
+  summary: {
+    requests_today: number;
+    requests_30d: number;
+    tokens_30d: number;
+    estimated_cost_30d_usd: number;
+    cache_hit_rate_pct: number | null;
+    rate_limited_today: number;
+    active_users_30d: number;
+  };
+  top_tools: Array<{ tool_name: string; calls: number }>;
+  users: AdminAIUserRow[];
+  recent_logs: AIUsageLogItem[];
 }
 
 export type ControlPlaneResult<T> =
@@ -230,4 +351,88 @@ export function updateMyDisplayName(
     method: "PATCH",
     body: JSON.stringify({ display_name: displayName }),
   });
+}
+
+export function fetchAiStatus(): Promise<ControlPlaneResult<AIStatusPayload>> {
+  return requestJson<AIStatusPayload>(`${PROXY_BASE}/v1/ai/status`, { method: "GET" });
+}
+
+export function sendAiChat(payload: {
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  locale: "en" | "id";
+  context_hint?: string | null;
+  bypass_cache?: boolean;
+}): Promise<ControlPlaneResult<AIChatResponsePayload>> {
+  return requestJson<AIChatResponsePayload>(`${PROXY_BASE}/v1/ai/chat`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAdminAiOverview(): Promise<ControlPlaneResult<AdminAIOverviewPayload>> {
+  return requestJson<AdminAIOverviewPayload>(`${PROXY_BASE}/v1/admin/ai/overview`, {
+    method: "GET",
+  });
+}
+
+export function updateAdminAiConfig(payload: {
+  enabled?: boolean;
+  base_url?: string;
+  model?: string;
+  api_key_secret?: string;
+  clear_api_key_secret?: boolean;
+  default_rate_limit_per_min?: number;
+  default_daily_requests?: number;
+  default_daily_tokens?: number;
+  max_tool_rounds?: number;
+  max_output_tokens?: number;
+  temperature?: number;
+  response_cache_ttl_seconds?: number;
+  system_directive?: string;
+}): Promise<ControlPlaneResult<AIRuntimeConfigPayload>> {
+  return requestJson<AIRuntimeConfigPayload>(`${PROXY_BASE}/v1/admin/ai/config`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAdminUserLimits(
+  targetUserId: string,
+  payload: {
+    ai_enabled: boolean;
+    rate_limit_per_min: number | null;
+    daily_requests_limit: number | null;
+    daily_tokens_limit: number | null;
+    notes: string | null;
+  },
+): Promise<ControlPlaneResult<unknown>> {
+  return requestJson<unknown>(
+    `${PROXY_BASE}/v1/admin/ai/users/${encodeURIComponent(targetUserId)}/limits`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function resetAdminUserLimits(targetUserId: string): Promise<ControlPlaneResult<unknown>> {
+  return requestJson<unknown>(
+    `${PROXY_BASE}/v1/admin/ai/users/${encodeURIComponent(targetUserId)}/limits`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export function updateAdminUserRole(
+  targetUserId: string,
+  platform_role: "user" | "super_admin",
+): Promise<ControlPlaneResult<{ user_id: string; platform_role: string }>> {
+  return requestJson<{ user_id: string; platform_role: string }>(
+    `${PROXY_BASE}/v1/admin/ai/users/${encodeURIComponent(targetUserId)}/role`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ platform_role }),
+    },
+  );
 }

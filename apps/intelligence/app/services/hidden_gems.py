@@ -43,12 +43,28 @@ from app.quant.hidden_gems import (
     geometric_rs,
     score_candidate,
 )
+from app.schemas.envelope import (
+    AgentAction,
+    DataMode,
+    EvidenceEnvelope,
+    EvidenceMeta,
+    EvidenceStatus,
+    Freshness,
+    MethodologyMeta,
+)
 from app.schemas.hidden_gems import (
     AlertEventItem,
     CandidateDetail,
     CandidateSummary,
     CreateScanRequest,
     EvidenceRecordItem,
+    HiddenGemCandidatesData,
+    HiddenGemCandidatesInput,
+    HiddenGemDetailData,
+    HiddenGemDetailInput,
+    HiddenGemQualityStatsData,
+    HiddenGemQualityStatsInput,
+    OutcomeCheckpointSummary,
     QualityStatsRow,
     RejectionSummary,
     ScanAcceptedResponse,
@@ -61,6 +77,13 @@ from app.schemas.hidden_gems import (
     WatchlistItem,
 )
 from app.services.budget import BudgetController, get_budget_controller
+from app.services.evidence import (
+    EvidenceDraft,
+    EvidenceWriter,
+    SupabaseEvidenceWriter,
+    dedupe_limitations,
+    new_evidence_id,
+)
 from app.services.hidden_gem_store import (
     HiddenGemStore,
     MemoryHiddenGemStore,
@@ -231,6 +254,43 @@ def _build_filter_preset(
 def _alert_dedup_key(user_id: str, asset_id: str, track: str, event_type: str) -> str:
     raw = f"{user_id}:{asset_id}:{track}:{event_type}".encode()
     return hashlib.sha256(raw).hexdigest()
+
+
+_SCAN_STAGES: tuple[str, ...] = (
+    "PREFLIGHT",
+    "INGESTION",
+    "HARD_GATES",
+    "ENRICHMENT",
+    "SCORING_PERSIST",
+)
+
+
+def _build_scan_progress(
+    *,
+    stage_index: int,
+    stage_code: str,
+    completed: Sequence[str],
+    universe_ingested: int | None = None,
+    hard_gate_passed: int | None = None,
+    hard_gate_rejected: int | None = None,
+    enrichment_targets: int | None = None,
+    candidates_scored: int | None = None,
+) -> dict[str, object]:
+    total = len(_SCAN_STAGES)
+    completed_list = list(completed)
+    pct = round((len(completed_list) / total) * 100.0, 1)
+    return {
+        "stage_index": stage_index,
+        "stage_total": total,
+        "stage_code": stage_code,
+        "stages_completed": completed_list,
+        "stage_pct": pct,
+        "universe_ingested": universe_ingested,
+        "hard_gate_passed": hard_gate_passed,
+        "hard_gate_rejected": hard_gate_rejected,
+        "enrichment_targets": enrichment_targets,
+        "candidates_scored": candidates_scored,
+    }
 
 
 def _tags_from_row(row: dict[str, object]) -> tuple[str, ...]:
@@ -426,7 +486,13 @@ class HiddenGemService:
             "candidates_eligible": 0,
             "candidates_rejected": 0,
             "cmc_credits_consumed": 0,
-            "source_metadata": {},
+            "source_metadata": {
+                "progress": _build_scan_progress(
+                    stage_index=1,
+                    stage_code="QUEUED",
+                    completed=[],
+                )
+            },
             "budget_metadata": {
                 "budget_state": snap.state,
                 "quota_profile": snap.quota_profile,
@@ -487,6 +553,13 @@ class HiddenGemService:
                     "status": "RUNNING",
                     "started_at": now.isoformat(),
                     "heartbeat_at": now.isoformat(),
+                    "source_metadata": {
+                        "progress": _build_scan_progress(
+                            stage_index=1,
+                            stage_code="PREFLIGHT",
+                            completed=[],
+                        )
+                    },
                 },
             )
             effective_tier, eval_profile, budget_meta, regime = await self._preflight(
@@ -505,6 +578,13 @@ class HiddenGemService:
                     "market_regime": regime,
                     "budget_metadata": budget_meta,
                     "universe_requested": universe_limit,
+                    "source_metadata": {
+                        "progress": _build_scan_progress(
+                            stage_index=2,
+                            stage_code="INGESTION",
+                            completed=["PREFLIGHT"],
+                        )
+                    },
                     "heartbeat_at": self.deps.now().isoformat(),
                 },
             )
@@ -530,10 +610,37 @@ class HiddenGemService:
                         "status": "FAILED",
                         "error_summary": "; ".join(limitations) or "No market snapshots ingested",
                         "cmc_credits_consumed": credits_used,
+                        "source_metadata": {
+                            "limitations": list(dict.fromkeys(limitations)),
+                            "progress": _build_scan_progress(
+                                stage_index=2,
+                                stage_code="INGESTION",
+                                completed=["PREFLIGHT"],
+                                universe_ingested=0,
+                            ),
+                        },
                         "completed_at": self.deps.now().isoformat(),
                     },
                 )
                 return
+
+            await self.store.update_scan_run(
+                user_id,
+                scan_run_id,
+                {
+                    "universe_scanned": len(ingest.items),
+                    "cmc_credits_consumed": credits_used,
+                    "source_metadata": {
+                        "progress": _build_scan_progress(
+                            stage_index=3,
+                            stage_code="HARD_GATES",
+                            completed=["PREFLIGHT", "INGESTION"],
+                            universe_ingested=len(ingest.items),
+                        )
+                    },
+                    "heartbeat_at": self.deps.now().isoformat(),
+                },
+            )
 
             if await self.store.is_cancel_requested(user_id, scan_run_id):
                 await self._mark_cancelled(user_id, scan_run_id, credits_used)
@@ -582,6 +689,18 @@ class HiddenGemService:
                 scan_run_id,
                 {
                     "universe_scanned": len(ingest.items),
+                    "candidates_rejected": len(rejections),
+                    "source_metadata": {
+                        "progress": _build_scan_progress(
+                            stage_index=4,
+                            stage_code="ENRICHMENT",
+                            completed=["PREFLIGHT", "INGESTION", "HARD_GATES"],
+                            universe_ingested=len(ingest.items),
+                            hard_gate_passed=len(finalist_items),
+                            hard_gate_rejected=len(rejections),
+                            enrichment_targets=len(finalist_items),
+                        )
+                    },
                     "heartbeat_at": self.deps.now().isoformat(),
                 },
             )
@@ -655,6 +774,27 @@ class HiddenGemService:
                 await self._mark_cancelled(user_id, scan_run_id, credits_used)
                 return
 
+            await self.store.update_scan_run(
+                user_id,
+                scan_run_id,
+                {
+                    "cmc_credits_consumed": credits_used,
+                    "candidates_rejected": len(rejections),
+                    "source_metadata": {
+                        "progress": _build_scan_progress(
+                            stage_index=5,
+                            stage_code="SCORING_PERSIST",
+                            completed=["PREFLIGHT", "INGESTION", "HARD_GATES", "ENRICHMENT"],
+                            universe_ingested=len(ingest.items),
+                            hard_gate_passed=len(finalist_list),
+                            hard_gate_rejected=len(rejections),
+                            enrichment_targets=len(hist_targets),
+                        )
+                    },
+                    "heartbeat_at": self.deps.now().isoformat(),
+                },
+            )
+
             # Stage 6-8: Score candidates, deltas, alerts, outcome checkpoints
             scored_list: list[tuple[_IngestItem, ScoredCandidate]] = []
             candidate_rows: list[dict[str, object]] = []
@@ -662,6 +802,7 @@ class HiddenGemService:
             history_rows: list[dict[str, object]] = []
             checkpoints: list[dict[str, object]] = []
             alerts: list[dict[str, object]] = []
+            seen_dedup_keys: set[str] = set()
 
             for item in finalist_list:
                 oi, fr = derivs_by_cid.get(item.cmc_id, (None, None))
@@ -801,7 +942,7 @@ class HiddenGemService:
                                 }
                             )
 
-                        # Alert generation with 6h SHA-256 deduplication
+                        # Alert generation with intra-scan + 6h SHA-256 deduplication
                         cand_alerts = await self._build_alerts(
                             user_id=user_id,
                             item=item,
@@ -809,6 +950,7 @@ class HiddenGemService:
                             prev=prev,
                             delta=delta,
                             now=now,
+                            seen_dedup_keys=seen_dedup_keys,
                         )
                         alerts.extend(cand_alerts)
 
@@ -895,6 +1037,16 @@ class HiddenGemService:
                         "data_mode": ingest.data_mode,
                         "reused_cache": ingest.reused_cache,
                         "limitations": list(dict.fromkeys(limitations)),
+                        "progress": _build_scan_progress(
+                            stage_index=5,
+                            stage_code="COMPLETED",
+                            completed=list(_SCAN_STAGES),
+                            universe_ingested=len(ingest.items),
+                            hard_gate_passed=len(finalist_list),
+                            hard_gate_rejected=len(rejections),
+                            enrichment_targets=len(hist_targets),
+                            candidates_scored=len(candidate_rows),
+                        ),
                     },
                     "error_summary": partial_reason,
                     "heartbeat_at": self.deps.now().isoformat(),
@@ -933,26 +1085,34 @@ class HiddenGemService:
         prev: dict[str, object] | None,
         delta: float | None,
         now: datetime,
+        seen_dedup_keys: set[str] | None = None,
     ) -> list[dict[str, object]]:
         alerts: list[dict[str, object]] = []
         since = now - timedelta(hours=6)
         score_val = scored.adjusted_score
+        was_eligible = (
+            prev is not None and str(prev.get("eligibility_status") or "") == "ELIGIBLE"
+        )
+        base_payload: dict[str, object] = {
+            "symbol": item.symbol,
+            "name": item.name,
+            "track": scored.discovery_track,
+            "horizon": scored.trading_horizon,
+            "adjusted_score": score_val,
+            "confidence_level": scored.confidence_level,
+            "classification": scored.classification,
+            "price": item.price,
+            "market_cap": item.market_cap,
+            "volume_24h": item.volume_24h,
+            "return_24h": item.return_24h,
+            "return_7d": item.return_7d,
+            "rs_btc_7d": item.rs_btc_7d,
+        }
 
         events: list[tuple[str, str, dict[str, object]]] = []
-        if scored.eligibility_status == "ELIGIBLE" and score_val is not None:
-            sev = "HIGH" if score_val >= 80.0 else ("MEDIUM" if score_val >= 70.0 else "INFO")
-            events.append(
-                (
-                    "NEW_DISCOVERY",
-                    sev,
-                    {
-                        "symbol": item.symbol,
-                        "adjusted_score": score_val,
-                        "track": scored.discovery_track,
-                        "horizon": scored.trading_horizon,
-                    },
-                )
-            )
+        if scored.eligibility_status == "ELIGIBLE" and score_val is not None and not was_eligible:
+            sev = "HIGH" if score_val >= 80.0 else ("MEDIUM" if score_val >= 65.0 else "INFO")
+            events.append(("NEW_DISCOVERY", sev, dict(base_payload)))
         if prev is not None and scored.confidence_level == "HIGH":
             if str(prev.get("confidence_level") or "") != "HIGH":
                 events.append(
@@ -960,10 +1120,9 @@ class HiddenGemService:
                         "CONFIRMATION",
                         "MEDIUM",
                         {
-                            "symbol": item.symbol,
+                            **base_payload,
                             "from": prev.get("confidence_level"),
                             "to": "HIGH",
-                            "adjusted_score": score_val,
                         },
                     )
                 )
@@ -972,7 +1131,7 @@ class HiddenGemService:
                 (
                     "SCORE_UPGRADE",
                     "MEDIUM",
-                    {"symbol": item.symbol, "score_delta": delta, "adjusted_score": score_val},
+                    {**base_payload, "score_delta": delta},
                 )
             )
         if prev is not None and scored.eligibility_status == "REJECTED":
@@ -981,14 +1140,18 @@ class HiddenGemService:
                     (
                         "INVALIDATION",
                         "HIGH",
-                        {"symbol": item.symbol, "track": scored.discovery_track},
+                        dict(base_payload),
                     )
                 )
 
         for event_type, severity, payload in events:
             dedup_key = _alert_dedup_key(user_id, item.asset_id, scored.discovery_track, event_type)
+            if seen_dedup_keys is not None and dedup_key in seen_dedup_keys:
+                continue
             if await self.store.has_recent_alert(user_id, dedup_key, since):
                 continue
+            if seen_dedup_keys is not None:
+                seen_dedup_keys.add(dedup_key)
             alerts.append(
                 {
                     "asset_id": item.asset_id,
@@ -1746,6 +1909,7 @@ class HiddenGemService:
         eligibility: str | None = None,
         run_id: str | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[CandidateSummary]:
         rows = await self.store.list_candidates(
             user_id,
@@ -1757,6 +1921,7 @@ class HiddenGemService:
             eligibility=eligibility,
             run_id=run_id,
             limit=limit,
+            offset=offset,
         )
         return [CandidateSummary(**self._candidate_summary_fields(r)) for r in rows]
 
@@ -1772,11 +1937,16 @@ class HiddenGemService:
         assert isinstance(evidence_rows, list)
         hist_rows = detail["score_history"]
         assert isinstance(hist_rows, list)
+        cp_raw = detail.get("outcome_checkpoint")
 
         explanation = row.get("explanation")
         if explanation is None and row.get("adjusted_score") is not None:
             explanation = self._lazy_explanation(row, evidence_rows)
             await self.store.set_candidate_explanation(user_id, candidate_id, explanation)
+
+        outcome_checkpoint = (
+            self._outcome_checkpoint_model(cp_raw) if isinstance(cp_raw, dict) else None
+        )
 
         return CandidateDetail(
             candidate=CandidateSummary(**self._candidate_summary_fields(row)),
@@ -1824,6 +1994,7 @@ class HiddenGemService:
                 for h in hist_rows
                 if isinstance(h, dict)
             ],
+            outcome_checkpoint=outcome_checkpoint,
         )
 
     @staticmethod
@@ -1966,19 +2137,31 @@ class HiddenGemService:
             for a in rows
         ]
 
-    async def get_quality_stats(self, user_id: str) -> list[QualityStatsRow]:
+    async def get_quality_stats(
+        self,
+        user_id: str,
+        *,
+        track: str | None = None,
+        score_version: str | None = None,
+    ) -> list[QualityStatsRow]:
         rows = await self.store.list_outcome_checkpoints(user_id)
         grouped: dict[tuple[str, str, str], list[dict[str, object]]] = {}
         for row in rows:
+            version = str(row.get("score_version") or HIDDEN_GEM_SCORE_VERSION)
+            row_track = str(row.get("discovery_track") or "EARLY")
+            if track and row_track != track:
+                continue
+            if score_version and version != score_version:
+                continue
             key = (
-                str(row.get("score_version") or HIDDEN_GEM_SCORE_VERSION),
-                str(row.get("discovery_track") or "EARLY"),
+                version,
+                row_track,
                 str(row.get("effective_tier") or "TRACKED"),
             )
             grouped.setdefault(key, []).append(row)
 
         out: list[QualityStatsRow] = []
-        for (version, track, tier), items in sorted(grouped.items()):
+        for (version, row_track, tier), items in sorted(grouped.items()):
             ret_7d_vals = [
                 val
                 for val in (as_float(i.get("ret_7d") or i.get("return_7d")) for i in items)
@@ -2012,7 +2195,7 @@ class HiddenGemService:
             out.append(
                 QualityStatsRow(
                     score_version=version,
-                    discovery_track=track,
+                    discovery_track=row_track,
                     effective_tier=tier,
                     total_tracked=len(items),
                     evaluated_7d=len(ret_7d_vals),
@@ -2022,6 +2205,335 @@ class HiddenGemService:
                 )
             )
         return out
+
+    async def list_candidates_envelope(
+        self,
+        user_id: str,
+        params: HiddenGemCandidatesInput,
+        *,
+        evidence_writer: EvidenceWriter | None = None,
+    ) -> EvidenceEnvelope[HiddenGemCandidatesData]:
+        fetched = await self.list_candidates(
+            user_id,
+            track=params.track,
+            horizon=params.horizon,
+            min_score=params.min_score,
+            confidence=params.confidence,
+            classification=params.classification,
+            eligibility=params.eligibility,
+            run_id=params.run_id,
+            limit=params.limit + 1,
+            offset=params.offset,
+        )
+        has_more = len(fetched) > params.limit
+        items = fetched[: params.limit]
+        filters = {
+            k: v
+            for k, v in params.model_dump(exclude={"limit", "offset"}).items()
+            if v is not None
+        }
+        timestamps = [
+            ts
+            for ts in (parse_timestamp(c.source_timestamp or c.created_at) for c in items)
+            if ts is not None
+        ]
+        cmc_ids = _extract_cmc_ids(c.canonical_provider_id for c in items)
+        limitations = [
+            "Reads persisted Hidden Gem scan candidates for this account; "
+            "does not trigger a live CoinMarketCap scan."
+        ]
+        missing_any = any(c.missing_components for c in items)
+        if not items:
+            limitations.append("No hidden gem candidates matched the supplied filters.")
+        if missing_any:
+            limitations.append(
+                "One or more candidates had missing optional indicators; "
+                "inspect valid_weight_coverage and missing_components."
+            )
+        status = EvidenceStatus.PARTIAL if missing_any else EvidenceStatus.OK
+        summary = (
+            f"Returned {len(items)} persisted hidden gem candidate(s)"
+            + (f" starting at offset {params.offset}." if params.offset else ".")
+        )
+        actions = (
+            [
+                AgentAction(
+                    reason="Inspect full component breakdown, evidence citations, and outcomes.",
+                    suggested_tool="get_hidden_gem_detail",
+                )
+            ]
+            if items
+            else [
+                AgentAction(
+                    reason=(
+                        "Broaden filters or run a Hidden Gems scan via "
+                        "REST /v1/hidden-gems/scans."
+                    ),
+                    suggested_tool="get_hidden_gem_quality_stats",
+                )
+            ]
+        )
+        return await self._build_mcp_envelope(
+            tool="list_hidden_gem_candidates",
+            status=status,
+            summary=summary,
+            data=HiddenGemCandidatesData(
+                candidates=items,
+                count=len(items),
+                limit=params.limit,
+                offset=params.offset,
+                has_more=has_more,
+                filters=filters,
+            ),
+            metrics=["adjusted_score", "valid_weight_coverage", "rs_btc_7d"],
+            window="persisted_scan_candidates",
+            asset_cmc_ids=cmc_ids,
+            timestamps=timestamps,
+            limitations=limitations,
+            agent_actions=actions,
+            evidence_writer=evidence_writer,
+        )
+
+    async def get_candidate_detail_envelope(
+        self,
+        user_id: str,
+        params: HiddenGemDetailInput,
+        *,
+        evidence_writer: EvidenceWriter | None = None,
+    ) -> EvidenceEnvelope[HiddenGemDetailData]:
+        detail = await self.get_candidate_detail(user_id, params.candidate_id)
+        if detail is None:
+            limitations = [
+                f"Candidate '{params.candidate_id}' was not found for this account.",
+                "Reads persisted Hidden Gem records without calling CoinMarketCap.",
+            ]
+            return await self._build_mcp_envelope(
+                tool="get_hidden_gem_detail",
+                status=EvidenceStatus.INSUFFICIENT_DATA,
+                summary=f"Hidden gem candidate '{params.candidate_id}' was not found.",
+                data=HiddenGemDetailData(found=False, detail=None),
+                metrics=["component_scores", "effective_weights", "outcome_checkpoint"],
+                window="candidate_detail",
+                asset_cmc_ids=[],
+                timestamps=[],
+                limitations=limitations,
+                agent_actions=[
+                    AgentAction(
+                        reason="List available hidden gem candidates for this account.",
+                        suggested_tool="list_hidden_gem_candidates",
+                    )
+                ],
+                evidence_writer=evidence_writer,
+            )
+
+        timestamps = [
+            ts
+            for ts in (
+                parse_timestamp(detail.candidate.source_timestamp or detail.candidate.created_at),
+                *(parse_timestamp(e.source_timestamp) for e in detail.evidence),
+            )
+            if ts is not None
+        ]
+        cmc_ids = _extract_cmc_ids([detail.candidate.canonical_provider_id])
+        limitations = [
+            "Reads persisted candidate scoring, evidence, and outcome records without calling "
+            "CoinMarketCap."
+        ]
+        if detail.candidate.missing_components:
+            limitations.append(
+                "Missing scoring components were excluded via weight re-normalization: "
+                + ", ".join(detail.candidate.missing_components)
+                + "."
+            )
+        if detail.outcome_checkpoint is None:
+            limitations.append("No forward outcome checkpoint is recorded for this candidate yet.")
+        status = (
+            EvidenceStatus.PARTIAL if detail.candidate.missing_components else EvidenceStatus.OK
+        )
+        return await self._build_mcp_envelope(
+            tool="get_hidden_gem_detail",
+            status=status,
+            summary=(
+                f"Loaded hidden gem detail for {detail.candidate.symbol} "
+                f"({detail.candidate.discovery_track}/{detail.candidate.trading_horizon})."
+            ),
+            data=HiddenGemDetailData(found=True, detail=detail),
+            metrics=["component_scores", "effective_weights", "evidence", "outcome_checkpoint"],
+            window="candidate_detail",
+            asset_cmc_ids=cmc_ids,
+            timestamps=timestamps,
+            limitations=limitations,
+            agent_actions=[
+                AgentAction(
+                    reason="Compare overall discovery outcome hit-rates across tracks and tiers.",
+                    suggested_tool="get_hidden_gem_quality_stats",
+                )
+            ],
+            evidence_writer=evidence_writer,
+        )
+
+    async def get_quality_stats_envelope(
+        self,
+        user_id: str,
+        params: HiddenGemQualityStatsInput,
+        *,
+        evidence_writer: EvidenceWriter | None = None,
+    ) -> EvidenceEnvelope[HiddenGemQualityStatsData]:
+        rows = await self.get_quality_stats(
+            user_id,
+            track=params.track,
+            score_version=params.score_version,
+        )
+        raw_checkpoints = await self.store.list_outcome_checkpoints(user_id)
+        timestamps = [
+            ts
+            for ts in (
+                parse_timestamp(
+                    str(cp.get("last_evaluated_at") or cp.get("entry_observed_at") or "")
+                )
+                for cp in raw_checkpoints
+                if (not params.track or cp.get("discovery_track") == params.track)
+                and (not params.score_version or cp.get("score_version") == params.score_version)
+            )
+            if ts is not None
+        ]
+        filters = {k: v for k, v in params.model_dump().items() if v is not None}
+        total_tracked = sum(row.total_tracked for row in rows)
+        evaluated_7d_total = sum(row.evaluated_7d for row in rows)
+        limitations = [
+            "Aggregates forward outcome checkpoints stored for this account without calling "
+            "CoinMarketCap."
+        ]
+        if not rows:
+            status = EvidenceStatus.INSUFFICIENT_DATA
+            limitations.append("No hidden gem outcome checkpoints exist for the supplied filters.")
+        elif evaluated_7d_total == 0:
+            status = EvidenceStatus.PARTIAL
+            limitations.append(
+                "Tracked candidates exist, but 7-day forward return checkpoints "
+                "have not matured yet."
+            )
+        else:
+            status = EvidenceStatus.OK
+        return await self._build_mcp_envelope(
+            tool="get_hidden_gem_quality_stats",
+            status=status,
+            summary=(
+                f"Aggregated {total_tracked} tracked hidden gem outcome checkpoint(s) across "
+                f"{len(rows)} group(s)."
+            ),
+            data=HiddenGemQualityStatsData(
+                rows=rows,
+                total_groups=len(rows),
+                total_tracked=total_tracked,
+                filters=filters,
+            ),
+            metrics=["positive_7d_rate", "avg_rel_btc_7d", "mean_mae_30d"],
+            window="T+1d to T+30d forward checkpoints",
+            asset_cmc_ids=[],
+            timestamps=timestamps,
+            limitations=limitations,
+            agent_actions=[
+                AgentAction(
+                    reason="Inspect individual candidates contributing to these outcome cohorts.",
+                    suggested_tool="list_hidden_gem_candidates",
+                )
+            ],
+            evidence_writer=evidence_writer,
+        )
+
+    async def _build_mcp_envelope[T](
+        self,
+        *,
+        tool: str,
+        status: EvidenceStatus,
+        summary: str,
+        data: T,
+        metrics: list[str],
+        window: str,
+        asset_cmc_ids: list[int],
+        timestamps: list[datetime],
+        limitations: list[str],
+        agent_actions: list[AgentAction],
+        evidence_writer: EvidenceWriter | None = None,
+    ) -> EvidenceEnvelope[T]:
+        now = self.deps.now()
+        clean_limits = dedupe_limitations(limitations)
+        evidence_id = new_evidence_id()
+        source_timestamps = {"latest_record": max(timestamps)} if timestamps else {}
+        freshness = _record_freshness(max(timestamps) if timestamps else None, now)
+        writer = evidence_writer if evidence_writer is not None else SupabaseEvidenceWriter()
+        methodology = {
+            "metrics": metrics,
+            "observation_window": window,
+            "annualization_basis": "365d",
+        }
+        try:
+            await writer.persist(
+                EvidenceDraft(
+                    evidence_id=evidence_id,
+                    tool_name=tool,
+                    asset_cmc_ids=asset_cmc_ids,
+                    endpoints_called=[],
+                    data_mode=DataMode.CACHED.value,
+                    freshness=freshness.value,
+                    credit_cost=0,
+                    engine_version=get_settings().engine_version,
+                    methodology=methodology,
+                    limitations=clean_limits,
+                    raw_excerpt={},
+                )
+            )
+        except Exception as exc:
+            clean_limits = dedupe_limitations(
+                [*clean_limits, f"Evidence record could not be stored ({exc.__class__.__name__})."]
+            )
+        return EvidenceEnvelope(
+            tool=tool,
+            engine_version=get_settings().engine_version,
+            status=status,
+            summary=summary,
+            data=data,
+            methodology=MethodologyMeta(
+                metrics=metrics,
+                observation_window=window,
+                annualization_basis="365d",
+            ),
+            evidence=EvidenceMeta(
+                evidence_id=evidence_id,
+                data_mode=DataMode.CACHED,
+                freshness=freshness,
+                retrieved_at_utc=now,
+                source_timestamps=source_timestamps,
+                cmc_endpoints_called=[],
+                cmc_credit_cost=0,
+                cache_hit=True,
+            ),
+            limitations=clean_limits,
+            agent_actions=agent_actions,
+        )
+
+    @staticmethod
+    def _outcome_checkpoint_model(row: dict[str, object]) -> OutcomeCheckpointSummary:
+        return OutcomeCheckpointSummary(
+            id=str(row["id"]),
+            entry_price=as_float(row.get("entry_price")),
+            entry_btc_price=as_float(row.get("entry_btc_price")),
+            entry_observed_at=str(row.get("entry_observed_at") or ""),
+            ret_1d=as_float(row.get("ret_1d")),
+            ret_3d=as_float(row.get("ret_3d")),
+            ret_7d=as_float(row.get("ret_7d")),
+            ret_14d=as_float(row.get("ret_14d")),
+            ret_30d=as_float(row.get("ret_30d")),
+            rel_btc_7d=as_float(row.get("rel_btc_7d")),
+            rel_btc_30d=as_float(row.get("rel_btc_30d")),
+            mfe_30d=as_float(row.get("mfe_30d")),
+            mae_30d=as_float(row.get("mae_30d")),
+            invalidated_at=str(row["invalidated_at"]) if row.get("invalidated_at") else None,
+            last_evaluated_at=(
+                str(row["last_evaluated_at"]) if row.get("last_evaluated_at") else None
+            ),
+        )
 
     async def run_zombie_watchdog(self, stale_seconds: int = _STALE_HEARTBEAT_SECONDS) -> int:
         cutoff = self.deps.now() - timedelta(seconds=stale_seconds)
@@ -2048,18 +2560,65 @@ class HiddenGemService:
         if not notifier.is_configured and not (chat_id and notifier._token):
             return 0
 
-        recent = await self.store.list_alerts(user_id, limit=50)
-        targets = [
+        now_dt = self.deps.now()
+        cooldown_cutoff = now_dt - timedelta(hours=24)
+        recent = await self.store.list_alerts(user_id, limit=200)
+        recently_sent_assets: set[str] = set()
+        for existing in recent:
+            if existing.get("scan_run_id") == scan_run_id:
+                continue
+            if (
+                existing.get("delivery_channel") != "TELEGRAM"
+                or existing.get("delivery_status") != "SENT"
+            ):
+                continue
+            stamp = parse_timestamp(existing.get("delivered_at") or existing.get("created_at"))
+            if stamp is not None and stamp >= cooldown_cutoff:
+                recently_sent_assets.add(str(existing.get("asset_id") or ""))
+
+        severity_rank = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "INFO": 1}
+        event_rank = {
+            "INVALIDATION": 4,
+            "SCORE_UPGRADE": 3,
+            "NEW_DISCOVERY": 2,
+            "CONFIRMATION": 1,
+        }
+        eligible_candidates = [
             al
             for al in recent
             if al.get("scan_run_id") == scan_run_id
             and (
-                al.get("severity") in ("HIGH", "CRITICAL")
-                or al.get("event_type") in ("NEW_DISCOVERY", "CONFIRMATION")
+                al.get("event_type") == "INVALIDATION"
+                or al.get("severity") in ("MEDIUM", "HIGH", "CRITICAL")
             )
         ]
+
+        def _priority_key(al: dict[str, object]) -> tuple[int, int, float]:
+            payload = al.get("payload") if isinstance(al.get("payload"), dict) else {}
+            score_num = as_float(payload.get("adjusted_score")) or 0.0
+            return (
+                severity_rank.get(str(al.get("severity") or ""), 0),
+                event_rank.get(str(al.get("event_type") or ""), 0),
+                score_num,
+            )
+
+        eligible_candidates.sort(key=_priority_key, reverse=True)
+        targets: list[dict[str, object]] = []
+        seen_assets: set[str] = set()
+        for al in eligible_candidates:
+            aid = str(al.get("asset_id") or "")
+            if not aid or aid in seen_assets:
+                continue
+            ev_type = str(al.get("event_type") or "")
+            if aid in recently_sent_assets and ev_type not in ("INVALIDATION", "SCORE_UPGRADE"):
+                continue
+            seen_assets.add(aid)
+            targets.append(al)
+            if len(targets) >= 5:
+                break
+
         sent_count = 0
-        now_iso = self.deps.now().isoformat()
+        now_iso = now_dt.isoformat()
         for alert in targets:
             res = await notifier.send_alert(alert, chat_id=chat_id)
             if not res.attempted:
@@ -2356,6 +2915,34 @@ class HiddenGemService:
             "added_at": str(row["added_at"]) if row.get("added_at") else None,
             "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
         }
+
+
+def _extract_cmc_ids(provider_ids: Sequence[str] | Any) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in provider_ids:
+        text = str(raw or "").strip()
+        if text.startswith("cmc:"):
+            text = text[4:]
+        if text.isdigit():
+            val = int(text)
+            if val > 0 and val not in seen:
+                seen.add(val)
+                ids.append(val)
+    return ids
+
+
+def _record_freshness(latest_ts: datetime | None, now: datetime) -> Freshness:
+    if latest_ts is None:
+        return Freshness.STALE
+    ref = latest_ts if latest_ts.tzinfo is not None else latest_ts.replace(tzinfo=UTC)
+    current = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+    age_seconds = max(0.0, (current - ref).total_seconds())
+    if age_seconds <= 7200:
+        return Freshness.FRESH
+    if age_seconds <= 86400:
+        return Freshness.AGING
+    return Freshness.STALE
 
 
 def get_hidden_gem_service() -> HiddenGemService:

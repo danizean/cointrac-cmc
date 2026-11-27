@@ -96,6 +96,7 @@ class HiddenGemStore(Protocol):
         eligibility: str | None = None,
         run_id: str | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, object]]: ...
 
     async def get_candidate_detail(
@@ -479,6 +480,7 @@ class MemoryHiddenGemStore:
         eligibility: str | None = None,
         run_id: str | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         for row in self.candidates.values():
@@ -504,10 +506,12 @@ class MemoryHiddenGemStore:
             key=lambda r: (
                 r.get("adjusted_score") is not None,
                 as_float(r.get("adjusted_score")) or -1.0,
+                str(r.get("created_at") or ""),
+                str(r.get("id") or ""),
             ),
             reverse=True,
         )
-        return rows[:limit]
+        return rows[offset : offset + limit]
 
     async def get_candidate_detail(
         self, user_id: str, candidate_id: str
@@ -525,7 +529,19 @@ class MemoryHiddenGemStore:
             for h in self.history
             if h.get("user_id") == user_id and h.get("asset_id") == row.get("asset_id")
         ]
-        return {"row": self._enrich_candidate_summary(row), "evidence": ev, "score_history": hist}
+        cp_row = self.checkpoints.get(candidate_id)
+        checkpoint = (
+            dict(cp_row)
+            if isinstance(cp_row, dict)
+            and (cp_row.get("user_id") is None or cp_row.get("user_id") == user_id)
+            else None
+        )
+        return {
+            "row": self._enrich_candidate_summary(row),
+            "evidence": ev,
+            "score_history": hist,
+            "outcome_checkpoint": checkpoint,
+        }
 
     async def set_candidate_explanation(
         self, user_id: str, candidate_id: str, explanation: dict[str, object]
@@ -1103,6 +1119,7 @@ class SupabaseHiddenGemStore:
         eligibility: str | None = None,
         run_id: str | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, object]]:
         def read() -> list[dict[str, object]]:
             q = (
@@ -1129,11 +1146,13 @@ class SupabaseHiddenGemStore:
                 q = q.eq("scan_run_id", run_id)
             if min_score is not None:
                 q = q.gte("adjusted_score", min_score)
-            resp = (
-                q.order("adjusted_score", desc=True, nullsfirst=False)
-                .limit(limit)
-                .execute()
+            ordered = q.order("adjusted_score", desc=True, nullsfirst=False).order(
+                "created_at", desc=True
             )
+            if offset > 0:
+                resp = ordered.range(offset, offset + limit - 1).execute()
+            else:
+                resp = ordered.limit(limit).execute()
             return [self._flatten_candidate(dict(r)) for r in (resp.data or [])]
 
         return await asyncio.to_thread(read)
@@ -1177,10 +1196,21 @@ class SupabaseHiddenGemStore:
                 .limit(20)
                 .execute()
             )
+            cp_resp = (
+                self._db()
+                .table("hg_outcome_checkpoints")
+                .select("*")
+                .eq("candidate_result_id", candidate_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            cp_rows = cp_resp.data or []
             return {
                 "row": row,
                 "evidence": [dict(e) for e in (ev_resp.data or [])],
                 "score_history": [dict(h) for h in (hist_resp.data or [])],
+                "outcome_checkpoint": dict(cp_rows[0]) if cp_rows else None,
             }
 
         return await asyncio.to_thread(read)

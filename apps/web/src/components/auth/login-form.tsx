@@ -9,9 +9,9 @@ import {
   EyeOff,
   Lock,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAppPreferences } from "@/components/app-preferences";
-import { sanitizeRedirectPath } from "@/lib/auth-redirect";
+import { EMAIL_OTP_LENGTH, normalizeEmailOtp, sanitizeRedirectPath } from "@/lib/auth-redirect";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 const ERROR_MESSAGES: Record<string, { en: string; id: string }> = {
@@ -31,6 +31,10 @@ const ERROR_MESSAGES: Record<string, { en: string; id: string }> = {
     en: "Invalid authentication callback parameters.",
     id: "Parameter callback autentikasi tidak valid.",
   },
+  email_not_confirmed: {
+    en: "Verify your email before signing in. Enter your email and the 6-digit code.",
+    id: "Verifikasi email sebelum masuk. Masukkan email dan kode 6 digit.",
+  },
 };
 
 export function LoginForm({
@@ -38,11 +42,13 @@ export function LoginForm({
   nextPath,
   initialError,
   signedOut,
+  passwordUpdated,
 }: {
   configured: boolean;
   nextPath: string;
   initialError?: string;
   signedOut?: boolean;
+  passwordUpdated?: boolean;
 }) {
   const router = useRouter();
   const { locale } = useAppPreferences();
@@ -51,6 +57,7 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordUpdated, setShowPasswordUpdated] = useState(Boolean(passwordUpdated));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(() => {
     if (!initialError) return null;
@@ -58,14 +65,65 @@ export function LoginForm({
     if (mapped) return isId ? mapped.id : mapped.en;
     return isId ? "Gagal menyelesaikan proses masuk." : "Unable to complete sign in.";
   });
-  const [needsVerification, setNeedsVerification] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(
+    initialError === "email_not_confirmed",
+  );
+  const [otp, setOtp] = useState("");
+  const [verifying, setVerifying] = useState(false);
   const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const resendTimer = useRef<number | null>(null);
+  const errorTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resendTimer.current !== null) window.clearTimeout(resendTimer.current);
+      if (errorTimer.current !== null) window.clearTimeout(errorTimer.current);
+    };
+  }, []);
+
+  function clearResendStatus() {
+    if (resendTimer.current !== null) {
+      window.clearTimeout(resendTimer.current);
+      resendTimer.current = null;
+    }
+    setResendStatus(null);
+  }
+
+  function showTemporaryError(message: string) {
+    if (errorTimer.current !== null) window.clearTimeout(errorTimer.current);
+    setError(message);
+    errorTimer.current = window.setTimeout(() => {
+      setError(null);
+      errorTimer.current = null;
+    }, 4000);
+  }
+
+  function clearTimedError() {
+    if (errorTimer.current === null) return;
+    window.clearTimeout(errorTimer.current);
+    errorTimer.current = null;
+    setError(null);
+  }
+
+  function showResendStatus(message: string) {
+    if (resendTimer.current !== null) window.clearTimeout(resendTimer.current);
+    setResendStatus(message);
+    resendTimer.current = window.setTimeout(() => {
+      setResendStatus(null);
+      resendTimer.current = null;
+    }, 4000);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (errorTimer.current !== null) {
+      window.clearTimeout(errorTimer.current);
+      errorTimer.current = null;
+    }
     setError(null);
+    setShowPasswordUpdated(false);
     setNeedsVerification(false);
-    setResendStatus(null);
+    clearResendStatus();
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !password) {
@@ -129,6 +187,7 @@ export function LoginForm({
   async function handleResendVerification() {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) return;
+    clearResendStatus();
     const supabase = createSupabaseBrowserClient();
     if (!supabase) return;
     const { error: resendErr } = await supabase.auth.resend({
@@ -139,7 +198,7 @@ export function LoginForm({
       },
     });
     if (resendErr) {
-      setResendStatus(
+      showResendStatus(
         resendErr.status === 429
           ? isId
             ? "Mohon tunggu sebelum mengirim ulang email verifikasi."
@@ -148,11 +207,54 @@ export function LoginForm({
       );
       return;
     }
-    setResendStatus(
+    setOtp("");
+    if (errorTimer.current !== null) {
+      window.clearTimeout(errorTimer.current);
+      errorTimer.current = null;
+    }
+    setError(null);
+    showResendStatus(
       isId
-        ? "Email verifikasi terkirim. Silakan cek kotak masuk Anda."
-        : "Verification email sent. Check your inbox.",
+        ? "Kode baru terkirim. Silakan cek kotak masuk Anda."
+        : "A new code was sent. Check your inbox.",
     );
+  }
+
+  async function handleVerifyOtp() {
+    const normalizedEmail = email.trim().toLowerCase();
+    const token = normalizeEmailOtp(otp);
+    clearResendStatus();
+    if (!normalizedEmail || !token) {
+      setError(isId ? "Masukkan kode 6 digit dari email." : "Enter the 6-digit code from the email.");
+      return;
+    }
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    setVerifying(true);
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token,
+        type: "signup",
+      });
+      if (verifyError) {
+        const lower = verifyError.message.toLowerCase();
+        showTemporaryError(
+          lower.includes("rate limit") || verifyError.status === 429
+            ? isId
+              ? "Terlalu banyak percobaan. Mohon tunggu beberapa menit."
+              : "Too many attempts. Please wait a few minutes."
+            : isId
+              ? "Kode tidak valid atau sudah kedaluwarsa."
+              : "That code is invalid or expired.",
+        );
+        return;
+      }
+      router.replace(safeNext);
+      router.refresh();
+    } finally {
+      setVerifying(false);
+    }
   }
 
   return (
@@ -173,7 +275,21 @@ export function LoginForm({
         className="ct-surface-featured rounded-[18px] p-6 sm:p-8"
         noValidate
       >
-        {signedOut && !error && (
+        {showPasswordUpdated && !error && (
+          <div
+            role="status"
+            className="mb-5 flex items-start gap-2 rounded-[12px] border border-positive/30 bg-positive/10 p-3 text-xs text-foreground"
+          >
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-positive" aria-hidden="true" />
+            <span>
+              {isId
+                ? "Kata sandi sudah diperbarui. Masuk dengan kata sandi baru."
+                : "Your password was updated. Sign in with the new password."}
+            </span>
+          </div>
+        )}
+
+        {signedOut && !error && !showPasswordUpdated && (
           <div className="mb-5 flex items-center gap-2 rounded-[12px] border border-positive/30 bg-positive/10 p-3 text-xs text-foreground">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-positive" aria-hidden="true" />
             <span>
@@ -185,24 +301,75 @@ export function LoginForm({
         {error && (
           <div
             role="alert"
-            className="mb-5 flex flex-col gap-2 rounded-[12px] border border-destructive/40 bg-destructive/10 p-3.5 text-xs text-foreground"
+            className="mb-5 flex items-start gap-2 rounded-[12px] border border-destructive/40 bg-destructive/10 p-3.5 text-xs text-foreground"
           >
-            <div className="flex items-start gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-              <span>{error}</span>
-            </div>
-            {needsVerification && (
-              <button
-                type="button"
-                onClick={handleResendVerification}
-                className="w-fit cursor-pointer rounded-[8px] border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground hover:border-primary/40"
-              >
-                {isId ? "Kirim ulang email verifikasi" : "Resend verification email"}
-              </button>
-            )}
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {needsVerification && (
+          <div className="mb-5 space-y-3">
             {resendStatus && (
-              <span className="text-[11px] text-muted-foreground">{resendStatus}</span>
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-start gap-2 rounded-[12px] border border-positive/30 bg-positive/10 p-3.5 text-xs text-foreground"
+              >
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-positive" aria-hidden="true" />
+                <span>{resendStatus}</span>
+              </div>
             )}
+            <div className="space-y-2">
+              <label htmlFor="login-otp" className="block text-[11px] font-semibold text-foreground">
+                {isId ? "Kode 6 digit" : "6-digit code"}
+              </label>
+              <input
+                id="login-otp"
+                name="otp"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={EMAIL_OTP_LENGTH}
+                value={otp}
+                onChange={(event) => {
+                  clearTimedError();
+                  clearResendStatus();
+                  setOtp(event.target.value.replace(/\D/g, "").slice(0, EMAIL_OTP_LENGTH));
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleVerifyOtp();
+                  }
+                }}
+                placeholder="000000"
+                className="min-h-10 w-full rounded-[8px] border border-border bg-input-bg px-3 py-2 text-center font-mono tracking-[0.22em] text-foreground focus:border-primary focus:outline-none"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleVerifyOtp()}
+                  disabled={verifying || normalizeEmailOtp(otp) === null}
+                  className="cursor-pointer rounded-[8px] bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {verifying
+                    ? isId
+                      ? "Memeriksa..."
+                      : "Checking..."
+                    : isId
+                      ? "Konfirmasi kode"
+                      : "Confirm code"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  className="cursor-pointer rounded-[8px] border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground hover:border-primary/40"
+                >
+                  {isId ? "Kirim ulang kode" : "Send a new code"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -250,7 +417,10 @@ export function LoginForm({
                 autoComplete="current-password"
                 required
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setShowPasswordUpdated(false);
+                  setPassword(e.target.value);
+                }}
                 placeholder={isId ? "Masukkan kata sandi" : "Enter your password"}
                 className="min-h-11 w-full rounded-[10px] border border-border bg-input-bg py-2.5 pl-3.5 pr-11 text-sm text-foreground placeholder:text-subtle-foreground transition-colors focus:border-primary focus:outline-none"
               />

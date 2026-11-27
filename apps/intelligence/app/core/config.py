@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     remote_mcp_public_url: str = ""
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_default_chat_id: str = ""
+    muse_api_key: SecretStr = SecretStr("")
+    muse_base_url: str = "https://api.meta.ai/v1"
+    muse_model: str = "muse-spark-1.3"
+    super_admin_emails: str = ""
 
     @field_validator("mcp_allowed_hosts")
     @classmethod
@@ -223,6 +227,9 @@ class Settings(BaseSettings):
 
     def cors_origin_list(self) -> list[str]:
         return _parse_csv(self.cors_origins)
+
+    def super_admin_email_set(self) -> set[str]:
+        return {entry.lower() for entry in _parse_csv(self.super_admin_emails)}
 
     def trusted_host_list(self) -> list[str]:
         return _parse_csv(self.trusted_hosts)

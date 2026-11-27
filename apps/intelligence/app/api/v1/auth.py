@@ -31,6 +31,8 @@ class AuthMeResponse(BaseModel):
     display_name: str | None
     created_at: str | None = None
     profile_provisioned: bool
+    platform_role: str = "user"
+    is_super_admin: bool = False
 
 
 class UpdateProfileRequest(BaseModel):
@@ -115,6 +117,8 @@ async def get_authenticated_me(
         display_name=user.display_name,
         created_at=user.created_at,
         profile_provisioned=user.profile_provisioned,
+        platform_role="super_admin" if user.is_super_admin else user.platform_role,
+        is_super_admin=user.is_super_admin,
     )
 
 

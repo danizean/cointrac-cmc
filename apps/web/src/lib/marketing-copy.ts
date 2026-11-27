@@ -89,7 +89,7 @@ const en: MarketingCopy = {
   home: {
     eyebrow: "Crypto Market API & MCP",
     title: "Structured crypto market data for your apps and AI tools.",
-    lede: "CoinTrac turns CoinMarketCap feeds into 10 REST endpoints and 11 MCP tools. Every response includes its data source, freshness, and any missing fields—nothing is guessed.",
+    lede: "CoinTrac turns CoinMarketCap feeds into 10 market REST endpoints, Hidden Gem Discovery, and 14 MCP tools with typed schemas. Every response includes its data source, freshness, and any missing fields—nothing is guessed.",
     primaryCta: "Create free account",
     secondaryCta: "Read API docs",
     problemTitle: "Clear numbers, honest gaps.",
@@ -115,7 +115,7 @@ const en: MarketingCopy = {
     flow: [
       { title: "CoinMarketCap data", body: "Fetches market quotes and metadata, tracking plan limits and missing fields." },
       { title: "Python calculations", body: "Runs fixed quantitative formulas (relative strength, regime rules, and 365-day volatility when OHLCV is enabled)." },
-      { title: "REST & MCP", body: "Exposes the same 10 tools over /v1/* HTTP routes and 11 tools over MCP." },
+      { title: "REST & MCP", body: "Exposes the 10 core intelligence tools over /v1/* HTTP routes plus Hidden Gem Discovery & 14 typed tools over MCP." },
       { title: "Structured response", body: "Returns JSON with status, data mode, freshness, and a list of limitations." },
     ],
     flowNote: "Cached and snapshot responses are always labeled so you know how fresh the data is.",
@@ -165,7 +165,7 @@ const en: MarketingCopy = {
     plans: [
       {
         title: "Free Account",
-        body: "Includes 5 active API keys, 60 requests/min per key, access to all 10 REST tools and 11 MCP tools, and saved evidence history.",
+        body: "Includes 5 active API keys, 60 requests/min per key, access to all 10 intelligence REST tools, Hidden Gem Discovery, 14 MCP tools, and saved evidence history.",
       },
       {
         title: "MCP Access",
@@ -207,8 +207,8 @@ const en: MarketingCopy = {
   },
   capabilities: {
     eyebrow: "Product Catalog",
-    title: "10 REST endpoints. 11 MCP tools.",
-    lede: "Every intelligence tool works identically over REST and MCP (plus get_capabilities for MCP discovery). Below is what each tool does and how status flags work.",
+    title: "10 REST endpoints. 14 MCP tools.",
+    lede: "Every core intelligence tool works identically over REST and MCP, alongside Hidden Gem Discovery tools and get_capabilities with typed output schemas. Below is what each core tool does and how status flags work.",
     catalogNote: "Tool summaries reflect the exact catalog definitions returned by the backend.",
     groups: [
       {
@@ -241,7 +241,7 @@ const en: MarketingCopy = {
   integrations: {
     eyebrow: "MCP Integrations",
     title: "Bring market tools to your AI agent.",
-    lede: "CoinTrac provides one Streamable HTTP MCP server over HTTPS with 11 tools, 5 resources (3 static + 2 URI templates), and 3 prompts. Connect your AI client using an API key or OAuth 2.1.",
+    lede: "CoinTrac provides one Streamable HTTP MCP server over HTTPS with 14 tools (with typed outputSchema), 6 resources (3 static + 3 URI templates), and 3 prompts. Connect your AI client using an API key or OAuth 2.1.",
     conceptTitle: "Streamable HTTP over HTTPS",
     conceptBody:
       "Send MCP JSON-RPC requests directly to /mcp over TLS. Every tool returns the same EvidenceEnvelope[T] format as the REST API.",
@@ -275,7 +275,7 @@ const en: MarketingCopy = {
       {
         name: "Hermes",
         status: "Streamable HTTP · API Key / Bearer",
-        detail: "Connects directly to https://mcp.cointrac.xyz/mcp with x-cointrac-key or Bearer auth for all 11 MCP tools.",
+        detail: "Connects directly to https://mcp.cointrac.xyz/mcp with x-cointrac-key or Bearer auth for all 14 MCP tools.",
       },
     ],
   },
@@ -309,7 +309,7 @@ const en: MarketingCopy = {
       },
       {
         title: "Product catalog",
-        body: "Browse all 10 REST endpoints and 11 MCP tools, including response statuses (OK, PARTIAL, TIER_RESTRICTED) and null-safety rules.",
+        body: "Browse all 10 intelligence REST endpoints, Hidden Gem Discovery, and 14 MCP tools, including response statuses (OK, PARTIAL, TIER_RESTRICTED) and null-safety rules.",
         links: [{ href: "/product", label: "View Product catalog" }],
         sources: ["/product"],
       },
@@ -354,7 +354,7 @@ const id: MarketingCopy = {
   home: {
     eyebrow: "API & MCP Data Pasar Kripto",
     title: "Data pasar kripto terstruktur untuk aplikasi dan AI Anda.",
-    lede: "CoinTrac mengolah data CoinMarketCap menjadi 10 endpoint REST dan 11 tool MCP. Setiap respons mencatat sumber data, kesegarannya, dan bagian yang tidak tersedia—tanpa menebak-nebak.",
+    lede: "CoinTrac mengolah data CoinMarketCap menjadi 10 endpoint REST pasar, Hidden Gem Discovery, dan 14 tool MCP berskema ketik. Setiap respons mencatat sumber data, kesegarannya, dan bagian yang tidak tersedia—tanpa menebak-nebak.",
     primaryCta: "Buat akun gratis",
     secondaryCta: "Baca dokumentasi",
     problemTitle: "Angka jelas, kekurangan data tetap jujur.",
@@ -380,7 +380,7 @@ const id: MarketingCopy = {
     flow: [
       { title: "Data CoinMarketCap", body: "Mengambil data pasar dan mencatat batas paket maupun kolom yang kosong." },
       { title: "Hitungan Python", body: "Menjalankan rumus tetap (kekuatan relatif, aturan regime, dan volatilitas 365 hari saat OHLCV tersedia)." },
-      { title: "REST & MCP", body: "Menyediakan 10 tool lewat rute HTTP /v1/* dan 11 tool lewat server MCP." },
+      { title: "REST & MCP", body: "Menyediakan 10 tool inti lewat rute HTTP /v1/* serta Hidden Gem Discovery & 14 tool lewat server MCP." },
       { title: "Respons terstruktur", body: "Mengembalikan JSON berisi status, mode data, kesegaran, dan daftar keterbatasan." },
     ],
     flowNote: "Data cache dan snapshot selalu diberi label agar Anda tahu seberapa baru datanya.",
@@ -430,7 +430,7 @@ const id: MarketingCopy = {
     plans: [
       {
         title: "Akun Gratis",
-        body: "Sudah termasuk 5 API key aktif, 60 request/menit per key, akses penuh ke 10 tool REST dan 11 tool MCP, serta riwayat bukti.",
+        body: "Sudah termasuk 5 API key aktif, 60 request/menit per key, akses ke 10 tool REST, Hidden Gem Discovery, 14 tool MCP, serta riwayat bukti.",
       },
       {
         title: "Akses MCP",
@@ -472,8 +472,8 @@ const id: MarketingCopy = {
   },
   capabilities: {
     eyebrow: "Katalog Produk",
-    title: "10 endpoint REST. 11 tool MCP.",
-    lede: "Setiap tool bekerja dengan logika yang sama di REST dan MCP (ditambah get_capabilities di MCP). Di bawah ini daftar tool dan cara membaca status hasilnya.",
+    title: "10 endpoint REST. 14 tool MCP.",
+    lede: "Setiap tool intelijen inti bekerja dengan logika yang sama di REST dan MCP, dilengkapi tool Hidden Gem Discovery serta get_capabilities dengan outputSchema terstruktur.",
     catalogNote: "Ringkasan tiap tool mengikuti definisi katalog resmi yang dikembalikan oleh backend.",
     groups: [
       {
@@ -506,7 +506,7 @@ const id: MarketingCopy = {
   integrations: {
     eyebrow: "Integrasi MCP",
     title: "Hubungkan agen AI ke data CoinTrac.",
-    lede: "CoinTrac menyediakan satu server MCP Streamable HTTP melalui HTTPS dengan 11 tool, 5 resource (3 statis + 2 template URI), dan 3 prompt. Hubungkan klien AI Anda menggunakan API key atau OAuth 2.1.",
+    lede: "CoinTrac menyediakan satu server MCP Streamable HTTP melalui HTTPS dengan 14 tool (dengan outputSchema), 6 resource (3 statis + 3 template URI), dan 3 prompt. Hubungkan klien AI Anda menggunakan API key atau OAuth 2.1.",
     conceptTitle: "Streamable HTTP melalui HTTPS",
     conceptBody:
       "Kirim permintaan MCP JSON-RPC langsung ke /mcp melalui HTTPS. Setiap tool mengembalikan format EvidenceEnvelope[T] yang sama dengan REST API.",
@@ -540,7 +540,7 @@ const id: MarketingCopy = {
       {
         name: "Hermes",
         status: "Streamable HTTP · API Key / Bearer",
-        detail: "Terhubung langsung ke https://mcp.cointrac.xyz/mcp dengan x-cointrac-key atau Bearer auth untuk seluruh 11 tool MCP.",
+        detail: "Terhubung langsung ke https://mcp.cointrac.xyz/mcp dengan x-cointrac-key atau Bearer auth untuk seluruh 14 tool MCP.",
       },
     ],
   },
@@ -574,7 +574,7 @@ const id: MarketingCopy = {
       },
       {
         title: "Katalog Produk",
-        body: "Lihat seluruh 10 endpoint REST dan 11 tool MCP beserta arti status (OK, PARTIAL, TIER_RESTRICTED) dan aturan null-safe.",
+        body: "Lihat seluruh 10 endpoint REST, Hidden Gem Discovery, dan 14 tool MCP beserta arti status (OK, PARTIAL, TIER_RESTRICTED) dan aturan null-safe.",
         links: [{ href: "/product", label: "Lihat Katalog Produk" }],
         sources: ["/product"],
       },
