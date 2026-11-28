@@ -25,7 +25,7 @@ function readDismissed(): boolean {
   }
 }
 
-type DemoFailure = "unavailable" | "unconfirmed" | "failed";
+type DemoFailure = "unavailable" | "unconfirmed" | "rate_limited" | "failed";
 
 export function DemoLauncher() {
   const router = useRouter();
@@ -94,13 +94,17 @@ export function DemoLauncher() {
       ? isId
         ? "Akun demo belum dikonfirmasi."
         : "The demo account is not confirmed yet."
-      : failure === "unavailable"
+      : failure === "rate_limited"
         ? isId
-          ? "Demo belum dikonfigurasi di server ini."
-          : "Demo sign-in is not configured on this server."
-        : isId
-          ? "Demo belum bisa dibuka. Coba lagi sebentar lagi."
-          : "The demo workspace could not be opened. Try again in a moment.";
+          ? "Terlalu banyak percobaan demo. Coba lagi beberapa menit lagi."
+          : "Too many demo sign-in attempts. Please wait a moment and try again."
+        : failure === "unavailable"
+          ? isId
+            ? "Demo belum dikonfigurasi di server ini."
+            : "Demo sign-in is not configured on this server."
+          : isId
+            ? "Demo belum bisa dibuka. Coba lagi sebentar lagi."
+            : "The demo workspace could not be opened. Try again in a moment.";
 
   return (
     <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex w-max max-w-[min(100vw-2rem,22rem)] flex-col items-end gap-2 sm:bottom-6 sm:right-6">
@@ -112,7 +116,7 @@ export function DemoLauncher() {
           className="ct-surface-featured pointer-events-auto w-[min(100vw-2rem,22rem)] rounded-[18px] p-4 shadow-[0_18px_50px_-24px_rgba(8,11,18,0.45)]"
         >
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-link">
-            {isId ? "Demo juri" : "Judge demo"}
+            Live Demo
           </p>
           <h2 id={titleId} className="mt-1 text-base font-semibold tracking-[-0.02em] text-foreground">
             {isId ? "Lihat workspace yang hidup" : "Open a live workspace"}

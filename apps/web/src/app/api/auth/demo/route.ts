@@ -8,9 +8,14 @@ const NO_STORE = {
   "x-content-type-options": "nosniff",
 } as const;
 
+function cleanEnvSecret(raw: string | undefined): string {
+  if (!raw) return "";
+  return raw.replace(/[\r\n]/g, "").trim().replace(/^["']|["']$/g, "");
+}
+
 export async function POST() {
-  const email = process.env.DEMO_LOGIN_EMAIL?.trim() ?? "";
-  const password = process.env.DEMO_LOGIN_PASSWORD ?? "";
+  const email = cleanEnvSecret(process.env.DEMO_LOGIN_EMAIL);
+  const password = cleanEnvSecret(process.env.DEMO_LOGIN_PASSWORD);
   const cfg = getSupabasePublicConfig();
   if (!cfg || !email || !password) {
     return NextResponse.json({ ok: false, reason: "unavailable" }, { status: 503, headers: NO_STORE });
@@ -34,8 +39,15 @@ export async function POST() {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     const lower = error.message.toLowerCase();
-    const reason = lower.includes("not confirmed") ? "unconfirmed" : "failed";
-    return NextResponse.json({ ok: false, reason }, { status: 403, headers: NO_STORE });
+    const reason = lower.includes("not confirmed")
+      ? "unconfirmed"
+      : error.status === 429 || lower.includes("rate limit")
+        ? "rate_limited"
+        : "failed";
+    return NextResponse.json(
+      { ok: false, reason },
+      { status: reason === "rate_limited" ? 429 : 403, headers: NO_STORE },
+    );
   }
 
   return response;
