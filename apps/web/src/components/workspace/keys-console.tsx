@@ -49,15 +49,12 @@ const QUICK_KEY_NAMES = [
   "Backend Service",
 ] as const;
 
-type KeyFilter = "all" | "active" | "revoked";
-
 export function KeysConsole() {
   const { locale } = useAppPreferences();
   const isId = locale === "id";
   const { pushToast } = useToast();
 
   const [keys, setKeys] = useState<ApiKeySummary[]>([]);
-  const [keyFilter, setKeyFilter] = useState<KeyFilter>("all");
   const [activeCount, setActiveCount] = useState(0);
   const [maxKeys, setMaxKeys] = useState(5);
   const [loading, setLoading] = useState(true);
@@ -128,21 +125,14 @@ export function KeysConsole() {
     };
   }, []);
 
-  const revokedCount = useMemo(
-    () => keys.filter((k) => !k.is_active || k.revoked_at !== null).length,
+  const activeKeys = useMemo(
+    () => keys.filter((k) => k.is_active && k.revoked_at === null),
     [keys],
   );
 
-  const filteredKeys = useMemo(() => {
-    if (keyFilter === "active") return keys.filter((k) => k.is_active);
-    if (keyFilter === "revoked") return keys.filter((k) => !k.is_active);
-    return keys;
-  }, [keyFilter, keys]);
-
   const rateLimitPerMin = useMemo(() => {
-    const active = keys.find((k) => k.is_active);
-    return active?.rate_limit_per_min ?? keys[0]?.rate_limit_per_min ?? null;
-  }, [keys]);
+    return activeKeys[0]?.rate_limit_per_min ?? keys[0]?.rate_limit_per_min ?? null;
+  }, [activeKeys, keys]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -304,13 +294,13 @@ export function KeysConsole() {
                 {activeCount} / {maxKeys} {isId ? "aktif" : "active"}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {revokedCount > 0
+                {activeCount > 0
                   ? isId
-                    ? `${revokedCount} kunci dicabut disimpan untuk riwayat audit.`
-                    : `${revokedCount} revoked key${revokedCount === 1 ? "" : "s"} retained for audit history.`
+                    ? "Siap dipakai untuk koneksi MCP & REST API."
+                    : "Ready for MCP client and REST API connections."
                   : isId
-                    ? "Belum ada kunci yang dicabut di akun ini."
-                    : "No revoked keys on this account."}
+                    ? "Belum ada kunci aktif di akun ini."
+                    : "No active keys on this account yet."}
               </p>
             </div>
           )}
@@ -385,49 +375,15 @@ export function KeysConsole() {
 
       {/* Key Inventory */}
       <section aria-labelledby="keys-list-heading" className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <SectionHeader
-            id="keys-list-heading"
-            title={isId ? "Daftar Kunci API Anda" : "Your API keys"}
-            description={
-              isId
-                ? "Kunci rahasia tidak dapat dilihat kembali setelah dibuat. Kunci yang dicabut tetap tersimpan sebagai catatan audit."
-                : "Raw secrets are never retrievable after creation. Revoked keys remain visible as immutable audit records."
-            }
-          />
-
-          {keys.length > 0 ? (
-            <div
-              role="group"
-              aria-label={isId ? "Filter kunci" : "Filter keys"}
-              className="inline-flex h-9 items-center rounded-full border border-border bg-card/80 p-0.5"
-            >
-              {(
-                [
-                  { id: "all", en: `All (${keys.length})`, idLabel: `Semua (${keys.length})` },
-                  { id: "active", en: `Active (${activeCount})`, idLabel: `Aktif (${activeCount})` },
-                  { id: "revoked", en: `Revoked (${revokedCount})`, idLabel: `Dicabut (${revokedCount})` },
-                ] as const
-              ).map((tab) => {
-                const active = keyFilter === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setKeyFilter(tab.id)}
-                    className={`min-h-7 cursor-pointer rounded-full px-3 font-mono text-[11px] font-semibold transition-colors ${
-                      active
-                        ? "bg-primary text-white shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {isId ? tab.idLabel : tab.en}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
+        <SectionHeader
+          id="keys-list-heading"
+          title={isId ? "Daftar Kunci API Aktif" : "Active API keys"}
+          description={
+            isId
+              ? "Kunci rahasia hanya ditampilkan sekali saat dibuat. Kunci yang sudah dicabut disembunyikan otomatis agar tampilan tetap rapi."
+              : "Raw secrets are shown only once upon creation. Revoked keys are automatically hidden to keep your workspace clean."
+          }
+        />
 
         {loading ? (
           <Card className="space-y-3 p-4">
@@ -435,14 +391,14 @@ export function KeysConsole() {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </Card>
-        ) : !loadError && keys.length === 0 ? (
+        ) : !loadError && activeKeys.length === 0 ? (
           <EmptyState
             icon={<KeyRound className="h-5 w-5" aria-hidden="true" />}
-            title={isId ? "Belum ada kunci API" : "No API keys yet"}
+            title={isId ? "Belum ada kunci API aktif" : "No active API keys"}
             description={
               isId
-                ? "Buat kunci API CoinTrac pribadi untuk menghubungkan klien MCP lokal atau request REST API."
-                : "Create a personal CoinTrac API key to authenticate local MCP clients or REST API requests under your account."
+                ? "Buat kunci API CoinTrac pribadi untuk menghubungkan klien MCP atau request REST API Anda."
+                : "Create a personal CoinTrac API key to authenticate MCP clients or REST API requests under your account."
             }
             action={
               <Button
@@ -460,13 +416,7 @@ export function KeysConsole() {
               </Button>
             }
           />
-        ) : keys.length > 0 && filteredKeys.length === 0 ? (
-          <Card className="p-6 text-center text-xs text-muted-foreground">
-            {isId
-              ? "Tidak ada kunci pada filter ini."
-              : "No API keys match this filter."}
-          </Card>
-        ) : filteredKeys.length > 0 ? (
+        ) : activeKeys.length > 0 ? (
           <>
             {/* Desktop Table */}
             <Card className="hidden overflow-hidden md:block">
@@ -484,7 +434,7 @@ export function KeysConsole() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {filteredKeys.map((item) => (
+                    {activeKeys.map((item) => (
                       <tr key={item.id} className="hover:bg-muted/40">
                         <td className="px-4 py-3.5 text-sm font-medium text-foreground">
                           {item.label}
@@ -493,11 +443,7 @@ export function KeysConsole() {
                           {item.masked_key}
                         </td>
                         <td className="px-4 py-3.5">
-                          {item.is_active ? (
-                            <StatusIndicator state="CONNECTED" label="ACTIVE" />
-                          ) : (
-                            <StatusIndicator state="DISCONNECTED" label="REVOKED" />
-                          )}
+                          <StatusIndicator state="CONNECTED" label="ACTIVE" />
                         </td>
                         <td className="px-4 py-3.5 font-mono tabular-nums text-muted-foreground">
                           {item.rate_limit_per_min} req/min
@@ -513,27 +459,17 @@ export function KeysConsole() {
                               : "Never used"}
                         </td>
                         <td className="px-4 py-3.5 text-right">
-                          {item.is_active ? (
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              onClick={() => {
-                                setRevokeError(null);
-                                setRevokeTarget(item);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                              <span>{isId ? "Cabut" : "Revoke"}</span>
-                            </Button>
-                          ) : (
-                            <span className="font-mono text-[11px] text-subtle-foreground">
-                              {item.revoked_at
-                                ? `${isId ? "Dicabut" : "Revoked"} ${formatTimestamp(item.revoked_at)}`
-                                : isId
-                                  ? "Dicabut"
-                                  : "Revoked"}
-                            </span>
-                          )}
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => {
+                              setRevokeError(null);
+                              setRevokeTarget(item);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>{isId ? "Cabut" : "Revoke"}</span>
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -544,7 +480,7 @@ export function KeysConsole() {
 
             {/* Mobile Card List */}
             <div className="space-y-3 md:hidden">
-              {filteredKeys.map((item) => (
+              {activeKeys.map((item) => (
                 <Card key={item.id} className="space-y-3 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -553,11 +489,7 @@ export function KeysConsole() {
                         {item.masked_key}
                       </p>
                     </div>
-                    {item.is_active ? (
-                      <StatusIndicator state="CONNECTED" label="ACTIVE" />
-                    ) : (
-                      <StatusIndicator state="DISCONNECTED" label="REVOKED" />
-                    )}
+                    <StatusIndicator state="CONNECTED" label="ACTIVE" />
                   </div>
                   <dl className="grid grid-cols-2 gap-2 border-t border-border pt-3 text-xs">
                     <div>
@@ -588,33 +520,21 @@ export function KeysConsole() {
                         {item.rate_limit_per_min} req/min
                       </dd>
                     </div>
-                    {item.revoked_at ? (
-                      <div>
-                        <dt className="text-[11px] text-subtle-foreground">
-                          {isId ? "Dicabut pada" : "Revoked at"}
-                        </dt>
-                        <dd className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                          {formatTimestamp(item.revoked_at)}
-                        </dd>
-                      </div>
-                    ) : null}
                   </dl>
-                  {item.is_active ? (
-                    <div className="pt-1">
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => {
-                          setRevokeError(null);
-                          setRevokeTarget(item);
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span>{isId ? "Cabut kunci" : "Revoke key"}</span>
-                      </Button>
-                    </div>
-                  ) : null}
+                  <div className="pt-1">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => {
+                        setRevokeError(null);
+                        setRevokeTarget(item);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>{isId ? "Cabut kunci" : "Revoke key"}</span>
+                    </Button>
+                  </div>
                 </Card>
               ))}
             </div>
