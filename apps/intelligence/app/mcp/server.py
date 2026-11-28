@@ -83,6 +83,10 @@ mcp = CoinTracMCPServer(
         "get_hidden_gem_detail, dan get_hidden_gem_quality_stats untuk riset & outcome "
         "Hidden Gems milik akun pengguna. Panggil get_capabilities dulu "
         "bila perlu tahu tier, persentase budget, dan tool yang sedang fallback. "
+        "Resources: resources/list mengembalikan 3 URI statis; panggil resources/templates/list "
+        "untuk 3 URI template (assets/{symbol}/profile, evidence/{evidence_id}, "
+        "hidden-gems/candidates/{candidate_id}). "
+        "Argumen prompts selalu berupa string (mis. 'BTC,ETH'). "
         "Jangan sebut data sebagai realtime. Angka yang hilang tetap null."
     ),
 )
@@ -1038,13 +1042,26 @@ async def hidden_gem_candidate_resource(candidate_id: str) -> str:
 def _sanitize_prompt_ticker_list(raw: str, field_name: str, *, multiple: bool) -> str:
     import re
 
+    cleaned_raw = raw.strip()
+    if cleaned_raw.startswith("[") and cleaned_raw.endswith("]"):
+        cleaned_raw = cleaned_raw[1:-1]
+
     ticker_re = re.compile(r"^[A-Za-z0-9]{1,20}$")
-    parts = [piece.strip().upper() for piece in raw.split(",") if piece.strip()]
+    parts = [
+        piece.strip().strip("\"'").strip().upper()
+        for piece in cleaned_raw.split(",")
+        if piece.strip().strip("\"'").strip()
+    ]
+    expected = "'BTC,ETH,SOL'" if multiple else "'BTC'"
     if not parts or (not multiple and len(parts) != 1):
-        raise ValueError(f"Invalid prompt argument '{field_name}': expected ticker symbol(s).")
+        raise ValueError(
+            f"Invalid prompt argument '{field_name}': expected comma-separated string "
+            f"(e.g. {expected}; MCP prompt arguments are strings, not JSON arrays)."
+        )
     if not all(ticker_re.fullmatch(part) for part in parts):
         raise ValueError(
-            f"Invalid prompt argument '{field_name}': symbols must be 1-20 alphanumeric chars."
+            f"Invalid prompt argument '{field_name}': symbols must be 1-20 alphanumeric chars "
+            f"in a comma-separated string (e.g. {expected})."
         )
     return ", ".join(parts)
 
@@ -1063,10 +1080,18 @@ def daily_market_briefing() -> str:
 
 @mcp.prompt(name="asset-due-diligence")
 def asset_due_diligence(
-    symbol: Annotated[str, Field(description="Primary ticker symbol string, e.g. 'BTC'.")],
+    symbol: Annotated[
+        str,
+        Field(description="MCP string argument: single ticker symbol, e.g. 'BTC'."),
+    ],
     peers: Annotated[
         str,
-        Field(description="Comma-separated string of peer ticker symbols, e.g. 'ETH, SOL'."),
+        Field(
+            description=(
+                "MCP string argument (NOT JSON array): "
+                "comma-separated peer tickers, e.g. 'ETH,SOL'."
+            )
+        ),
     ],
 ) -> str:
     """Single-asset due diligence workflow."""
@@ -1086,7 +1111,12 @@ def asset_due_diligence(
 def market_risk_review(
     symbols: Annotated[
         str,
-        Field(description="Comma-separated string of ticker symbols, e.g. 'BTC, ETH, SOL'."),
+        Field(
+            description=(
+                "MCP string argument (NOT JSON array): "
+                "comma-separated ticker symbols, e.g. 'BTC,ETH,SOL'."
+            )
+        ),
     ],
 ) -> str:
     """Weekly sector rotation workflow. The prompt name stays stable for existing clients."""

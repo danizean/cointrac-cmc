@@ -53,6 +53,7 @@ export default async function HomePage() {
         "@id": `${origin}/#organization`,
         name: "CoinTrac",
         url: origin,
+        email: "support@cointrac.xyz",
         logo: {
           "@type": "ImageObject",
           url: `${origin}/brand/cointrac-logo.png`,

@@ -456,6 +456,12 @@ def create_app() -> FastAPI:
         "title": "CoinTrac Market Intelligence API",
         "description": OPENAPI_DESCRIPTION,
         "version": settings.engine_version,
+        "terms_of_service": "https://cointrac.xyz/terms",
+        "contact": {
+            "name": "CoinTrac Support",
+            "url": "https://cointrac.xyz/docs",
+            "email": "support@cointrac.xyz",
+        },
         "openapi_tags": OPENAPI_TAGS,
         "docs_url": None,
         "redoc_url": "/redoc",

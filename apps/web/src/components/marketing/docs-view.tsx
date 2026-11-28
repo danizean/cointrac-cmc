@@ -10,36 +10,42 @@ const HIDDEN_GEM_ROUTES = [
   {
     method: "POST",
     path: "/v1/hidden-gems/scans",
+    mcpTool: "REST-only (enqueue)",
     notesEn: "Enqueue async discovery scan (202 Accepted, optional Idempotency-Key)",
     notesId: "Antrekan scan discovery asinkron (202 Accepted, mendukung Idempotency-Key)",
   },
   {
     method: "GET",
     path: "/v1/hidden-gems/scans",
+    mcpTool: "REST-only (run history)",
     notesEn: "List account scan runs, credit cost, capability profile & status",
     notesId: "Daftar eksekusi scan akun, biaya kredit, profil kapabilitas & status",
   },
   {
     method: "GET",
     path: "/v1/hidden-gems/candidates",
+    mcpTool: "list_hidden_gem_candidates",
     notesEn: "Filter scored candidates (track, horizon, min_score, confidence)",
     notesId: "Filter kandidat terskor (track, horizon, min_score, confidence)",
   },
   {
     method: "GET",
     path: "/v1/hidden-gems/candidates/{id}",
+    mcpTool: "get_hidden_gem_detail",
     notesEn: "Inspect 6-component breakdown, deterministic thesis & persisted evidence",
     notesId: "Detail 6 komponen skor, penjelasan deterministik & bukti terpersistensi",
   },
   {
     method: "GET",
     path: "/v1/hidden-gems/quality-stats",
+    mcpTool: "get_hidden_gem_quality_stats",
     notesEn: "Aggregated forward T+1/3/7/14/30d outcome accuracy by track & version",
     notesId: "Agregat akurasi evaluasi forward T+1/3/7/14/30d per track & versi",
   },
   {
     method: "POST",
     path: "/v1/hidden-gems/outcomes/evaluate",
+    mcpTool: "REST-only (checkpoint eval)",
     notesEn: "Evaluate due forward outcome checkpoints against stored snapshots",
     notesId: "Evaluasi checkpoint outcome forward dari snapshot tersimpan",
   },
@@ -184,11 +190,12 @@ export function DocsView() {
 
           <div className="ct-surface-featured overflow-hidden rounded-[16px]">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[780px] border-collapse text-left text-sm">
                 <thead className="border-b border-border bg-card-elevated/60 font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Method</th>
                     <th className="px-4 py-3 font-semibold">Endpoint path</th>
+                    <th className="px-4 py-3 font-semibold">MCP tool</th>
                     <th className="px-4 py-3 font-semibold">Purpose</th>
                   </tr>
                 </thead>
@@ -211,6 +218,9 @@ export function DocsView() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-foreground">
                         {route.path}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs font-semibold text-link">
+                        {route.mcpTool}
                       </td>
                       <td className="px-4 py-3.5 text-xs text-muted-foreground">
                         {locale === "id" ? route.notesId : route.notesEn}

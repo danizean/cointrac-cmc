@@ -162,15 +162,28 @@ export function IntegrationsView() {
             >
               Resources &amp; URI templates
             </h2>
+            <p className="mt-1.5 font-mono text-[11px] text-subtle-foreground">
+              {locale === "id"
+                ? "3 statis via resources/list · 3 template URI via resources/templates/list"
+                : "3 static via resources/list · 3 URI templates via resources/templates/list"}
+            </p>
             <ul className="mt-4 divide-y divide-border">
-              {RESOURCE_CATALOG.map((resource) => (
-                <li key={resource.uri} className="py-3 first:pt-0 last:pb-0">
-                  <p className="font-mono text-xs font-semibold text-link">{resource.uri}</p>
-                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                    {resource.description}
-                  </p>
-                </li>
-              ))}
+              {RESOURCE_CATALOG.map((resource) => {
+                const isTemplate = resource.uri.includes("{");
+                return (
+                  <li key={resource.uri} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-mono text-xs font-semibold text-link">{resource.uri}</p>
+                      <span className="rounded-full border border-border bg-background/70 px-2 py-0.5 font-mono text-[10px] text-subtle-foreground">
+                        {isTemplate ? "resources/templates/list" : "resources/list"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      {resource.description}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           </div>
 
@@ -181,10 +194,27 @@ export function IntegrationsView() {
             >
               MCP Prompts
             </h2>
+            <p className="mt-1.5 font-mono text-[11px] text-subtle-foreground">
+              {locale === "id"
+                ? "Semua argumen prompt dikirim sebagai string MCP (mis. symbols: 'BTC,ETH,SOL')."
+                : "All prompt arguments are MCP strings (e.g. symbols: 'BTC,ETH,SOL', not arrays)."}
+            </p>
             <ul className="mt-4 divide-y divide-border">
               {PROMPT_CATALOG.map((prompt) => (
                 <li key={prompt.name} className="py-3 first:pt-0 last:pb-0">
                   <p className="font-mono text-xs font-semibold text-link">{prompt.name}</p>
+                  {prompt.args.length > 0 ? (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {prompt.args.map((arg) => (
+                        <span
+                          key={arg}
+                          className="rounded-full border border-border bg-background/70 px-2 py-0.5 font-mono text-[10px] text-foreground"
+                        >
+                          {arg}: string (comma-separated)
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                     {prompt.description}
                   </p>

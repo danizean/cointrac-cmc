@@ -91,6 +91,12 @@ function AuthChrome({ children }: { children: ReactNode }) {
           <Link href="/terms" className="transition-colors hover:text-foreground">
             {t.footer.terms}
           </Link>
+          <a
+            href="mailto:support@cointrac.xyz"
+            className="font-mono text-[11px] text-link transition-colors hover:underline"
+          >
+            {t.footer.contact}
+          </a>
         </div>
       </footer>
     </div>

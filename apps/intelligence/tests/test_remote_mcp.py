@@ -38,7 +38,9 @@ from tests.test_mcp import research_deps
 from app.api.deps import (
     ApiKeyRecord,
     MemoryKeyDirectory,
+    MemoryRateStore,
     install_keys,
+    install_rate_store,
     key_hash,
 )
 from app.api.jwt_auth import install_jwt_auth_deps, reset_jwt_auth_deps
@@ -595,6 +597,35 @@ async def test_mcp_status_endpoint_reports_honest_deployment_state(
                 "prompts": 3,
             }
 
+            # OpenAPI exposes vendor contact metadata (K-11)
+            openapi_res = await client.get("/openapi.json")
+            assert openapi_res.status_code == 200
+            assert openapi_res.json()["info"]["contact"]["email"] == "support@cointrac.xyz"
+
+            # Valid CoinTrac API keys (x-cointrac-key & Bearer) can also inspect /v1/mcp/status
+            api_secret = "ct_live_status_check_key_1234567890abcdefghijklmnop"
+            install_keys(
+                MemoryKeyDirectory(
+                    [
+                        ApiKeyRecord(
+                            key_id="k-status",
+                            key_hash=key_hash(api_secret),
+                            rate_limit_per_min=60,
+                            is_active=True,
+                            user_id=uid,
+                            account_status="active",
+                        )
+                    ]
+                )
+            )
+            install_rate_store(MemoryRateStore())
+            res_xkey = await client.get("/v1/mcp/status", headers={"x-cointrac-key": api_secret})
+            assert res_xkey.status_code == 200
+            res_bkey = await client.get(
+                "/v1/mcp/status", headers={"Authorization": f"Bearer {api_secret}"}
+            )
+            assert res_bkey.status_code == 200
+
             # When a real https:// remote URL is configured, status reflects deployed accurately
             monkeypatch.setenv("REMOTE_MCP_PUBLIC_URL", "https://mcp.cointrac.dev/mcp")
             get_settings.cache_clear()
@@ -607,5 +638,7 @@ async def test_mcp_status_endpoint_reports_honest_deployment_state(
             assert dep["remote_url"] == "https://mcp.cointrac.dev/mcp"
             assert dep["deployment_status"] == "deployed"
     finally:
+        install_keys(None)
+        install_rate_store(None)
         reset_jwt_auth_deps()
         get_settings.cache_clear()

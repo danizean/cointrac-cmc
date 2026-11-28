@@ -296,11 +296,19 @@ async def test_mcp_prompts_include_no_investment_advice_guardrails() -> None:
     briefing = await mcp.get_prompt("daily-market-briefing", {})
     diligence = await mcp.get_prompt("asset-due-diligence", {"symbol": "SOL", "peers": "AVAX"})
     risk = await mcp.get_prompt("market-risk-review", {"symbols": "BTC"})
+    risk_json_str = await mcp.get_prompt(
+        "market-risk-review", {"symbols": '["BTC", "ETH", "SOL"]'}
+    )
+    assert "BTC, ETH, SOL" in str(risk_json_str.messages[0].content)
     for prompt_result in (briefing, diligence, risk):
         text = " ".join(str(msg.content) for msg in prompt_result.messages).lower()
         assert "evidence_id" in text
         assert "do not" in text
         assert any(term in text for term in ("advice", "recommendations", "price targets"))
+
+    prompts = await mcp.list_prompts()
+    risk_meta = next(p for p in prompts if p.name == "market-risk-review")
+    assert "comma-separated" in (risk_meta.arguments[0].description or "").lower()
 
 
 async def test_mcp_stage_4_3_additive_fields_and_backward_compatibility() -> None:
