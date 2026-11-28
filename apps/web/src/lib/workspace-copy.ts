@@ -31,7 +31,8 @@ const COPY = {
     moversBody: "Find trending coins with strong liquidity while filtering extreme 24h spikes.",
     anomaliesBody: "Spot unusual volume spikes, price moves, and BTC divergences.",
     sectorsBody: "Compare performance across DeFi, AI, L1, L2, Gaming, RWA, and Memes.",
-    derivativesBody: "Check open interest, funding rates, and market stress signals.",
+    derivativesBody:
+      "Check sampled perp-pair open interest, funding rates, and spot-stress proxies (venue aggregates are market-wide context).",
     historicalBody: "Review daily closing prices, volatility, beta, and max drawdown.",
     mcpNote: "These pages call the 10 REST tools. The MCP server also exposes get_capabilities. This page does not prove the public MCP host is reachable.",
   },
@@ -65,7 +66,8 @@ const COPY = {
     moversBody: "Temukan koin yang sedang naik dengan likuiditas sehat tanpa mengejar lonjakan ekstrem.",
     anomaliesBody: "Deteksi lonjakan volume, pergerakan harga tidak wajar, dan divergensi terhadap BTC.",
     sectorsBody: "Bandingkan performa sektor DeFi, AI, L1, L2, Gaming, RWA, dan Memes.",
-    derivativesBody: "Lihat open interest, funding rate, dan sinyal tekanan pasar.",
+    derivativesBody:
+      "Lihat open interest pair perp tersampel, funding rate, dan proksi tekanan spot (agregat bursa bersifat konteks pasar menyeluruh).",
     historicalBody: "Lihat harga penutupan harian, volatilitas, beta, dan penurunan maksimum.",
     mcpNote: "Halaman ini memanggil 10 tool REST. Server MCP juga menyediakan get_capabilities. Halaman ini tidak membuktikan host MCP publik dapat dihubungi.",
   },

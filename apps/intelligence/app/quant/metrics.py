@@ -7,6 +7,7 @@ import pandas as pd
 
 MOMENTUM_WEIGHTS = {"24h": 0.15, "7d": 0.35, "30d": 0.30, "60d": 0.20}
 MIN_OBSERVATIONS = 5
+METRICS_METHODOLOGY_VERSION = "cointrac_metrics_v1.1"
 
 
 def utc_daily_close(observations: Sequence[tuple[datetime, float]]) -> pd.Series:
@@ -119,7 +120,20 @@ def relative_strength(asset_change: float | None, benchmark_change: float | None
 
 
 def acceleration_7d_vs_30d(change_7d: float | None, change_30d: float | None) -> float | None:
+    """Cumulative 7d minus 30d return spread (pp); kept for backward compatibility."""
     return relative_strength(change_7d, change_30d)
+
+
+def daily_rate_spread_7d_vs_30d(
+    change_7d: float | None,
+    change_30d: float | None,
+) -> float | None:
+    """Normalized average daily return spread: (7d / 7) - (30d / 30) percentage points/day."""
+    if change_7d is None or change_30d is None:
+        return None
+    if not math.isfinite(change_7d) or not math.isfinite(change_30d):
+        return None
+    return (change_7d / 7.0) - (change_30d / 30.0)
 
 
 def count_available_timeframes(changes: Mapping[str, float | None]) -> int:

@@ -118,10 +118,10 @@ export function DocsView() {
               <table className="w-full min-w-[780px] border-collapse text-left text-sm">
                 <thead className="border-b border-border bg-card-elevated/60 font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Method</th>
-                    <th className="px-4 py-3 font-semibold">Endpoint path</th>
-                    <th className="px-4 py-3 font-semibold">MCP tool</th>
-                    <th className="px-4 py-3 font-semibold">Description</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Metode" : "Method"}</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Path endpoint" : "Endpoint path"}</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Tool MCP" : "MCP tool"}</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Deskripsi" : "Description"}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -179,7 +179,7 @@ export function DocsView() {
               id="docs-hidden-gems-heading"
               className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
             >
-              Hidden Gem Discovery Endpoints
+              {locale === "id" ? "Endpoint Hidden Gem Discovery" : "Hidden Gem Discovery Endpoints"}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
               {locale === "id"
@@ -193,10 +193,10 @@ export function DocsView() {
               <table className="w-full min-w-[780px] border-collapse text-left text-sm">
                 <thead className="border-b border-border bg-card-elevated/60 font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Method</th>
-                    <th className="px-4 py-3 font-semibold">Endpoint path</th>
-                    <th className="px-4 py-3 font-semibold">MCP tool</th>
-                    <th className="px-4 py-3 font-semibold">Purpose</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Metode" : "Method"}</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Path endpoint" : "Endpoint path"}</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Tool MCP" : "MCP tool"}</th>
+                    <th className="px-4 py-3 font-semibold">{locale === "id" ? "Fungsi" : "Purpose"}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -274,6 +274,66 @@ export function DocsView() {
             </section>
           ))}
         </div>
+
+        {/* Status Meanings Section */}
+        <section
+          id="status-meanings"
+          aria-labelledby="docs-status-heading"
+          className="mt-14 scroll-mt-24 space-y-4"
+        >
+          <div>
+            <h2
+              id="docs-status-heading"
+              className="text-2xl font-semibold tracking-[-0.02em] text-foreground"
+            >
+              {locale === "id" ? "Arti Status Respons API & MCP" : "Response Status Meanings"}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+              {locale === "id"
+                ? "CoinTrac tidak pernah menyembunyikan data yang kosong sebagai angka nol. Periksa status respons bersama evidence.data_mode dan evidence.cache_hit."
+                : "CoinTrac never disguises missing upstream values as zero. Inspect response status alongside evidence.data_mode and evidence.cache_hit."}
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                status: "OK",
+                desc:
+                  locale === "id"
+                    ? "Seluruh data yang dibutuhkan tersedia dan seluruh rumus Python selesai penuh."
+                    : "All required upstream inputs were available and all deterministic calculations completed.",
+              },
+              {
+                status: "PARTIAL",
+                desc:
+                  locale === "id"
+                    ? "Sebagian metrik tersedia, namun sebagian kolom tetap null dan dijelaskan pada limitations."
+                    : "Primary output is available while restricted or missing sub-fields remain null and listed in limitations.",
+              },
+              {
+                status: "TIER_RESTRICTED",
+                desc:
+                  locale === "id"
+                    ? "Paket CoinMarketCap saat ini tidak mengizinkan endpoint tersebut (mis. OHLCV historis tanpa BYOK)."
+                    : "The active CoinMarketCap key tier cannot query this endpoint (for example 365d OHLCV without BYOK).",
+              },
+              {
+                status: "INSUFFICIENT_DATA",
+                desc:
+                  locale === "id"
+                    ? "Jumlah sampel observasi belum cukup memenuhi syarat minimum perhitungan statistik."
+                    : "Available sample count fell below the minimum statistical threshold; nothing was fabricated.",
+              },
+            ].map((item) => (
+              <div key={item.status} className="ct-surface-card rounded-[14px] p-4">
+                <span className="inline-flex rounded-full border border-border bg-card-elevated px-2.5 py-0.5 font-mono text-[11px] font-semibold text-link">
+                  {item.status}
+                </span>
+                <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </main>
   );

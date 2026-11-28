@@ -1,6 +1,18 @@
 from dataclasses import dataclass, field
 
 MIN_BREADTH_SAMPLE = 10
+REGIME_RULES_VERSION = "regime_rules_v1"
+REGIME_THRESHOLDS: dict[str, float | int] = {
+    "structural_stress_mcap_24h_max_pct": -2.0,
+    "structural_stress_breadth_max_pct": 30.0,
+    "sentiment_stress_fear_greed_max": 30,
+    "bullish_structure_mcap_min_pct": 0.0,
+    "bullish_structure_breadth_min_pct": 60.0,
+    "risk_on_fear_greed_min": 55,
+    "btc_led_mcap_min_pct": 0.0,
+    "btc_led_dom_min_pp": 0.0,
+    "min_breadth_sample": MIN_BREADTH_SAMPLE,
+}
 
 
 @dataclass(frozen=True)

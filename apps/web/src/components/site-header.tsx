@@ -10,6 +10,7 @@ import { useAppPreferences } from "./app-preferences";
 const NAV = [
   { href: "/product", key: "capabilities" },
   { href: "/integrations", key: "integrations" },
+  { href: "/pricing", key: "pricing" },
   { href: "/docs", key: "docs" },
   { href: "/playground", key: "playground" },
 ] as const;
@@ -44,27 +45,52 @@ export function CoinTracMark({ className = "h-6 w-6" }: { className?: string }) 
   );
 }
 
+const HEADER_AUTH_HINT_KEY = "ct_header_auth_hint_v1";
+
 export function SiteHeader({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const pathname = usePathname();
   const { locale, t, toggleTheme, setLocale } = useAppPreferences();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [account, setAccount] = useState<AccountSessionStatus | null>(null);
+  const [authHint, setAuthHint] = useState<"authenticated" | "anonymous" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      try {
+        const saved = window.sessionStorage.getItem(HEADER_AUTH_HINT_KEY);
+        if (saved === "authenticated" || saved === "anonymous") {
+          setAuthHint(saved);
+        }
+      } catch {
+        // Ignore storage errors.
+      }
+    });
     void probeAccountSession().then((next) => {
-      if (!cancelled) setAccount(next);
+      if (cancelled) return;
+      setAccount(next);
+      try {
+        window.sessionStorage.setItem(
+          HEADER_AUTH_HINT_KEY,
+          next.status === "authenticated" ? "authenticated" : "anonymous",
+        );
+      } catch {
+        // Ignore storage errors.
+      }
     });
     return () => {
       cancelled = true;
     };
   }, [pathname]);
 
-  const isSignedIn = account?.status === "authenticated";
+  const isSignedIn =
+    account !== null ? account.status === "authenticated" : authHint === "authenticated";
 
   const labels = {
     capabilities: t.nav.capabilities,
     integrations: t.nav.integrations,
+    pricing: t.nav.pricing,
     docs: t.nav.docs,
     playground: t.nav.playground,
   };

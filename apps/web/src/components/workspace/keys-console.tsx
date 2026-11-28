@@ -245,10 +245,17 @@ export function KeysConsole() {
               <span>{isId ? "Muat ulang" : "Refresh"}</span>
             </Button>
             <Button
-              variant="primary"
+              variant={limitReached ? "secondary" : "primary"}
               size="md"
               disabled={loading || limitReached}
-              className="ct-btn-glow"
+              className={loading || limitReached ? "" : "ct-btn-glow"}
+              title={
+                limitReached
+                  ? isId
+                    ? `Batas kunci aktif tercapai (${activeCount}/${maxKeys}). Cabut kunci yang tidak terpakai terlebih dahulu.`
+                    : `Active key limit reached (${activeCount}/${maxKeys}). Revoke an unused key first.`
+                  : undefined
+              }
               onClick={() => {
                 setCreateError(null);
                 setLabel("");

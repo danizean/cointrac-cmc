@@ -88,7 +88,7 @@ export interface MarketingCopy {
 const en: MarketingCopy = {
   home: {
     eyebrow: "Crypto Market API & MCP",
-    title: "Structured crypto market data for your apps and AI tools.",
+    title: "Give your AI assistant live crypto market data it can trust.",
     lede: "CoinTrac turns CoinMarketCap feeds into 10 market REST endpoints, Hidden Gem Discovery, and 14 MCP tools with typed schemas. Every response includes its data source, freshness, and any missing fields—nothing is guessed.",
     primaryCta: "Create free account",
     secondaryCta: "Read API docs",
@@ -111,7 +111,7 @@ const en: MarketingCopy = {
       },
     ],
     flowTitle: "How a request works",
-    flowLede: "One Python backend serves the web app, REST API, and MCP server. It does not use an LLM on the server and does not stream live ticks.",
+    flowLede: "One Python engine powers the web app, REST API, and MCP server using fixed formulas—no LLM invents market calculations; CoinTrac AI Analyst is an optional separate chat layer.",
     flow: [
       { title: "CoinMarketCap data", body: "Fetches market quotes and metadata, tracking plan limits and missing fields." },
       { title: "Python calculations", body: "Runs fixed quantitative formulas (relative strength, regime rules, and 365-day volatility when OHLCV is enabled)." },
@@ -353,7 +353,7 @@ const en: MarketingCopy = {
 const id: MarketingCopy = {
   home: {
     eyebrow: "API & MCP Data Pasar Kripto",
-    title: "Data pasar kripto terstruktur untuk aplikasi dan AI Anda.",
+    title: "Beri asisten AI Anda data pasar kripto langsung yang bisa dipercaya.",
     lede: "CoinTrac mengolah data CoinMarketCap menjadi 10 endpoint REST pasar, Hidden Gem Discovery, dan 14 tool MCP berskema ketik. Setiap respons mencatat sumber data, kesegarannya, dan bagian yang tidak tersedia—tanpa menebak-nebak.",
     primaryCta: "Buat akun gratis",
     secondaryCta: "Baca dokumentasi",
@@ -376,7 +376,7 @@ const id: MarketingCopy = {
       },
     ],
     flowTitle: "Cara kerja setiap permintaan",
-    flowLede: "Satu backend Python melayani web, REST API, dan server MCP. Tidak ada AI/LLM di server yang mengarang hasil, dan bukan feed harga real-time per detik.",
+    flowLede: "Satu mesin Python melayani aplikasi web, REST API, dan server MCP dengan rumus kuantitatif tetap—tanpa LLM pada kalkulasi pasar; CoinTrac AI Analyst adalah lapisan chat terpisah.",
     flow: [
       { title: "Data CoinMarketCap", body: "Mengambil data pasar dan mencatat batas paket maupun kolom yang kosong." },
       { title: "Hitungan Python", body: "Menjalankan rumus tetap (kekuatan relatif, aturan regime, dan volatilitas 365 hari saat OHLCV tersedia)." },

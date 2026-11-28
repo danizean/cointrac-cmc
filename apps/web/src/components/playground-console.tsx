@@ -183,6 +183,28 @@ export function PlaygroundConsole({
 
   useEffect(() => {
     let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const requestedTool = new URLSearchParams(window.location.search).get("tool");
+      if (requestedTool && TOOL_CATALOG.some((item) => item.name === requestedTool)) {
+        setSelectedTool(requestedTool as ToolName);
+        setActivePresetId(null);
+        setOutputSource("sample");
+      }
+
+      try {
+        const savedHistory = window.sessionStorage.getItem("ct_playground_history_v1");
+        if (savedHistory) {
+          const parsed = JSON.parse(savedHistory) as RunOutcome[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setRunHistory(parsed.slice(0, MAX_HISTORY_ITEMS));
+          }
+        }
+      } catch {
+        // Ignore storage errors.
+      }
+    });
+
     void Promise.all([probeAccountSession(), probeSession()]).then(
       ([acct, backend]) => {
         if (cancelled) return;
@@ -209,12 +231,18 @@ export function PlaygroundConsole({
     setOutcome(entry);
     setOutputSource("live");
     if (entry.envelopes.length > 0 && !entry.error) {
-      setRunHistory((prev) =>
-        [entry, ...prev.filter((item) => item.id !== entry.id)].slice(
+      setRunHistory((prev) => {
+        const updated = [entry, ...prev.filter((item) => item.id !== entry.id)].slice(
           0,
           MAX_HISTORY_ITEMS,
-        ),
-      );
+        );
+        try {
+          window.sessionStorage.setItem("ct_playground_history_v1", JSON.stringify(updated));
+        } catch {
+          // Ignore storage quota errors.
+        }
+        return updated;
+      });
     }
   }
 
@@ -326,6 +354,9 @@ export function PlaygroundConsole({
     if (!(await ensureSession())) return;
     setRunning(true);
     setOutputSource("live");
+    if (outputTab === "request") {
+      setOutputTab("report");
+    }
     const res = await runIntelligenceTool(tool, params, {
       byok: byokKey || undefined,
     });
@@ -408,6 +439,9 @@ export function PlaygroundConsole({
     if (!(await ensureSession())) return;
     setRunning(true);
     setOutputSource("live");
+    if (outputTab === "request") {
+      setOutputTab("report");
+    }
     const [first, second] = await Promise.all([
       runIntelligenceTool(preset.primaryTool, params, {
         byok: byokKey || undefined,
@@ -1175,12 +1209,16 @@ export function PlaygroundConsole({
               {running ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  {t.playground.executing} {selectedTool}...
+                  <span>
+                    {t.playground.executing} {selectedTool}...
+                  </span>
                 </>
               ) : (
                 <>
                   <Play className="h-4 w-4" aria-hidden="true" />
-                  {t.playground.runTool} {selectedTool}
+                  <span>
+                    {t.playground.runTool} {selectedTool}
+                  </span>
                 </>
               )}
             </button>

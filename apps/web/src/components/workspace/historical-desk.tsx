@@ -123,6 +123,11 @@ export function HistoricalDesk() {
       />
 
       <div className="ct-surface-featured space-y-4 rounded-[16px] p-4 sm:p-5">
+        <div className="rounded-xl border border-warning/35 bg-warning-soft/35 px-3.5 py-2.5 text-xs text-muted-foreground">
+          {locale === "id"
+            ? "Catatan tier sumber data: OHLCV historis penuh membutuhkan kunci CoinMarketCap dengan akses OHLCV historis (mis. via BYOK di API Keys) atau fallback snapshot terverifikasi. Tanpa akses tersebut, status kembali TIER_RESTRICTED dan metrik tetap kosong (Unavailable)."
+            : "Source tier notice: Full daily OHLCV history requires a CoinMarketCap key with historical OHLCV access (e.g. BYOK in API Keys) or a verified local snapshot. Otherwise this tool returns TIER_RESTRICTED and leaves historical metrics Unavailable rather than fabricating 0."}
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-subtle-foreground">
             {locale === "id" ? "Pilih Koin" : "Select Coin"}

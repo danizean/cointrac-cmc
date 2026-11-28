@@ -12,41 +12,122 @@ function compactVersion(raw: string | null): string | null {
   return match ? (match[0].startsWith("v") ? match[0] : `v${match[0]}`) : raw;
 }
 
+const STATUS_CACHE_KEY = "ct_api_status_v1";
+const STATUS_CACHE_TTL_MS = 60_000;
+
+interface CachedHealthSnapshot {
+  state: Exclude<EngineConnectionState, "connecting">;
+  engineVersion: string | null;
+  latencyMs: number | null;
+  checkedAt: number;
+}
+
+function readCachedHealth(): CachedHealthSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(STATUS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedHealthSnapshot>;
+    if (
+      (parsed.state === "online" || parsed.state === "standby") &&
+      typeof parsed.checkedAt === "number" &&
+      Date.now() - parsed.checkedAt < STATUS_CACHE_TTL_MS
+    ) {
+      return {
+        state: parsed.state,
+        engineVersion: typeof parsed.engineVersion === "string" ? parsed.engineVersion : null,
+        latencyMs: typeof parsed.latencyMs === "number" ? parsed.latencyMs : null,
+        checkedAt: parsed.checkedAt,
+      };
+    }
+  } catch {
+    // Ignore storage quota or private browsing errors.
+  }
+  return null;
+}
+
+function writeCachedHealth(snapshot: CachedHealthSnapshot) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 export function EngineStatusPill({ compact = false }: { compact?: boolean }) {
   const [state, setState] = useState<EngineConnectionState>("connecting");
   const [engineVersion, setEngineVersion] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
-  const checkHealth = useCallback(async () => {
-    setState("connecting");
+  const checkHealth = useCallback(async (background = false) => {
+    if (!background) {
+      setState("connecting");
+    }
     const res = await fetchHealth();
     if (res.ok && res.data?.status === "ok") {
+      const ver = res.data.engine_version ?? null;
       setState("online");
-      setEngineVersion(res.data.engine_version ?? null);
+      setEngineVersion(ver);
       setLatencyMs(res.latencyMs);
+      writeCachedHealth({
+        state: "online",
+        engineVersion: ver,
+        latencyMs: res.latencyMs,
+        checkedAt: Date.now(),
+      });
       return;
     }
     setState("standby");
     setLatencyMs(null);
+    writeCachedHealth({
+      state: "standby",
+      engineVersion: null,
+      latencyMs: null,
+      checkedAt: Date.now(),
+    });
   }, []);
 
   useEffect(() => {
+    const cached = readCachedHealth();
+    if (cached) {
+      // Hydrate immediately from recent tab verification to avoid "Checking API..." lag.
+      queueMicrotask(() => {
+        setState(cached.state);
+        setEngineVersion(cached.engineVersion);
+        setLatencyMs(cached.latencyMs);
+      });
+    }
+
     let active = true;
     void (async () => {
       const res = await fetchHealth();
       if (!active) return;
       if (res.ok && res.data?.status === "ok") {
+        const ver = res.data.engine_version ?? null;
         setState("online");
-        setEngineVersion(res.data.engine_version ?? null);
+        setEngineVersion(ver);
         setLatencyMs(res.latencyMs);
+        writeCachedHealth({
+          state: "online",
+          engineVersion: ver,
+          latencyMs: res.latencyMs,
+          checkedAt: Date.now(),
+        });
       } else {
         setState("standby");
+        writeCachedHealth({
+          state: "standby",
+          engineVersion: null,
+          latencyMs: null,
+          checkedAt: Date.now(),
+        });
       }
     })();
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        void checkHealth();
+        void checkHealth(true);
       }
     };
     document.addEventListener("visibilitychange", onVisibility);

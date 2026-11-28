@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,14 +25,37 @@ class Freshness(StrEnum):
     STALE = "STALE"
 
 
+FieldAvailability = Literal[
+    "AVAILABLE",
+    "UNAVAILABLE_TIER",
+    "UNAVAILABLE_SOURCE",
+    "INSUFFICIENT_SAMPLE",
+    "NOT_APPLICABLE",
+    "INVALID_SYMBOL",
+]
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FieldProvenance(StrictModel):
+    availability: FieldAvailability
+    reason_code: str | None = None
+    source: str | None = None
+    endpoint: str | None = None
+    source_timestamp: datetime | None = None
+    retrieved_at: datetime | None = None
+    data_mode: DataMode | None = None
+    freshness: Freshness | None = None
+
+
 class MethodologyMeta(StrictModel):
+    version: str | None = None
     metrics: list[str]
     observation_window: str
     annualization_basis: str = Field(pattern=r"^365d$")
+    parameters: dict[str, object] | None = None
 
 
 class EvidenceMeta(StrictModel):
@@ -59,5 +83,7 @@ class EvidenceEnvelope[T](StrictModel):
     data: T
     methodology: MethodologyMeta
     evidence: EvidenceMeta
+    field_provenance: dict[str, FieldProvenance] | None = None
     limitations: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     agent_actions: list[AgentAction] = Field(default_factory=list)

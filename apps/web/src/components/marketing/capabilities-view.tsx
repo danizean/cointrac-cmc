@@ -189,7 +189,7 @@ export function CapabilitiesView() {
 
                         <div className="lg:justify-self-end">
                           <Link
-                            href="/playground"
+                            href={`/playground?tool=${encodeURIComponent(tool.name)}`}
                             className="inline-flex min-h-9 items-center gap-1.5 rounded-[8px] border border-border bg-background/60 px-3 font-mono text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
                           >
                             <span>{locale === "id" ? "Uji" : "Test"}</span>

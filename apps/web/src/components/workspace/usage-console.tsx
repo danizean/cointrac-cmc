@@ -343,7 +343,7 @@ export function UsageConsole() {
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
               <Zap className="h-4 w-4 text-positive" aria-hidden="true" />
-              <span>{isId ? "Efisiensi Cache & Latensi" : "Cache Hit & Latency"}</span>
+              <span>{isId ? "Efisiensi Cache & Latensi Server" : "Cache Hit & Server Latency"}</span>
             </span>
           </div>
 
@@ -378,7 +378,7 @@ export function UsageConsole() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
               <Gauge className="h-4 w-4 text-link" aria-hidden="true" />
-              <span>{isId ? "Status Anggaran & Scan" : "Budget & Deep Scan"}</span>
+              <span>{isId ? "Status Kapabilitas Sistem" : "System Capability Snapshot"}</span>
             </span>
             {loading ? (
               <StatusIndicator state="LOADING" />
@@ -401,7 +401,10 @@ export function UsageConsole() {
                 )}
                 <QuotaProfileBadge profile={serverMode?.effective_profile} />
               </div>
-              <p className="line-clamp-2 text-xs text-muted-foreground">{budget.description}</p>
+              <p className="line-clamp-2 text-xs text-muted-foreground">
+                {isId ? "Bukan data pasar live — " : "Not live market data — "}
+                {budget.description}
+              </p>
             </div>
           )}
         </Card>
@@ -599,7 +602,7 @@ export function UsageConsole() {
                       <th className="px-4 py-2.5">Tool / Scan</th>
                       <th className="px-4 py-2.5">Surface</th>
                       <th className="px-4 py-2.5">Cache</th>
-                      <th className="px-4 py-2.5 text-right">Duration</th>
+                      <th className="px-4 py-2.5 text-right">{isId ? "Durasi Server" : "Server Duration"}</th>
                       <th className="px-4 py-2.5 text-right">CMC credits</th>
                       <th className="px-4 py-2.5">Evidence</th>
                     </tr>

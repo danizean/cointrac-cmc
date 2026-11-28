@@ -732,15 +732,18 @@ class SupabaseHiddenGemStore:
             return {}
 
         def write() -> dict[str, str]:
-            resp = (
-                self._db()
-                .table("hg_assets")
-                .upsert(rows, on_conflict="canonical_provider,canonical_provider_id")
-                .execute()
-            )
-            return {
-                str(r["canonical_provider_id"]): str(r["id"]) for r in (resp.data or [])
-            }
+            mapping: dict[str, str] = {}
+            for start in range(0, len(rows), 200):
+                batch = rows[start : start + 200]
+                resp = (
+                    self._db()
+                    .table("hg_assets")
+                    .upsert(batch, on_conflict="canonical_provider,canonical_provider_id")
+                    .execute()
+                )
+                for r in resp.data or []:
+                    mapping[str(r["canonical_provider_id"])] = str(r["id"])
+            return mapping
 
         return await asyncio.to_thread(write)
 
@@ -749,8 +752,13 @@ class SupabaseHiddenGemStore:
             return {}
 
         def write() -> dict[str, str]:
-            resp = self._db().table("hg_market_snapshots").insert(rows).execute()
-            return {str(r["asset_id"]): str(r["id"]) for r in (resp.data or [])}
+            mapping: dict[str, str] = {}
+            for start in range(0, len(rows), 200):
+                batch = rows[start : start + 200]
+                resp = self._db().table("hg_market_snapshots").insert(batch).execute()
+                for r in resp.data or []:
+                    mapping[str(r["asset_id"])] = str(r["id"])
+            return mapping
 
         return await asyncio.to_thread(write)
 
@@ -761,21 +769,26 @@ class SupabaseHiddenGemStore:
             return {}
 
         def read() -> dict[str, list[tuple[datetime, float]]]:
-            resp = (
-                self._db()
-                .table("hg_market_snapshots")
-                .select("asset_id,source_timestamp,price")
-                .in_("asset_id", asset_ids)
-                .gte("source_timestamp", start_ts.isoformat())
-                .lte("source_timestamp", end_ts.isoformat())
-                .execute()
-            )
             out: dict[str, list[tuple[datetime, float]]] = {}
-            for row in resp.data or []:
-                ts = parse_timestamp(row.get("source_timestamp"))
-                price = as_float(row.get("price"))
-                if ts is not None and price is not None:
-                    out.setdefault(str(row["asset_id"]), []).append((ts, price))
+            start_iso = start_ts.isoformat()
+            end_iso = end_ts.isoformat()
+            # Chunk .in_() UUID filters so PostgREST query strings never exceed proxy/URL limits.
+            for start in range(0, len(asset_ids), 150):
+                batch = asset_ids[start : start + 150]
+                resp = (
+                    self._db()
+                    .table("hg_market_snapshots")
+                    .select("asset_id,source_timestamp,price")
+                    .in_("asset_id", batch)
+                    .gte("source_timestamp", start_iso)
+                    .lte("source_timestamp", end_iso)
+                    .execute()
+                )
+                for row in resp.data or []:
+                    ts = parse_timestamp(row.get("source_timestamp"))
+                    price = as_float(row.get("price"))
+                    if ts is not None and price is not None:
+                        out.setdefault(str(row["asset_id"]), []).append((ts, price))
             return out
 
         return await asyncio.to_thread(read)
@@ -939,7 +952,13 @@ class SupabaseHiddenGemStore:
             out = []
             for row in resp.data or []:
                 item = dict(row)
-                asset = item.pop("hg_assets", None) or {}
+                raw_asset = item.pop("hg_assets", None)
+                if isinstance(raw_asset, dict):
+                    asset = raw_asset
+                elif isinstance(raw_asset, list) and raw_asset and isinstance(raw_asset[0], dict):
+                    asset = raw_asset[0]
+                else:
+                    asset = {}
                 item["symbol"] = asset.get("symbol")
                 out.append(item)
             return out
@@ -1364,20 +1383,22 @@ class SupabaseHiddenGemStore:
             return {}
 
         def read() -> dict[str, dict[str, object]]:
-            resp = (
-                self._db()
-                .table("hg_market_snapshots")
-                .select("asset_id,price,observed_at")
-                .in_("asset_id", asset_ids)
-                .order("observed_at", desc=True)
-                .limit(max(len(asset_ids) * 2, 50))
-                .execute()
-            )
             latest: dict[str, dict[str, object]] = {}
-            for row in resp.data or []:
-                aid = str(row["asset_id"])
-                if aid not in latest:
-                    latest[aid] = dict(row)
+            for start in range(0, len(asset_ids), 150):
+                batch = asset_ids[start : start + 150]
+                resp = (
+                    self._db()
+                    .table("hg_market_snapshots")
+                    .select("asset_id,price,observed_at")
+                    .in_("asset_id", batch)
+                    .order("observed_at", desc=True)
+                    .limit(max(len(batch) * 2, 50))
+                    .execute()
+                )
+                for row in resp.data or []:
+                    aid = str(row["asset_id"])
+                    if aid not in latest:
+                        latest[aid] = dict(row)
             return latest
 
         return await asyncio.to_thread(read)

@@ -55,12 +55,34 @@ export type MultiHorizonRisk =
 export type AnomalyDirection =
   | "HIGH_VOLUME_TO_MCAP"
   | "LOW_VOLUME_ILLIQUIDITY"
+  | "NOT_DIRECTIONAL"
   | "INSUFFICIENT_DATA";
 
+export type FieldAvailability =
+  | "AVAILABLE"
+  | "UNAVAILABLE_TIER"
+  | "UNAVAILABLE_SOURCE"
+  | "INSUFFICIENT_SAMPLE"
+  | "NOT_APPLICABLE"
+  | "INVALID_SYMBOL";
+
+export interface FieldProvenance {
+  availability: FieldAvailability;
+  reason_code?: string | null;
+  source?: string | null;
+  endpoint?: string | null;
+  source_timestamp?: string | null;
+  retrieved_at?: string | null;
+  data_mode?: DataMode | null;
+  freshness?: Freshness | null;
+}
+
 export interface MethodologyMeta {
+  version?: string | null;
   metrics: string[];
   observation_window: string;
   annualization_basis: string;
+  parameters?: Record<string, unknown> | null;
 }
 
 export interface EvidenceMeta {
@@ -82,7 +104,9 @@ export interface EvidenceEnvelope<T = unknown> {
   data: T;
   methodology: MethodologyMeta;
   evidence: EvidenceMeta;
+  field_provenance?: Record<string, FieldProvenance> | null;
   limitations: string[];
+  warnings?: string[];
 }
 
 export interface QuoteBrief {
@@ -238,6 +262,7 @@ export interface MomentumRow {
   composite_momentum_score: number | null;
   timeframes_available?: number | null;
   acceleration_7d_vs_30d: number | null;
+  daily_rate_spread_7d_vs_30d_pct?: number | null;
 }
 
 export interface AnalyzeMomentumData {
@@ -312,11 +337,39 @@ export interface SectorSnapshot {
   sample_sufficient?: boolean | null;
 }
 
+export interface RwaAssetBrief {
+  rwa_id: number | null;
+  symbol: string | null;
+  name: string | null;
+  asset_type: string | null;
+  rwa_rank: number | null;
+  has_tokens: boolean | null;
+  price: number | null;
+  market_cap: number | null;
+  volume_24h: number | null;
+  percent_change_24h: number | null;
+  percent_change_7d: number | null;
+  last_updated: string | null;
+}
+
+export interface RwaUniverseContext {
+  scope: "underlying_rwa_universe";
+  separated_from_crypto_sectors: boolean;
+  total_rwa_assets: number | null;
+  sampled_rwa_assets: number;
+  asset_type_counts: Record<string, number>;
+  total_tokenized_market_cap: number | null;
+  total_tokenized_volume_24h: number | null;
+  top_rwa_assets: RwaAssetBrief[];
+  source_endpoints: string[];
+}
+
 export interface SectorRotationData {
   quote_currency: string;
   sectors: SectorSnapshot[];
   unique_constituent_count?: number | null;
   overlapping_asset_count?: number | null;
+  rwa_universe?: RwaUniverseContext | null;
 }
 
 export interface HistoricalPerformanceData {
@@ -351,6 +404,46 @@ export interface DerivativePairObservation {
   last_updated: string | null;
 }
 
+export interface MarketWideLiquidationsContext {
+  scope: "market_wide";
+  attribution: "not_asset_specific";
+  data_kind: "observed_exchange_aggregate";
+  quote_currency: string;
+  total_24h: number | null;
+  long_24h: number | null;
+  short_24h: number | null;
+  total_1h: number | null;
+  total_4h: number | null;
+  last_updated: string | null;
+  source_endpoint: string;
+}
+
+export interface DerivativeVenueBrief {
+  exchange_id: number | null;
+  name: string | null;
+  slug: string | null;
+  rank: number | null;
+  num_market_pairs: number | null;
+  exchange_score: number | null;
+  liquidity_score: number | null;
+  volume_24h: number | null;
+  volume_24h_adjusted: number | null;
+  open_interest: number | null;
+  last_updated: string | null;
+}
+
+export interface DerivativesVenuesContext {
+  scope: "market_wide_venues";
+  attribution: "not_asset_specific";
+  quote_currency: string;
+  total_exchanges: number | null;
+  sampled_exchanges: number;
+  total_open_interest: number | null;
+  total_volume_24h: number | null;
+  venues: DerivativeVenueBrief[];
+  source_endpoint: string;
+}
+
 export interface DerivativesAnalysisData {
   symbol: string;
   cmc_id: number | null;
@@ -364,6 +457,8 @@ export interface DerivativesAnalysisData {
   open_interest_pairs_included?: number | null;
   outlier_pairs_excluded?: number | null;
   market_pairs?: DerivativePairObservation[];
+  market_wide_liquidations?: MarketWideLiquidationsContext | null;
+  derivatives_venues?: DerivativesVenuesContext | null;
   spot_volume_24h: number | null;
   annualized_volatility: number | null;
 }

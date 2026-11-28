@@ -5,7 +5,6 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
-  ChevronRight,
   Copy,
   Cpu,
   Gem,
@@ -20,6 +19,8 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   X,
   Zap,
@@ -50,6 +51,7 @@ import {
   type AIUsageLogItem,
 } from "@/lib/control-plane-api";
 import { AiMarkdown } from "./ai-markdown";
+import { AIStructuredCard } from "./ai-structured-card";
 
 type FocusLensId = "all" | "macro" | "assets" | "gems" | "movers" | "derivatives";
 
@@ -210,7 +212,7 @@ export function CoinTracAIConsole({
   const [sending, setSending] = useState(false);
   const [thinkingStage, setThinkingStage] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [selectedLogPreview, setSelectedLogPreview] = useState<AIUsageLogItem | null>(null);
   const [railOpen, setRailOpen] = useState(true);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [quotaMenuOpen, setQuotaMenuOpen] = useState(false);
@@ -325,6 +327,7 @@ export function CoinTracAIConsole({
   function startNewThread() {
     const cur = readAIThreadStateSnapshot();
     writeAIThreadState({ ...cur, activeThreadId: null });
+    setSelectedLogPreview(null);
     setMobileRailOpen(false);
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }
@@ -332,7 +335,45 @@ export function CoinTracAIConsole({
   function selectThread(threadId: string) {
     const cur = readAIThreadStateSnapshot();
     writeAIThreadState({ ...cur, activeThreadId: threadId });
+    setSelectedLogPreview(null);
     setMobileRailOpen(false);
+  }
+
+  function openServerHistoryEntry(log: AIUsageLogItem) {
+    setMobileRailOpen(false);
+    const target = log.prompt_summary.trim().toLowerCase();
+    const cur = readAIThreadStateSnapshot();
+    const matched = cur.threads.find(
+      (thr) =>
+        thr.title.trim().toLowerCase() === target ||
+        thr.turns.some((t) => t.role === "user" && t.content.trim().toLowerCase() === target),
+    );
+    if (matched) {
+      writeAIThreadState({ ...cur, activeThreadId: matched.id });
+      setSelectedLogPreview(null);
+      return;
+    }
+    setSelectedLogPreview(log);
+  }
+
+  function handleFeedback(turnId: string, vote: "up" | "down") {
+    const cur = readAIThreadStateSnapshot();
+    if (!cur.activeThreadId) return;
+    writeAIThreadState({
+      ...cur,
+      threads: cur.threads.map((thr) =>
+        thr.id === cur.activeThreadId
+          ? {
+              ...thr,
+              turns: thr.turns.map((turn) =>
+                turn.id === turnId
+                  ? { ...turn, feedback: turn.feedback === vote ? null : vote }
+                  : turn,
+              ),
+            }
+          : thr,
+      ),
+    });
   }
 
   function deleteThread(threadId: string) {
@@ -482,7 +523,11 @@ export function CoinTracAIConsole({
   const aiReady = quota
     ? quota.ai_enabled && quota.user_ai_enabled && quota.key_configured
     : false;
-  const composerLocked = Boolean(quota && !aiReady);
+  const quotaExhausted = Boolean(quota && quota.remaining_today_requests <= 0);
+  const lowQuotaWarning = Boolean(
+    quota && quota.remaining_today_requests > 0 && quota.remaining_today_requests < 5,
+  );
+  const composerLocked = Boolean(quota && (!aiReady || quotaExhausted));
 
   const thinkingLabels = isId
     ? [
@@ -513,7 +558,7 @@ export function CoinTracAIConsole({
           id="cointrac-gpt-input"
           rows={centered ? 2 : 1}
           value={input}
-          disabled={sending}
+          disabled={sending || composerLocked}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -522,13 +567,17 @@ export function CoinTracAIConsole({
             }
           }}
           placeholder={
-            composerLocked
+            quotaExhausted
               ? isId
-                ? "CoinTrac AI sedang dijeda atau API key belum diset..."
-                : "CoinTrac AI is paused or unconfigured..."
-              : isId
-                ? "Tanyakan apa saja soal pasar kripto, koin, movers, atau Hidden Gems..."
-                : "Ask anything about crypto regime, coins, movers, or Hidden Gems..."
+                ? "Kuota harian CoinTrac AI habis — reset otomatis pukul 00:00 UTC..."
+                : "Daily CoinTrac AI quota reached — resets at 00:00 UTC..."
+              : composerLocked
+                ? isId
+                  ? "CoinTrac AI sedang dijeda atau API key belum diset..."
+                  : "CoinTrac AI is paused or unconfigured..."
+                : isId
+                  ? "Tanyakan apa saja soal pasar kripto, koin, movers, atau Hidden Gems..."
+                  : "Ask anything about crypto regime, coins, movers, or Hidden Gems..."
           }
           className="max-h-44 min-h-[52px] w-full resize-none border-0 bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-subtle-foreground focus:outline-none focus-visible:outline-none"
         />
@@ -604,6 +653,13 @@ export function CoinTracAIConsole({
           </div>
 
           <div className="flex items-center gap-2.5">
+            {lowQuotaWarning && quota ? (
+              <span className="rounded-full border border-warning/40 bg-warning-soft/30 px-2 py-0.5 font-mono text-[10.5px] font-semibold text-warning">
+                {isId
+                  ? `Sisa ${quota.remaining_today_requests} req hari ini`
+                  : `${quota.remaining_today_requests} req left today`}
+              </span>
+            ) : null}
             {quota && quota.remaining_this_minute <= 3 ? (
               <span className="font-mono text-[11px] text-warning">
                 {quota.remaining_this_minute}/{quota.rate_limit_per_min} min
@@ -735,22 +791,33 @@ export function CoinTracAIConsole({
               {isId ? "Riwayat Server" : "Recent Prompts"}
             </p>
             <ul className="space-y-0.5">
-              {recentLogs.slice(0, 7).map((log) => (
-                <li key={log.id}>
-                  <button
-                    type="button"
-                    disabled={sending || !log.prompt_summary || composerLocked}
-                    onClick={() => {
-                      setMobileRailOpen(false);
-                      void executePrompt(log.prompt_summary);
-                    }}
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
-                  >
-                    <Sparkles className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
-                    <span className="truncate">{log.prompt_summary || "—"}</span>
-                  </button>
-                </li>
-              ))}
+              {recentLogs
+                .filter((log, idx, arr) => {
+                  const key = log.prompt_summary.trim().toLowerCase();
+                  return (
+                    key.length > 0 &&
+                    arr.findIndex((x) => x.prompt_summary.trim().toLowerCase() === key) === idx
+                  );
+                })
+                .slice(0, 7)
+                .map((log) => (
+                  <li key={log.id}>
+                    <button
+                      type="button"
+                      disabled={!log.prompt_summary}
+                      onClick={() => openServerHistoryEntry(log)}
+                      title={
+                        isId
+                          ? "Buka riwayat tanpa memakai kuota"
+                          : "Open conversation / log without spending quota"
+                      }
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[11.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+                    >
+                      <Sparkles className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
+                      <span className="truncate">{log.prompt_summary || "—"}</span>
+                    </button>
+                  </li>
+                ))}
             </ul>
           </div>
         ) : null}
@@ -955,6 +1022,95 @@ export function CoinTracAIConsole({
           </div>
         ) : null}
 
+        {/* Quota Exhausted Banner */}
+        {quotaExhausted && quota ? (
+          <div className="relative z-10 mx-auto mt-3 w-full max-w-[760px] px-4">
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-warning/45 bg-warning-soft/30 px-3.5 py-2.5 text-xs text-foreground"
+            >
+              <span>
+                {isId
+                  ? `Kuota harian CoinTrac AI habis (${quota.remaining_today_requests}/${quota.daily_requests_limit} tersisa hari ini). Reset otomatis pada 00:00 UTC`
+                  : `Daily CoinTrac AI quota reached (${quota.remaining_today_requests}/${quota.daily_requests_limit} requests left today). Resets automatically at 00:00 UTC`}
+                {quota.reset_in_seconds > 0
+                  ? ` (${Math.floor(quota.reset_in_seconds / 3600)}h ${Math.floor((quota.reset_in_seconds % 3600) / 60)}m).`
+                  : "."}
+              </span>
+              <span className="font-mono text-[11px] font-semibold text-warning">
+                {isId ? "00:00 UTC Reset" : "00:00 UTC Reset"}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Read-Only Archived Server Log Preview (Opened When Local Thread Is Unavailable — 0 AI Calls) */}
+        {selectedLogPreview ? (
+          <div className="relative z-10 mx-auto mt-3 w-full max-w-[760px] px-4">
+            <div className="ct-surface-featured space-y-2.5 rounded-[14px] p-4 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-mono text-[10.5px] font-semibold uppercase tracking-wider text-link">
+                    {isId ? "Arsip Riwayat Server (Tanpa Kuota)" : "Archived Prompt Log (No Quota Used)"}
+                  </p>
+                  <p className="mt-1 font-medium text-foreground">{selectedLogPreview.prompt_summary}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLogPreview(null)}
+                  aria-label={isId ? "Tutup pratinjau arsip" : "Close archived preview"}
+                  className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[8px] border border-border text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
+                <span>{selectedLogPreview.created_at.replace("T", " ").slice(0, 16)} UTC</span>
+                <span>· {selectedLogPreview.total_tokens.toLocaleString()} tok</span>
+                <span>· {selectedLogPreview.latency_ms} ms</span>
+                {selectedLogPreview.evidence_ids.map((evId) =>
+                  isAdminSandbox ? (
+                    <span
+                      key={evId}
+                      className="rounded-full border border-positive/35 bg-positive-soft px-2 py-0.5 text-positive"
+                    >
+                      {evId}
+                    </span>
+                  ) : (
+                    <Link
+                      key={evId}
+                      href={`/app/evidence?id=${encodeURIComponent(evId)}`}
+                      className="rounded-full border border-positive/35 bg-positive-soft px-2 py-0.5 text-positive hover:underline"
+                    >
+                      {evId}
+                    </Link>
+                  ),
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-2.5">
+                <span className="text-[11px] text-muted-foreground">
+                  {isId
+                    ? "Teks jawaban lengkap tidak disimpan di perangkat ini. Anda tetap bisa mengaudit evidence_id di atas."
+                    : "Full prose transcript was not saved in this browser; inspect persisted evidence IDs above."}
+                </span>
+                <button
+                  type="button"
+                  disabled={sending || composerLocked}
+                  onClick={() => {
+                    const p = selectedLogPreview.prompt_summary;
+                    setSelectedLogPreview(null);
+                    void executePrompt(p);
+                  }}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-primary/45 bg-primary/12 px-3 py-1 font-mono text-[11px] font-semibold text-link hover:bg-primary/20 disabled:opacity-50"
+                >
+                  <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  <span>{isId ? "Jalankan Ulang (1 req)" : "Run Fresh (1 req)"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* Empty State (Flagship Centered Stage) vs Active Conversation Stream */}
         {turns.length === 0 ? (
           <div className="relative z-10 flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8 sm:px-6">
@@ -1061,75 +1217,75 @@ export function CoinTracAIConsole({
                         <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                       </span>
                       <div className="min-w-0 flex-1 space-y-3">
-                        {/* Collapsible Perplexity / ChatGPT-style Grounded Sources Pill */}
-                        {turn.meta &&
-                        (turn.meta.tools_used.length > 0 || turn.meta.evidence_refs.length > 0) ? (
-                          <div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setExpandedSources((prev) => ({
-                                  ...prev,
-                                  [turn.id]: !prev[turn.id],
-                                }))
-                              }
-                              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary/45 hover:text-foreground"
-                            >
-                              <ShieldCheck className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
-                              <span>
-                                {isId
-                                  ? `Terverifikasi · ${Math.max(turn.meta.tools_used.length, turn.meta.evidence_refs.length)} sumber CoinTrac`
-                                  : `Verified · ${Math.max(turn.meta.tools_used.length, turn.meta.evidence_refs.length)} CoinTrac sources`}
-                              </span>
-                              <ChevronRight
-                                className={`h-3 w-3 transition-transform ${
-                                  expandedSources[turn.id] ? "rotate-90" : ""
-                                }`}
-                                aria-hidden="true"
-                              />
-                            </button>
-
-                            {expandedSources[turn.id] ? (
-                              <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-border/80 bg-card/65 p-2.5">
-                                {turn.meta.tools_used.map((tool) => (
-                                  <span
-                                    key={tool}
-                                    className="rounded-full border border-border bg-muted/60 px-2.5 py-0.5 font-mono text-[10.5px] text-foreground"
-                                  >
-                                    {tool}
-                                  </span>
-                                ))}
-                                {turn.meta.evidence_refs.map((ev) =>
-                                  isAdminSandbox ? (
-                                    <span
-                                      key={ev.evidence_id}
-                                      className="inline-flex items-center gap-1 rounded-full border border-positive/35 bg-positive-soft px-2.5 py-0.5 font-mono text-[10.5px] font-semibold text-positive"
-                                    >
-                                      <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-                                      <span>{ev.evidence_id}</span>
-                                      {ev.data_mode ? <span>· {ev.data_mode}</span> : null}
-                                    </span>
-                                  ) : (
-                                    <Link
-                                      key={ev.evidence_id}
-                                      href={`/app/evidence?id=${encodeURIComponent(ev.evidence_id)}`}
-                                      className="inline-flex items-center gap-1 rounded-full border border-positive/35 bg-positive-soft px-2.5 py-0.5 font-mono text-[10.5px] font-semibold text-positive hover:underline"
-                                    >
-                                      <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-                                      <span>{ev.evidence_id}</span>
-                                      {ev.data_mode ? <span>· {ev.data_mode}</span> : null}
-                                    </Link>
-                                  ),
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
+                        {/* Deterministic Structured Summary Cards, Tables & Sparkline */}
+                        {turn.meta?.structured_cards ? (
+                          <AIStructuredCard
+                            summary={turn.meta.structured_cards}
+                            locale={locale}
+                            isAdminSandbox={isAdminSandbox}
+                          />
                         ) : null}
 
                         <AiMarkdown text={turn.content} />
 
-                        {/* Clean Minimalist Action Bar */}
-                        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        {/* Always-Visible Evidence & Tool Provenance Strip */}
+                        {turn.meta &&
+                        (turn.meta.tools_used.length > 0 || turn.meta.evidence_refs.length > 0) ? (
+                          <div className="space-y-1.5 rounded-[12px] border border-border/80 bg-card/55 px-3 py-2.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="inline-flex items-center gap-1 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-positive">
+                                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                                <span>{isId ? "Bukti:" : "Evidence:"}</span>
+                              </span>
+                              {turn.meta.evidence_refs.map((ev) => {
+                                const tsLabel = ev.source_timestamp ?? ev.retrieved_at_utc;
+                                const shortTs = tsLabel
+                                  ? (() => {
+                                      const d = new Date(tsLabel);
+                                      return Number.isNaN(d.getTime())
+                                        ? null
+                                        : `${d.toISOString().slice(11, 16)} UTC`;
+                                    })()
+                                  : null;
+                                const badgeClass =
+                                  "inline-flex items-center gap-1 rounded-full border border-positive/35 bg-positive-soft px-2.5 py-0.5 font-mono text-[10.5px] font-semibold text-positive";
+                                return isAdminSandbox ? (
+                                  <span key={ev.evidence_id} className={badgeClass}>
+                                    <span>{ev.evidence_id}</span>
+                                    {ev.data_mode ? <span>· {ev.data_mode}</span> : null}
+                                    {shortTs ? <span>· {shortTs}</span> : null}
+                                  </span>
+                                ) : (
+                                  <Link
+                                    key={ev.evidence_id}
+                                    href={`/app/evidence?id=${encodeURIComponent(ev.evidence_id)}`}
+                                    className={`${badgeClass} hover:underline`}
+                                  >
+                                    <span>{ev.evidence_id}</span>
+                                    {ev.data_mode ? <span>· {ev.data_mode}</span> : null}
+                                    {shortTs ? <span>· {shortTs}</span> : null}
+                                  </Link>
+                                );
+                              })}
+                              {turn.meta.tools_used.map((tool) => (
+                                <span
+                                  key={tool}
+                                  className="rounded-full border border-border bg-muted/60 px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                                >
+                                  {tool}
+                                </span>
+                              ))}
+                            </div>
+                            {turn.meta.structured_cards?.limitations_line ? (
+                              <p className="font-mono text-[10.5px] leading-relaxed text-muted-foreground">
+                                {turn.meta.structured_cards.limitations_line}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {/* Clean Minimalist Action Bar: Copy, Regenerate, Live Refresh, Feedback */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                           <button
                             type="button"
                             onClick={() => void handleCopyAnswer(turn.id, turn.content)}
@@ -1150,21 +1306,64 @@ export function CoinTracAIConsole({
                           </button>
 
                           {idx > 0 && turns[idx - 1]?.role === "user" ? (
-                            <button
-                              type="button"
-                              disabled={sending}
-                              onClick={() =>
-                                void executePrompt(turns[idx - 1].content, {
-                                  forceLive: true,
-                                  replaceTurnIdx: idx - 1,
-                                })
-                              }
-                              className="inline-flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] text-subtle-foreground transition-colors hover:bg-muted hover:text-link disabled:opacity-50"
-                            >
-                              <RefreshCw className="h-3 w-3" aria-hidden="true" />
-                              <span>{isId ? "Segarkan Live" : "Regenerate Live"}</span>
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                disabled={sending || composerLocked}
+                                onClick={() =>
+                                  void executePrompt(turns[idx - 1].content, {
+                                    forceLive: false,
+                                    replaceTurnIdx: idx - 1,
+                                  })
+                                }
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] text-subtle-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                              >
+                                <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                                <span>{isId ? "Buat Ulang" : "Regenerate"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={sending || composerLocked}
+                                onClick={() =>
+                                  void executePrompt(turns[idx - 1].content, {
+                                    forceLive: true,
+                                    replaceTurnIdx: idx - 1,
+                                  })
+                                }
+                                className="inline-flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 font-mono text-[11px] text-subtle-foreground transition-colors hover:bg-muted hover:text-link disabled:opacity-50"
+                              >
+                                <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                                <span>{isId ? "Segarkan Live" : "Regenerate Live"}</span>
+                              </button>
+                            </>
                           ) : null}
+
+                          <button
+                            type="button"
+                            onClick={() => handleFeedback(turn.id, "up")}
+                            aria-pressed={turn.feedback === "up"}
+                            aria-label={isId ? "Jawaban membantu" : "Helpful response"}
+                            className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 font-mono text-[11px] transition-colors ${
+                              turn.feedback === "up"
+                                ? "bg-positive-soft text-positive"
+                                : "text-subtle-foreground hover:bg-muted hover:text-foreground"
+                            }`}
+                          >
+                            <ThumbsUp className="h-3 w-3" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedback(turn.id, "down")}
+                            aria-pressed={turn.feedback === "down"}
+                            aria-label={isId ? "Jawaban kurang tepat" : "Unhelpful response"}
+                            className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 font-mono text-[11px] transition-colors ${
+                              turn.feedback === "down"
+                                ? "bg-destructive-soft text-destructive"
+                                : "text-subtle-foreground hover:bg-muted hover:text-foreground"
+                            }`}
+                          >
+                            <ThumbsDown className="h-3 w-3" aria-hidden="true" />
+                          </button>
 
                           {turn.meta?.cache_hit ? (
                             <span className="rounded-full border border-border/80 bg-muted/50 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">

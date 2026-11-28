@@ -85,12 +85,18 @@ export function IntegrationsView() {
                 type="button"
                 onClick={() => void handleCopy()}
                 aria-label={locale === "id" ? "Salin URL MCP" : "Copy MCP URL"}
-                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[6px] border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+                className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-[6px] border border-border bg-card px-2 font-mono text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
                 {copied ? (
-                  <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
+                  <>
+                    <Check className="h-3.5 w-3.5 text-positive" aria-hidden="true" />
+                    <span className="text-positive">{locale === "id" ? "Tersalin" : "Copied"}</span>
+                  </>
                 ) : (
-                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  <>
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{locale === "id" ? "Salin" : "Copy"}</span>
+                  </>
                 )}
               </button>
             </div>
@@ -160,7 +166,7 @@ export function IntegrationsView() {
               id="integrations-resources-heading"
               className="text-xl font-semibold tracking-tight text-foreground"
             >
-              Resources &amp; URI templates
+              {locale === "id" ? "Resource & Template URI" : "Resources & URI templates"}
             </h2>
             <p className="mt-1.5 font-mono text-[11px] text-subtle-foreground">
               {locale === "id"

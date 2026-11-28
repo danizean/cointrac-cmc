@@ -12,6 +12,7 @@ Architectural boundary (AGENTS.md Rule 10):
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -46,6 +47,11 @@ from app.schemas.tools import (
     validate_quote_currency,
 )
 from app.services import intelligence as workflows
+from app.services.ai_structured import (
+    AIStructuredSummary,
+    _extract_primary_ts,
+    build_structured_summary,
+)
 from app.services.evidence import RequestLog, SupabaseEvidenceWriter
 from app.services.hidden_gems import get_hidden_gem_service
 
@@ -168,6 +174,9 @@ class EvidenceCitation(BaseModel):
     tool: str
     data_mode: str | None = None
     freshness: str | None = None
+    retrieved_at_utc: str | None = None
+    source_timestamp: str | None = None
+    status: str | None = None
 
 
 class AITokenUsage(BaseModel):
@@ -193,6 +202,7 @@ class AIChatResponse(BaseModel):
     latency_ms: int
     cache_hit: bool
     quota: AIQuotaSnapshot
+    structured_cards: AIStructuredSummary | None = None
 
 
 class AIStatusResponse(BaseModel):
@@ -1171,6 +1181,8 @@ def _compact_envelope_digest(raw_envelope: Any) -> dict[str, Any]:
         "evidence_id": evidence.get("evidence_id"),
         "data_mode": evidence.get("data_mode"),
         "freshness": evidence.get("freshness"),
+        "retrieved_at_utc": evidence.get("retrieved_at_utc"),
+        "source_timestamp": _extract_primary_ts(evidence),
         "limitations": dumped.get("limitations", [])[:8],
         "data": _compact_value(dumped.get("data")),
     }
@@ -1191,15 +1203,24 @@ def _system_prompt(locale: Literal["en", "id"], directive: str, context_hint: st
         "STRICT RULES:\n"
         "1. ALWAYS call the appropriate CoinTrac tools before quoting any live price, "
         "market cap, regime, score, or Hidden Gem candidate.\n"
-        "2. Output MUST be compact, high-signal, and scannable:\n"
-        "   - Start with a **1-2 sentence bottom-line takeaway**.\n"
-        "   - Follow with **short bullet points** containing exact observed numbers.\n"
-        "   - End with a short **Limitations & Evidence** line listing every "
+        "2. Clean executive hierarchy (the UI renders KPI cards and tables automatically "
+        "alongside your answer, so avoid walls of raw bullet numbers):\n"
+        "   - Start with `**Bottom-line:**` in 1-2 crisp sentences. ONLY name coins/assets "
+        "in the Bottom-line that you explicitly cover in the body/table.\n"
+        "   - Use a compact Markdown table (`| Asset | Price | 24h | 7d | Score |`) when "
+        "comparing 2+ coins, movers, Hidden Gems, or sectors.\n"
+        "   - Group unavailable/TIER_RESTRICTED metrics into 1 short sentence; NEVER spam "
+        "rows of `— / unavailable` bullets.\n"
+        "   - Always finish with ONE line: `**Limitations & Evidence:**` citing every "
         "`evidence_id` and `data_mode`.\n"
-        "3. NEVER invent, guess, or convert `null`/missing metrics into `0`. "
-        "Explicitly say unavailable/`—` if missing or TIER_RESTRICTED.\n"
-        "4. Never present CACHED or VERIFIED_SNAPSHOT_FALLBACK as live ticks, "
-        "and never give buy/sell financial advice.\n"
+        "3. Number normalization rules:\n"
+        "   - Percentages: 1 decimal (`+4.3%`, `-3.7%`)\n"
+        "   - Prices: 2 decimals (`$59,495.15`, `$70.85`; tiny sub-cent tokens max 6 decimals)\n"
+        "   - Market cap / volume / OI: abbreviated (`$2.04T`, `$41.97B`, `$2.25M`)\n"
+        "   - Scores: 1 decimal (`29.2`); Ratios: 2 decimals (`0.05`)\n"
+        "4. NEVER invent missing values or turn `null` into `0`. "
+        "Do NOT present CACHED or VERIFIED_SNAPSHOT_FALLBACK as live ticks, and never give "
+        "financial/trading advice.\n"
         f"{hint_line}{extra}"
     )
 
@@ -1217,6 +1238,7 @@ class AIAnalystService:
         self.transport: MuseTransport = transport or HttpxMuseTransport()
         self._minute_windows: dict[str, deque[float]] = defaultdict(deque)
         self._response_cache: dict[str, tuple[float, AIChatResponse]] = {}
+        self._last_tool_envelopes: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
     async def get_quota_snapshot(self, user_id: str) -> AIQuotaSnapshot:
@@ -1301,6 +1323,92 @@ class AIAnalystService:
             q.append(now_mono)
             return True, 0
 
+    async def _dispatch_tool_once(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        args: dict[str, Any],
+        quote: str,
+        byok_cmc_key: str | None,
+    ) -> Any:
+        if name == "get_market_overview":
+            return await workflows.get_market_overview(
+                quote_currency=quote, override_cmc_key=byok_cmc_key
+            )
+        if name == "analyze_market_regime":
+            return await workflows.analyze_market_regime(
+                quote_currency=quote, override_cmc_key=byok_cmc_key
+            )
+        if name == "analyze_asset":
+            params = AnalyzeAssetInput(
+                symbol=str(args.get("symbol") or "BTC"), quote_currency=quote
+            )
+            return await workflows.analyze_asset(params, override_cmc_key=byok_cmc_key)
+        if name == "compare_assets":
+            raw_syms = args.get("symbols") or ["BTC", "ETH"]
+            params = CompareAssetsInput(symbols=list(raw_syms), quote_currency=quote)
+            return await workflows.compare_assets(params, override_cmc_key=byok_cmc_key)
+        if name == "analyze_momentum":
+            raw_syms = args.get("symbols") or ["BTC"]
+            params = AnalyzeMomentumInput(symbols=list(raw_syms), quote_currency=quote)
+            return await workflows.analyze_momentum(params, override_cmc_key=byok_cmc_key)
+        if name == "scan_market_movers":
+            params = ScanMoversInput(
+                quote_currency=quote,
+                min_market_cap_usd=args.get("min_market_cap_usd", 250_000_000.0),
+                min_volume_24h_usd=args.get("min_volume_24h_usd", 15_000_000.0),
+                max_24h_gain_pct=args.get("max_24h_gain_pct", 18.0),
+                rank_by=args.get("rank_by", "composite_momentum_score"),
+                limit=int(args.get("limit") or 10),
+            )
+            return await workflows.scan_market_movers(params, override_cmc_key=byok_cmc_key)
+        if name == "detect_market_anomalies":
+            params = DetectAnomaliesInput(
+                quote_currency=quote,
+                universe_size=int(args.get("universe_size") or 150),
+            )
+            return await workflows.detect_market_anomalies(params, override_cmc_key=byok_cmc_key)
+        if name == "analyze_sector_rotation":
+            params = SectorRotationInput(
+                quote_currency=quote,
+                sectors=args.get("sectors"),
+            )
+            return await workflows.analyze_sector_rotation(params, override_cmc_key=byok_cmc_key)
+        if name == "analyze_derivatives":
+            params = DerivativesAnalysisInput(
+                symbol=str(args.get("symbol") or "BTC"), quote_currency=quote
+            )
+            return await workflows.analyze_derivatives(params, override_cmc_key=byok_cmc_key)
+        if name == "get_historical_performance":
+            params = HistoricalPerformanceInput(
+                symbol=str(args.get("symbol") or "BTC"),
+                quote_currency=quote,
+                count=int(args.get("count") or 30),
+            )
+            return await workflows.get_historical_performance(params, override_cmc_key=byok_cmc_key)
+        if name == "list_hidden_gem_candidates":
+            params = HiddenGemCandidatesInput(
+                track=args.get("track"),
+                horizon=args.get("horizon"),
+                min_score=args.get("min_score"),
+                limit=int(args.get("limit") or 12),
+            )
+            return await get_hidden_gem_service().list_candidates_envelope(
+                user_id, params, evidence_writer=SupabaseEvidenceWriter()
+            )
+        if name == "get_hidden_gem_detail":
+            params = HiddenGemDetailInput(candidate_id=str(args.get("candidate_id") or ""))
+            return await get_hidden_gem_service().get_candidate_detail_envelope(
+                user_id, params, evidence_writer=SupabaseEvidenceWriter()
+            )
+        if name == "get_hidden_gem_quality_stats":
+            params = HiddenGemQualityStatsInput(track=args.get("track"))
+            return await get_hidden_gem_service().get_quality_stats_envelope(
+                user_id, params, evidence_writer=SupabaseEvidenceWriter()
+            )
+        raise KeyError(f"Unknown tool: {name}")
+
     async def _execute_tool(
         self,
         *,
@@ -1308,7 +1416,7 @@ class AIAnalystService:
         name: str,
         arguments_raw: str | dict[str, Any],
         byok_cmc_key: str | None,
-    ) -> tuple[dict[str, Any], EvidenceCitation | None]:
+    ) -> tuple[dict[str, Any], EvidenceCitation | None, dict[str, Any] | None]:
         if isinstance(arguments_raw, dict):
             args = arguments_raw
         else:
@@ -1316,11 +1424,13 @@ class AIAnalystService:
                 parsed = json.loads(arguments_raw or "{}")
                 args = parsed if isinstance(parsed, dict) else {}
             except Exception:
-                return {"error": f"Invalid JSON arguments for tool {name}"}, None
+                return {"error": f"Invalid JSON arguments for tool {name}"}, None, None
 
         quote = validate_quote_currency(str(args.get("quote_currency") or "USD"))
+        fallback_key = f"{name}:{quote}:{json.dumps(args, sort_keys=True, default=str)}"
         started = time.perf_counter()
         envelope: Any = None
+        last_exc: Exception | None = None
         token = current_principal.set(
             AuthContext(
                 scoped=True,
@@ -1332,97 +1442,75 @@ class AIAnalystService:
             )
         )
         try:
-            if name == "get_market_overview":
-                envelope = await workflows.get_market_overview(quote, override_cmc_key=byok_cmc_key)
-            elif name == "analyze_market_regime":
-                envelope = await workflows.analyze_market_regime(
-                    quote, override_cmc_key=byok_cmc_key
-                )
-            elif name == "analyze_asset":
-                params = AnalyzeAssetInput(
-                    symbol=str(args.get("symbol") or "BTC"), quote_currency=quote
-                )
-                envelope = await workflows.analyze_asset(params, override_cmc_key=byok_cmc_key)
-            elif name == "compare_assets":
-                raw_syms = args.get("symbols") or ["BTC", "ETH"]
-                params = CompareAssetsInput(symbols=list(raw_syms), quote_currency=quote)
-                envelope = await workflows.compare_assets(params, override_cmc_key=byok_cmc_key)
-            elif name == "analyze_momentum":
-                raw_syms = args.get("symbols") or ["BTC"]
-                params = AnalyzeMomentumInput(symbols=list(raw_syms), quote_currency=quote)
-                envelope = await workflows.analyze_momentum(params, override_cmc_key=byok_cmc_key)
-            elif name == "scan_market_movers":
-                params = ScanMoversInput(
-                    quote_currency=quote,
-                    min_market_cap_usd=args.get("min_market_cap_usd", 250_000_000.0),
-                    min_volume_24h_usd=args.get("min_volume_24h_usd", 15_000_000.0),
-                    max_24h_gain_pct=args.get("max_24h_gain_pct", 18.0),
-                    rank_by=args.get("rank_by", "composite_momentum_score"),
-                    limit=int(args.get("limit") or 10),
-                )
-                envelope = await workflows.scan_market_movers(params, override_cmc_key=byok_cmc_key)
-            elif name == "detect_market_anomalies":
-                params = DetectAnomaliesInput(
-                    quote_currency=quote,
-                    universe_size=int(args.get("universe_size") or 150),
-                )
-                envelope = await workflows.detect_market_anomalies(
-                    params, override_cmc_key=byok_cmc_key
-                )
-            elif name == "analyze_sector_rotation":
-                params = SectorRotationInput(
-                    quote_currency=quote,
-                    sectors=args.get("sectors"),
-                )
-                envelope = await workflows.analyze_sector_rotation(
-                    params, override_cmc_key=byok_cmc_key
-                )
-            elif name == "analyze_derivatives":
-                params = DerivativesAnalysisInput(
-                    symbol=str(args.get("symbol") or "BTC"), quote_currency=quote
-                )
-                envelope = await workflows.analyze_derivatives(
-                    params, override_cmc_key=byok_cmc_key
-                )
-            elif name == "get_historical_performance":
-                params = HistoricalPerformanceInput(
-                    symbol=str(args.get("symbol") or "BTC"),
-                    quote_currency=quote,
-                    count=int(args.get("count") or 30),
-                )
-                envelope = await workflows.get_historical_performance(
-                    params, override_cmc_key=byok_cmc_key
-                )
-            elif name == "list_hidden_gem_candidates":
-                params = HiddenGemCandidatesInput(
-                    track=args.get("track"),
-                    horizon=args.get("horizon"),
-                    min_score=args.get("min_score"),
-                    limit=int(args.get("limit") or 12),
-                )
-                envelope = await get_hidden_gem_service().list_candidates_envelope(
-                    user_id, params, evidence_writer=SupabaseEvidenceWriter()
-                )
-            elif name == "get_hidden_gem_detail":
-                params = HiddenGemDetailInput(candidate_id=str(args.get("candidate_id") or ""))
-                envelope = await get_hidden_gem_service().get_candidate_detail_envelope(
-                    user_id, params, evidence_writer=SupabaseEvidenceWriter()
-                )
-            elif name == "get_hidden_gem_quality_stats":
-                params = HiddenGemQualityStatsInput(track=args.get("track"))
-                envelope = await get_hidden_gem_service().get_quality_stats_envelope(
-                    user_id, params, evidence_writer=SupabaseEvidenceWriter()
-                )
-            else:
-                return {"error": f"Unknown tool: {name}"}, None
-        except ValidationError as exc:
-            return {"error": f"Invalid tool parameters for {name}: {exc.errors()[:3]}"}, None
-        except Exception as exc:
-            return {"error": f"Tool {name} failed: {exc.__class__.__name__}"}, None
+            for attempt in range(2):
+                try:
+                    candidate = await self._dispatch_tool_once(
+                        user_id=user_id,
+                        name=name,
+                        args=args,
+                        quote=quote,
+                        byok_cmc_key=byok_cmc_key,
+                    )
+                    if (
+                        name == "analyze_market_regime"
+                        and getattr(getattr(candidate, "data", None), "regime", None) is None
+                        and attempt == 0
+                    ):
+                        await asyncio.sleep(0.25)
+                        continue
+                    envelope = candidate
+                    last_exc = None
+                    break
+                except ValidationError as exc:
+                    return (
+                        {"error": f"Invalid tool parameters for {name}: {exc.errors()[:3]}"},
+                        None,
+                        None,
+                    )
+                except KeyError:
+                    return {"error": f"Unknown tool: {name}"}, None, None
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt == 0:
+                        await asyncio.sleep(0.25)
         finally:
             current_principal.reset(token)
 
-        digest = _compact_envelope_digest(envelope)
+        dumped: dict[str, Any] | None = None
+        if envelope is not None:
+            dumped = (
+                envelope.model_dump(mode="json")
+                if isinstance(envelope, BaseModel)
+                else dict(envelope)
+            )
+            if name != "analyze_market_regime" or (dumped.get("data") or {}).get("regime"):
+                self._last_tool_envelopes[fallback_key] = copy.deepcopy(dumped)
+                self._last_tool_envelopes[name] = copy.deepcopy(dumped)
+
+        if (
+            dumped is None
+            or (name == "analyze_market_regime" and not (dumped.get("data") or {}).get("regime"))
+        ):
+            cached_fallback = self._last_tool_envelopes.get(
+                fallback_key
+            ) or self._last_tool_envelopes.get(name)
+            if cached_fallback is not None:
+                dumped = copy.deepcopy(cached_fallback)
+                ev_blk = dict(dumped.get("evidence") or {})
+                ev_blk["data_mode"] = "CACHED"
+                dumped["evidence"] = ev_blk
+                lims = list(dumped.get("limitations") or [])
+                fb_note = (
+                    "Fallback to last cached snapshot after live tool error "
+                    f"({last_exc.__class__.__name__ if last_exc else 'incomplete'})."
+                )
+                if fb_note not in lims:
+                    lims.insert(0, fb_note)
+                dumped["limitations"] = lims
+            elif last_exc is not None:
+                return {"error": f"Tool {name} failed: {last_exc.__class__.__name__}"}, None, None
+
+        digest = _compact_envelope_digest(dumped if dumped is not None else envelope)
         ev_id = digest.get("evidence_id")
         citation = (
             EvidenceCitation(
@@ -1430,6 +1518,13 @@ class AIAnalystService:
                 tool=name,
                 data_mode=str(digest.get("data_mode")) if digest.get("data_mode") else None,
                 freshness=str(digest.get("freshness")) if digest.get("freshness") else None,
+                retrieved_at_utc=str(digest.get("retrieved_at_utc"))
+                if digest.get("retrieved_at_utc")
+                else None,
+                source_timestamp=str(digest.get("source_timestamp"))
+                if digest.get("source_timestamp")
+                else None,
+                status=str(digest.get("status")) if digest.get("status") else None,
             )
             if ev_id
             else None
@@ -1454,7 +1549,7 @@ class AIAnalystService:
                 )
         except Exception:
             pass
-        return digest, citation
+        return digest, citation, dumped
 
     async def chat(
         self,
@@ -1597,6 +1692,10 @@ class AIAnalystService:
 
         tools_used: list[str] = []
         citations: dict[str, EvidenceCitation] = {}
+        collected_envelopes: list[dict[str, Any]] = []
+        turn_tool_cache: dict[
+            str, tuple[dict[str, Any], EvidenceCitation | None, dict[str, Any] | None]
+        ] = {}
         total_in = 0
         total_cached_in = 0
         total_out = 0
@@ -1647,28 +1746,36 @@ class AIAnalystService:
                         }
                     )
 
-                    async def _run_call(
-                        call: dict[str, Any],
-                    ) -> tuple[str, str, dict[str, Any], EvidenceCitation | None]:
+                    # Execute tools sequentially within the turn with memoization so shared
+                    # CMC feeds stay deterministically tagged (no race-induced LIVE/CACHED swaps).
+                    for call in tool_calls[:6]:
                         fn = call.get("function") if isinstance(call.get("function"), dict) else {}
                         t_name = str(fn.get("name") or "")
                         t_args = fn.get("arguments") or "{}"
                         t_id = str(call.get("id") or f"call_{uuid4().hex[:8]}")
-                        digest, cit = await self._execute_tool(
-                            user_id=user_id,
-                            name=t_name,
-                            arguments_raw=t_args,
-                            byok_cmc_key=byok_cmc_key,
+                        args_key = (
+                            t_args
+                            if isinstance(t_args, str)
+                            else json.dumps(t_args, sort_keys=True)
                         )
-                        return t_id, t_name, digest, cit
-
-                    results = await asyncio.gather(*(_run_call(c) for c in tool_calls[:6]))
-                    for t_id, t_name, digest, cit in results:
+                        memo_key = f"{t_name}:{args_key}"
+                        if memo_key in turn_tool_cache:
+                            digest, cit, raw_env = turn_tool_cache[memo_key]
+                        else:
+                            digest, cit, raw_env = await self._execute_tool(
+                                user_id=user_id,
+                                name=t_name,
+                                arguments_raw=t_args,
+                                byok_cmc_key=byok_cmc_key,
+                            )
+                            turn_tool_cache[memo_key] = (digest, cit, raw_env)
                         tool_calls_count += 1
                         if t_name and t_name not in tools_used:
                             tools_used.append(t_name)
                         if cit is not None:
                             citations[cit.evidence_id] = cit
+                        if raw_env is not None:
+                            collected_envelopes.append(raw_env)
                         conversation.append(
                             {
                                 "role": "tool",
@@ -1769,6 +1876,7 @@ class AIAnalystService:
         )
 
         updated_quota = await self.get_quota_snapshot(user_id)
+        structured_cards = build_structured_summary(collected_envelopes, locale=request.locale)
         response_obj = AIChatResponse(
             answer=final_answer,
             model=cfg.model,
@@ -1786,6 +1894,7 @@ class AIAnalystService:
             latency_ms=latency_ms,
             cache_hit=False,
             quota=updated_quota,
+            structured_cards=structured_cards,
         )
         if cache_key is not None and cfg.response_cache_ttl_seconds > 0:
             self._response_cache[cache_key] = (

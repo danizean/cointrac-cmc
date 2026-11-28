@@ -1,9 +1,17 @@
+import type { Metadata } from "next";
 import { LogOut, MailWarning } from "lucide-react";
 import { redirect } from "next/navigation";
 import { Suspense, type ReactNode } from "react";
 import { AppRoleShell } from "@/components/app-role-shell";
 import { ResendVerificationButton } from "@/components/auth/resend-verification-button";
 import { getVerifiedServerIdentity, resolveServerPlatformRole } from "@/lib/supabase/server";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 async function AuthenticatedGate({ children }: { children: ReactNode }) {
   const { configured, user, emailVerified } = await getVerifiedServerIdentity();

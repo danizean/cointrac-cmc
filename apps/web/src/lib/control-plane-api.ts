@@ -175,6 +175,45 @@ export interface AIStatusPayload {
   recent_logs: AIUsageLogItem[];
 }
 
+export type AISummaryTone = "positive" | "warning" | "destructive" | "info" | "neutral";
+
+export interface AIStructuredSummaryPayload {
+  headline_chip?: {
+    label: string;
+    sublabel?: string | null;
+    tone: AISummaryTone;
+    data_mode?: string | null;
+    source_timestamp?: string | null;
+    evidence_id?: string | null;
+  } | null;
+  kpis: Array<{
+    label: string;
+    value: string;
+    sub?: string | null;
+    tone: AISummaryTone;
+    data_mode?: string | null;
+    source_timestamp?: string | null;
+    evidence_id?: string | null;
+  }>;
+  tables: Array<{
+    title: string;
+    columns: string[];
+    rows: Array<Array<{ text: string; tone: AISummaryTone }>>;
+  }>;
+  sparkline?: {
+    label: string;
+    points: number[];
+    point_labels: string[];
+    tone: AISummaryTone;
+  } | null;
+  details: Array<{
+    label: string;
+    value: string;
+    note?: string | null;
+  }>;
+  limitations_line?: string | null;
+}
+
 export interface AIChatResponsePayload {
   answer: string;
   model: string;
@@ -185,6 +224,9 @@ export interface AIChatResponsePayload {
     tool: string;
     data_mode: string | null;
     freshness: string | null;
+    retrieved_at_utc?: string | null;
+    source_timestamp?: string | null;
+    status?: string | null;
   }>;
   tool_calls_count: number;
   usage: {
@@ -197,6 +239,7 @@ export interface AIChatResponsePayload {
   latency_ms: number;
   cache_hit: boolean;
   quota: AIQuotaSnapshot;
+  structured_cards?: AIStructuredSummaryPayload | null;
 }
 
 export interface AIRuntimeConfigPayload {

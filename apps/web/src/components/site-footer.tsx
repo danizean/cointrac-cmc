@@ -12,7 +12,7 @@ export function SiteFooter() {
     { href: "/product", label: t.footer.capabilities },
     { href: "/integrations", label: t.footer.integrations },
     { href: "/docs", label: t.footer.docs },
-    { href: "/#pricing", label: t.nav.pricing },
+    { href: "/pricing", label: t.nav.pricing },
   ];
   const developers = [
     { href: "/signup", label: t.nav.explore },

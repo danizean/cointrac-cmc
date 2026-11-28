@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { LoginForm } from "@/components/auth/login-form";
+import { sanitizeRedirectPath } from "@/lib/auth-redirect";
 import { siteUrl } from "@/lib/site-url";
 import { isSupabaseAuthConfigured } from "@/lib/supabase/config";
+import { getVerifiedServerIdentity } from "@/lib/supabase/server";
 
 const site = siteUrl();
 
@@ -44,11 +47,19 @@ type LoginSearchParams = Promise<{
 async function LoginContent({ searchParams }: { searchParams: LoginSearchParams }) {
   const params = await searchParams;
   const configured = isSupabaseAuthConfigured();
+  const safeNext = sanitizeRedirectPath(params.next ?? "/app", "/app");
+
+  if (configured && params.signed_out !== "1") {
+    const { user, emailVerified } = await getVerifiedServerIdentity();
+    if (user && emailVerified) {
+      redirect(safeNext);
+    }
+  }
 
   return (
     <LoginForm
       configured={configured}
-      nextPath={params.next ?? "/app"}
+      nextPath={safeNext}
       initialError={params.error}
       signedOut={params.signed_out === "1"}
       passwordUpdated={params.password_updated === "1"}

@@ -96,14 +96,16 @@ OPENAPI_TAGS = [
 
 OPENAPI_DESCRIPTION = (
     "**CoinTrac Market Intelligence** is a deterministic crypto market intelligence MCP & REST "
-    "platform powered by the CoinMarketCap API (0 server-side LLM calls, `sqrt(365)` volatility "
-    "annualization, canonical numeric `cmc_id` resolution, and mandatory `EvidenceEnvelope` "
-    "audit provenance).\n\n"
+    "platform powered by the CoinMarketCap API (fixed quantitative formulas in Python — no LLM in "
+    "market calculations; `sqrt(365)` volatility annualization, canonical numeric `cmc_id` "
+    "resolution, and mandatory `EvidenceEnvelope` audit provenance). CoinTrac AI Analyst "
+    "(`/v1/ai/*`) is an optional separate chat layer on top.\n\n"
     "- **Authentication:** Pass your CoinTrac API key via `Authorization: Bearer <key>` or "
     "`x-cointrac-key`, or use a verified Supabase JWT.\n"
     "- **Optional BYOK:** Supply your own CoinMarketCap Pro key in `CoinMarketCapBYOK` "
     "(`x-cmc-api-key`) strictly in memory.\n"
-    "- **MCP Endpoint:** Streamable HTTP mounted at `/mcp` (11 Tools, 5 Resources, 3 Prompts). "
+    "- **MCP Endpoint:** Streamable HTTP mounted at `/mcp` (14 Tools, 6 Resources [3 static + "
+    "3 URI templates], 3 Prompts). "
     "A per-user token may also be sent as `/mcp/u/<token>` and is hashed like an API key."
 )
 

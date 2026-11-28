@@ -22,6 +22,26 @@ VERIFIED_STABLECOIN_TAGS: frozenset[str] = frozenset(
     }
 )
 StablecoinClass = Literal["verified_stablecoin", "non_stablecoin", "unknown"]
+AssetUniverseClass = Literal[
+    "verified_stablecoin",
+    "wrapped_asset",
+    "leveraged_token",
+    "tokenized_equity_rwa",
+    "exchange_token",
+    "native_crypto",
+    "unknown",
+]
+UNIVERSE_POLICY_VERSION = "universe_policy_v1"
+MOMENTUM_METHODOLOGY_VERSION = "momentum_score_v1"
+
+WRAPPED_TAGS: frozenset[str] = frozenset(
+    {"wrapped-tokens", "wrapped-assets", "liquid-staking-tokens"}
+)
+LEVERAGED_TAGS: frozenset[str] = frozenset({"leveraged-tokens", "3x-long", "3x-short"})
+TOKENIZED_EQUITY_RWA_TAGS: frozenset[str] = frozenset(
+    {"tokenized-stock", "tokenized-equities", "stocks", "equities"}
+)
+EXCHANGE_TOKEN_TAGS: frozenset[str] = frozenset({"centralized-exchange", "exchange-tokens"})
 
 # Multi-horizon crypto volatility-grounded thresholds (percentage points).
 # Derived relative to the 10pp sigmoid momentum scale:
@@ -52,6 +72,37 @@ def classify_stablecoin(tags: Sequence[str] | None) -> StablecoinClass:
     if normalized & VERIFIED_STABLECOIN_TAGS:
         return "verified_stablecoin"
     return "non_stablecoin"
+
+
+def classify_asset_universe(
+    tags: Sequence[str] | None,
+    *,
+    symbol: str | None = None,
+    name: str | None = None,
+) -> AssetUniverseClass:
+    """Classify asset into explicit universe bucket using canonical CMC tags and safe hints."""
+    norm_tags = (
+        {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+        if isinstance(tags, (list, tuple, set, frozenset))
+        else set()
+    )
+    if norm_tags & VERIFIED_STABLECOIN_TAGS:
+        return "verified_stablecoin"
+    if norm_tags & LEVERAGED_TAGS:
+        return "leveraged_token"
+    if norm_tags & TOKENIZED_EQUITY_RWA_TAGS:
+        return "tokenized_equity_rwa"
+    if norm_tags & WRAPPED_TAGS:
+        return "wrapped_asset"
+    if norm_tags & EXCHANGE_TOKEN_TAGS:
+        return "exchange_token"
+    sym_upper = (symbol or "").strip().upper()
+    name_lower = (name or "").strip().lower()
+    if sym_upper.endswith("X") and ("tokenized" in name_lower or "xstock" in name_lower):
+        return "tokenized_equity_rwa"
+    if not norm_tags:
+        return "unknown"
+    return "native_crypto"
 
 
 def assess_multi_horizon_risk(

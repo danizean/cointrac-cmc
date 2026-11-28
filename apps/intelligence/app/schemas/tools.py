@@ -358,7 +358,17 @@ class MomentumRow(StrictModel):
     rs_vs_btc_30d: FiniteFloat | None = None
     composite_momentum_score: FiniteFloat | None = None
     timeframes_available: int | None = Field(default=None, ge=0, le=4)
-    acceleration_7d_vs_30d: FiniteFloat | None = None
+    acceleration_7d_vs_30d: FiniteFloat | None = Field(
+        default=None,
+        description="Cumulative 7d minus 30d return spread in percentage points.",
+    )
+    daily_rate_spread_7d_vs_30d_pct: FiniteFloat | None = Field(
+        default=None,
+        description=(
+            "Normalized average daily return spread: (percent_change_7d / 7) minus "
+            "(percent_change_30d / 30) in percentage points per day."
+        ),
+    )
 
 
 class AnalyzeMomentumData(StrictModel):

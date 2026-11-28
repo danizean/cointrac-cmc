@@ -346,17 +346,6 @@ export function buildWorkspaceCommands(locale: Locale): CommandItem[] {
 
   const docCommands: CommandItem[] = [
     {
-      id: "workspace-cointrac-ai",
-      section: "Workspace",
-      title: "CoinTrac AI",
-      subtitle:
-        locale === "id"
-          ? "Analis AI Muse Spark 1.3 dengan tool calling & bukti audit"
-          : "Muse Spark 1.3 market analyst with deterministic tool calling",
-      href: "/app/ai",
-      keywords: ["ai", "cointrac ai", "muse", "spark", "chat", "copilot", "analyst"],
-    },
-    {
       id: "tool-playground",
       section: "Tools & Documentation",
       title: locale === "id" ? "API Playground" : "API Playground",

@@ -25,11 +25,11 @@ import {
   fetchTelemetrySummary,
 } from "@/lib/api";
 import {
-  formatCompactUsd,
+  formatCompactQuoteCurrency,
   formatDurationMs,
   formatInteger,
   formatPct,
-  formatUsd,
+  formatQuoteCurrency,
   formatUtc,
   pctToneClass,
 } from "@/lib/format";
@@ -295,10 +295,11 @@ export function OverviewView({
             </span>
           </div>
           <p className="mt-3 font-mono text-2xl font-bold tracking-tight tabular-nums text-foreground">
-            {formatCompactUsd(overview?.total_market_cap)}
+            {formatCompactQuoteCurrency(overview?.total_market_cap, overview?.quote_currency ?? "USD")}
           </p>
           <p className="mt-1.5 font-mono text-[11px] text-muted-foreground">
-            {t.overview.vol24h}: {formatCompactUsd(overview?.total_volume_24h)}
+            {t.overview.vol24h}:{" "}
+            {formatCompactQuoteCurrency(overview?.total_volume_24h, overview?.quote_currency ?? "USD")}
           </p>
         </div>
 
@@ -510,10 +511,11 @@ export function OverviewView({
                       </span>
                     </div>
                     <p className="mt-3 font-mono text-xl font-bold tabular-nums text-foreground">
-                      {formatUsd(coin.price)}
+                      {formatQuoteCurrency(coin.price, overview?.quote_currency ?? "USD")}
                     </p>
                     <p className="mt-1 font-mono text-[11px] tabular-nums text-muted-foreground">
-                      {t.overview.vol24h} {formatCompactUsd(coin.volume_24h)}
+                      {t.overview.vol24h}{" "}
+                      {formatCompactQuoteCurrency(coin.volume_24h, overview?.quote_currency ?? "USD")}
                     </p>
                   </div>
                 ))}
@@ -633,7 +635,7 @@ export function OverviewView({
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-muted-foreground">
-                        {formatUsd(coin.price)}
+                        {formatQuoteCurrency(coin.price, overview?.quote_currency ?? "USD")}
                       </span>
                       <span className="w-20 rounded-md bg-positive/12 px-2 py-0.5 text-right font-semibold text-positive">
                         {formatPct(coin.percent_change_24h, { signed: true })}
@@ -682,7 +684,7 @@ export function OverviewView({
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-muted-foreground">
-                        {formatUsd(coin.price)}
+                        {formatQuoteCurrency(coin.price, overview?.quote_currency ?? "USD")}
                       </span>
                       <span className="w-20 rounded-md bg-destructive/12 px-2 py-0.5 text-right font-semibold text-destructive">
                         {formatPct(coin.percent_change_24h, { signed: true })}

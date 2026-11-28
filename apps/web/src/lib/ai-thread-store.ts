@@ -11,6 +11,7 @@ export interface AIChatTurn {
   content: string;
   createdAt: string;
   meta?: AIChatResponsePayload;
+  feedback?: "up" | "down" | null;
   error?: { status: number; message: string };
 }
 
@@ -65,7 +66,17 @@ export function readAIThreadStateSnapshot(): AIThreadState {
       return EMPTY_AI_THREAD_STATE;
     }
     const obj = parsed as Partial<AIThreadState>;
-    const threads = Array.isArray(obj.threads) ? obj.threads.slice(0, MAX_THREADS) : [];
+    const rawThreads = Array.isArray(obj.threads) ? obj.threads : [];
+    const seenIds = new Set<string>();
+    const threads: AIThread[] = [];
+    for (const item of rawThreads) {
+      if (!item || typeof item !== "object" || typeof item.id !== "string" || seenIds.has(item.id)) {
+        continue;
+      }
+      seenIds.add(item.id);
+      threads.push(item);
+      if (threads.length >= MAX_THREADS) break;
+    }
     const activeThreadId =
       typeof obj.activeThreadId === "string" && threads.some((t) => t.id === obj.activeThreadId)
         ? obj.activeThreadId
@@ -81,12 +92,20 @@ export function readAIThreadStateSnapshot(): AIThreadState {
 export function writeAIThreadState(next: AIThreadState): void {
   if (typeof window === "undefined") return;
   try {
-    const normalized: AIThreadState = {
-      activeThreadId: next.activeThreadId,
-      threads: next.threads.slice(0, MAX_THREADS).map((thread) => ({
+    const seenIds = new Set<string>();
+    const uniqueThreads: AIThread[] = [];
+    for (const thread of next.threads) {
+      if (!thread || !thread.id || seenIds.has(thread.id)) continue;
+      seenIds.add(thread.id);
+      uniqueThreads.push({
         ...thread,
         turns: thread.turns.slice(-MAX_TURNS_PER_THREAD),
-      })),
+      });
+      if (uniqueThreads.length >= MAX_THREADS) break;
+    }
+    const normalized: AIThreadState = {
+      activeThreadId: next.activeThreadId,
+      threads: uniqueThreads,
     };
     const serialized = JSON.stringify(normalized);
     window.localStorage.setItem(STORAGE_KEY, serialized);

@@ -451,12 +451,12 @@ export function WorkspaceOverview() {
           <p className="font-mono text-[11px] text-muted-foreground">
             {derivedMetrics.verifiedKeyCount > 0
               ? locale === "id"
-                ? `${derivedMetrics.verifiedKeyCount} terverifikasi`
-                : `${derivedMetrics.verifiedKeyCount} verified`
+                ? `${derivedMetrics.verifiedKeyCount} pernah dipakai`
+                : `${derivedMetrics.verifiedKeyCount} verified in use`
               : (keys.data?.active_count ?? 0) > 0
                 ? locale === "id"
-                  ? "Siap dipakai"
-                  : "Ready for first call"
+                  ? "Aktif · siap dipakai"
+                  : "Active · ready for first call"
                 : locale === "id"
                   ? "Belum dibuat"
                   : "Key needed"}

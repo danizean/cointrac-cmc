@@ -344,7 +344,7 @@ export function HomeView() {
 
           <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
             {copy.plans.map((plan, idx) => {
-              const highlighted = idx === 1;
+              const highlighted = idx === 0;
               return (
                 <article
                   key={plan.title}
@@ -361,8 +361,8 @@ export function HomeView() {
                         <h3 className="text-base font-semibold text-foreground">{plan.title}</h3>
                       </div>
                       {highlighted ? (
-                        <span className="rounded-full border border-primary/35 bg-primary/12 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-link">
-                          {locale === "id" ? "Populer" : "Recommended"}
+                        <span className="rounded-full border border-positive/35 bg-positive-soft px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-positive">
+                          {locale === "id" ? "Aktif" : "Active"}
                         </span>
                       ) : null}
                     </div>
@@ -372,17 +372,26 @@ export function HomeView() {
                   </div>
                   <div className="mt-6 border-t border-border/80 pt-4">
                     <Link
-                      href="/signup"
+                      href="/pricing"
                       className={`tg-btn w-full ${highlighted ? "tg-btn-primary" : "tg-btn-secondary"} inline-flex`}
                     >
-                      <span>{copy.primaryCta}</span>
+                      <span>{highlighted ? copy.primaryCta : locale === "id" ? "Lihat paket & batas" : "View pricing & limits"}</span>
                     </Link>
                   </div>
                 </article>
               );
             })}
           </div>
-          <p className="mt-6 font-mono text-xs text-subtle-foreground">{copy.pricingNote}</p>
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="font-mono text-xs text-subtle-foreground">{copy.pricingNote}</p>
+            <Link
+              href="/pricing"
+              className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-link hover:underline"
+            >
+              <span>{locale === "id" ? "Buka halaman Harga lengkap" : "See full pricing & BYOK"}</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
+          </div>
         </section>
 
         {/* FAQ */}

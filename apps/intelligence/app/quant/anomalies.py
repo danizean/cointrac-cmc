@@ -5,9 +5,11 @@ from typing import Literal
 import numpy as np
 
 MIN_ANOMALY_SAMPLE = 5
+ANOMALY_METHODOLOGY_VERSION = "anomaly_mad_v1"
 AnomalyDirection = Literal[
     "HIGH_VOLUME_TO_MCAP",
     "LOW_VOLUME_ILLIQUIDITY",
+    "NOT_DIRECTIONAL",
     "INSUFFICIENT_DATA",
 ]
 

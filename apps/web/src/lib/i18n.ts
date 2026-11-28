@@ -270,7 +270,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       heroTitlePrefix: "Institutional crypto intelligence,",
       heroTitleAccent: "with proof on every figure.",
       heroDesc:
-        "Real-time market regime detection, anti-chase momentum screening, and 7-sector rotation powered by CoinMarketCap APIs — engineered for AI agents and quant workflows with zero server-side LLM calls.",
+        "Real-time market regime detection, anti-chase momentum screening, and 7-sector rotation powered by CoinMarketCap APIs — built with fixed formulas in Python (no LLM in market calculations; CoinTrac AI Analyst is an optional separate chat layer).",
       ctaPlayground: "Launch MCP Playground",
       ctaConnect: "Connect Agent",
       totalMarketCap: "Total Crypto Market Cap",
@@ -484,7 +484,7 @@ export const DICTIONARIES: Record<Locale, Dictionary> = {
       heroTitlePrefix: "Intelijen kripto institusional,",
       heroTitleAccent: "dengan bukti di setiap angka.",
       heroDesc:
-        "Klasifikasi rezim pasar real-time, penyaring momentum anti-kejar, dan rotasi 7 sektor berbasis API CoinMarketCap — dirancang khusus untuk agen AI dan bot kuantitatif tanpa panggilan LLM di server.",
+        "Klasifikasi rezim pasar real-time, penyaring momentum anti-kejar, dan rotasi 7 sektor berbasis API CoinMarketCap — menggunakan rumus Python deterministik (tanpa LLM pada kalkulasi pasar; CoinTrac AI Analyst adalah lapisan chat terpisah).",
       ctaPlayground: "Buka MCP Playground",
       ctaConnect: "Hubungkan Agen",
       totalMarketCap: "Total Kapitalisasi Pasar Kripto",

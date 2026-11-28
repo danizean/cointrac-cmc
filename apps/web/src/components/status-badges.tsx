@@ -348,6 +348,7 @@ export function AnomalyDirectionBadge({
   const styles: Record<AnomalyDirection, string> = {
     HIGH_VOLUME_TO_MCAP: "border-primary/35 bg-primary/12 text-link",
     LOW_VOLUME_ILLIQUIDITY: "border-warning/40 bg-warning-soft text-warning",
+    NOT_DIRECTIONAL: "border-border bg-muted text-muted-foreground",
     INSUFFICIENT_DATA: "border-border bg-muted text-muted-foreground",
   };
   return (
@@ -355,4 +356,28 @@ export function AnomalyDirectionBadge({
       {direction.replaceAll("_", " ")}
     </span>
   );
+}
+
+export function explainEvidenceStatus(
+  status: EvidenceStatus | string,
+  locale: "en" | "id" = "en",
+): string {
+  if (status === "OK") {
+    return locale === "id"
+      ? "Seluruh metrik utama tersedia dari sumber data aktif."
+      : "All primary metrics are available from active data sources.";
+  }
+  if (status === "PARTIAL") {
+    return locale === "id"
+      ? "Sebagian metrik tersedia. Metrik historis atau agregat tertentu belum tersedia dari sumber data aktif."
+      : "Partial metrics available. Certain historical or aggregate fields are unavailable on the active source.";
+  }
+  if (status === "TIER_RESTRICTED") {
+    return locale === "id"
+      ? "Data historis tidak tersedia pada paket/sumber data aktif (gunakan BYOK untuk OHLCV historis)."
+      : "Historical data is unavailable on the active tier/source (BYOK required for historical OHLCV).";
+  }
+  return locale === "id"
+    ? "Tidak cukup data valid untuk menghasilkan analisis."
+    : "Insufficient valid data to produce the requested analysis.";
 }

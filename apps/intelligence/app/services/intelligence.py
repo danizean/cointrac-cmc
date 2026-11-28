@@ -34,6 +34,7 @@ from app.adapters.normalizer import (
 )
 from app.core.config import get_settings
 from app.quant.anomalies import (
+    ANOMALY_METHODOLOGY_VERSION,
     MIN_ANOMALY_SAMPLE,
     btc_divergence,
     classify_volume_anomaly_direction,
@@ -42,10 +43,14 @@ from app.quant.anomalies import (
     standard_zscores,
 )
 from app.quant.metrics import (
+    METRICS_METHODOLOGY_VERSION,
+    MIN_OBSERVATIONS,
+    MOMENTUM_WEIGHTS,
     annualized_volatility,
     beta,
     circulating_supply_pct,
     composite_momentum_score,
+    daily_rate_spread_7d_vs_30d,
     fdv_to_mcap_ratio,
     log_returns,
     maximum_drawdown,
@@ -55,9 +60,12 @@ from app.quant.metrics import (
     utc_daily_close,
     volume_to_mcap,
 )
-from app.quant.regime import classify_regime
+from app.quant.regime import REGIME_RULES_VERSION, REGIME_THRESHOLDS, classify_regime
 from app.quant.screening import (
+    MOMENTUM_METHODOLOGY_VERSION,
+    UNIVERSE_POLICY_VERSION,
     UniverseAsset,
+    classify_asset_universe,
     classify_stablecoin,
     screen_movers,
 )
@@ -73,9 +81,13 @@ from app.quant.sectors import (
 )
 from app.schemas.envelope import (
     AgentAction,
+    DataMode,
     EvidenceEnvelope,
     EvidenceMeta,
     EvidenceStatus,
+    FieldAvailability,
+    FieldProvenance,
+    Freshness,
     MethodologyMeta,
 )
 from app.schemas.tools import (
@@ -772,17 +784,29 @@ async def get_market_overview(
             f"Only {len(negative_briefs)} non-stablecoin asset(s) in the top 50 posted "
             "negative 24h returns; top_losers excludes positive performers."
         )
+    total_mcap = _non_negative(
+        metrics.get("total_market_cap"), overview_notes, "total_market_cap"
+    )
+    total_vol = _non_negative(metrics.get("total_volume_24h"), overview_notes, "total_volume_24h")
+    btc_dom = _bounded_pct(metrics.get("btc_dominance"), overview_notes, "btc_dominance")
+    eth_dom = _bounded_pct(metrics.get("eth_dominance"), overview_notes, "eth_dominance")
+    fg_bounded = _bounded_pct(fg_value, overview_notes, "fear_greed_value")
+    top50_breadth = _bounded_pct(
+        _breadth([row.percent_change_24h for row in briefs]),
+        overview_notes,
+        "top50_breadth_positive_pct",
+    )
     data = MarketOverviewData(
         quote_currency=quote_currency,
-        total_market_cap=metrics.get("total_market_cap"),
-        total_volume_24h=metrics.get("total_volume_24h"),
+        total_market_cap=total_mcap,
+        total_volume_24h=total_vol,
         total_market_cap_change_24h_pct=metrics.get("total_market_cap_change_24h_pct"),
-        btc_dominance=metrics.get("btc_dominance"),
-        eth_dominance=metrics.get("eth_dominance"),
+        btc_dominance=btc_dom,
+        eth_dominance=eth_dom,
         btc_dominance_change_24h=metrics.get("btc_dominance_change_24h"),
-        fear_greed_value=fg_value,
-        fear_greed_classification=fg_label,
-        top50_breadth_positive_pct=_breadth([row.percent_change_24h for row in briefs]),
+        fear_greed_value=fg_bounded,
+        fear_greed_classification=fg_label if fg_bounded is not None else None,
+        top50_breadth_positive_pct=top50_breadth,
         total_market_cap_change_7d_pct=global_trends.get("total_market_cap_change_7d_pct"),
         total_market_cap_change_30d_pct=global_trends.get("total_market_cap_change_30d_pct"),
         btc_dominance_change_7d=global_trends.get("btc_dominance_change_7d"),
@@ -799,6 +823,24 @@ async def get_market_overview(
         )[:5],
         top_losers=sorted(negative_briefs, key=lambda row: row.percent_change_24h or 0.0)[:5],
     )
+    field_prov = {
+        "macro_global": _endpoint_provenance(
+            collector, GLOBAL, available=total_mcap is not None
+        ),
+        "fear_and_greed": _endpoint_provenance(
+            collector, FEAR, available=fg_bounded is not None
+        ),
+        "top50_breadth": _endpoint_provenance(
+            collector, LISTINGS, available=top50_breadth is not None
+        ),
+        "historical_trends_7d_30d": _endpoint_provenance(
+            collector,
+            GLOBAL_HISTORICAL,
+            available=data.total_market_cap_change_7d_pct is not None,
+            unavailable_availability="UNAVAILABLE_TIER",
+            reason_code="CMC_HISTORICAL_GLOBAL_UNAVAILABLE",
+        ),
+    }
     return await _envelope(
         "get_market_overview",
         _status(collector, data.total_market_cap is not None),
@@ -810,6 +852,13 @@ async def get_market_overview(
         collector,
         bound,
         overview_notes,
+        methodology_version=METRICS_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "quote_currency": quote_currency,
+            "breadth_sample_size": len(briefs),
+        },
+        request_parameters={"quote_currency": quote_currency},
+        field_provenance=field_prov,
     )
 
 
@@ -838,10 +887,18 @@ async def scan_market_movers(
     excluded_stables = 0
     unknown_class_count = 0
     corrupt_excluded = 0
+    universe_class_counts: dict[str, int] = {}
     for row in rows:
         if row.get("symbol") == "BTC":
             continue
-        stable_cls = classify_stablecoin(_raw_tags(row))
+        tags = _raw_tags(row)
+        stable_cls = classify_stablecoin(tags)
+        u_cls = classify_asset_universe(
+            tags,
+            symbol=str(row.get("symbol") or ""),
+            name=_text(row, "name"),
+        )
+        universe_class_counts[u_cls] = universe_class_counts.get(u_cls, 0) + 1
         if stable_cls == "verified_stablecoin":
             excluded_stables += 1
             continue
@@ -953,11 +1010,37 @@ async def scan_market_movers(
         f"{len(data.movers)} movers ranked by {params.rank_by}.",
         data,
         ["composite_momentum_score", "rs_vs_btc_7d", "volume_to_mcap"],
-        f"top {params.universe_size} listings",
+        f"top {scan_limit} listings",
         [row.cmc_id for row in data.movers if row.cmc_id is not None],
         collector,
         bound,
         notes,
+        methodology_version=MOMENTUM_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "universe_policy_version": UNIVERSE_POLICY_VERSION,
+            "momentum_weights": MOMENTUM_WEIGHTS,
+            "universe_requested": params.universe_size,
+            "universe_scanned": len(rows),
+            "universe_eligible": len(eligible_universe),
+            "excluded_stablecoins": excluded_stables,
+            "excluded_corrupt_or_zero_volume": corrupt_excluded,
+            "unknown_classification_retained": unknown_class_count,
+            "universe_class_breakdown": universe_class_counts,
+            "rank_by": params.rank_by,
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "movers_universe": _endpoint_provenance(
+                collector, LISTINGS, available=bool(rows)
+            ),
+            "btc_benchmark_7d": _endpoint_provenance(
+                collector,
+                LISTINGS,
+                available=btc_7d is not None,
+                unavailable_availability="UNAVAILABLE_SOURCE",
+                reason_code="BTC_7D_MISSING",
+            ),
+        },
     )
 
 
@@ -968,10 +1051,19 @@ async def compare_assets(
 ) -> EvidenceEnvelope[CompareAssetsData]:
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    ids, notes = await _resolve(bound, collector, [*params.symbols, "BTC"])
+    unresolved_syms: list[str] = []
+    ambiguous_syms: dict[str, list[dict[str, object]]] = {}
+    ids, notes = await _resolve(
+        bound,
+        collector,
+        [*params.symbols, "BTC"],
+        unresolved_out=unresolved_syms,
+        ambiguous_out=ambiguous_syms,
+    )
     assets = await _quoted(collector, ids, params.quote_currency)
     btc_quote = quote_of(assets.get("BTC") or {}, params.quote_currency)
     comparisons: list[AssetComparison] = []
+    any_ohlcv_available = False
     for symbol in params.symbols:
         asset = assets.get(symbol)
         if asset is None:
@@ -979,6 +1071,8 @@ async def compare_assets(
             continue
         cmc_id = asset.get("id") if isinstance(asset.get("id"), int) else None
         closes = await _closes(collector, bound, cmc_id, params.quote_currency)
+        if closes:
+            any_ohlcv_available = True
         series = utc_daily_close(closes)
         comparisons.append(_comparison(symbol, asset, params.quote_currency, series, btc_quote))
     if any(
@@ -997,6 +1091,11 @@ async def compare_assets(
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
+    warnings: list[str] = []
+    if unresolved_syms:
+        warnings.append(f"SYMBOL_NOT_FOUND: {', '.join(unresolved_syms)}")
+    if ambiguous_syms:
+        warnings.append(f"AMBIGUOUS_SYMBOL_RANK_SELECTED: {', '.join(sorted(ambiguous_syms))}")
     return await _envelope(
         "compare_assets",
         status,
@@ -1018,6 +1117,33 @@ async def compare_assets(
         collector,
         bound,
         notes,
+        methodology_version=METRICS_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "momentum_weights": MOMENTUM_WEIGHTS,
+            "requested_symbols": params.symbols,
+            "resolved_count": len(comparisons),
+            "unresolved_symbols": unresolved_syms,
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "quotes": _endpoint_provenance(
+                collector,
+                QUOTES,
+                available=bool(comparisons),
+                unavailable_availability="INVALID_SYMBOL"
+                if unresolved_syms and not comparisons
+                else "UNAVAILABLE_SOURCE",
+                reason_code="SYMBOL_NOT_FOUND" if unresolved_syms and not comparisons else None,
+            ),
+            "historical_risk_365d": _endpoint_provenance(
+                collector,
+                OHLCV,
+                available=any_ohlcv_available,
+                unavailable_availability="UNAVAILABLE_TIER",
+                reason_code="CMC_OHLCV_TIER_RESTRICTED",
+            ),
+        },
+        warnings=warnings,
     )
 
 
@@ -1028,9 +1154,17 @@ async def analyze_asset(
 ) -> EvidenceEnvelope[AnalyzeAssetData]:
     bound = _bound(deps)
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    ids, notes = await _resolve(bound, collector, [params.symbol, "BTC"])
+    unresolved_syms: list[str] = []
+    ambiguous_syms: dict[str, list[dict[str, object]]] = {}
+    ids, notes = await _resolve(
+        bound,
+        collector,
+        [params.symbol, "BTC"],
+        unresolved_out=unresolved_syms,
+        ambiguous_out=ambiguous_syms,
+    )
     resolved_id = ids.get(params.symbol)
-    assets = await _quoted(collector, ids, params.quote_currency) if ids else {}
+    assets = await _quoted(collector, ids, params.quote_currency) if resolved_id is not None else {}
     asset = assets.get(params.symbol)
     btc = assets.get("BTC")
     tags: list[str] = []
@@ -1124,6 +1258,11 @@ async def analyze_asset(
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
+    warnings: list[str] = []
+    if resolved_id is None:
+        warnings.append(f"SYMBOL_NOT_FOUND: {params.symbol}")
+    elif params.symbol in ambiguous_syms:
+        warnings.append(f"AMBIGUOUS_SYMBOL_RANK_SELECTED: {params.symbol} -> cmc_id={resolved_id}")
     return await _envelope(
         "analyze_asset",
         status,
@@ -1141,6 +1280,39 @@ async def analyze_asset(
         collector,
         bound,
         notes,
+        methodology_version=METRICS_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "momentum_weights": MOMENTUM_WEIGHTS,
+            "symbol_resolved": resolved_id is not None,
+            "ambiguous_candidates": ambiguous_syms.get(params.symbol),
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "quote": _endpoint_provenance(
+                collector,
+                QUOTES,
+                available=asset is not None,
+                unavailable_availability="INVALID_SYMBOL"
+                if resolved_id is None
+                else "UNAVAILABLE_SOURCE",
+                reason_code="SYMBOL_NOT_FOUND" if resolved_id is None else None,
+            ),
+            "price_performance": _endpoint_provenance(
+                collector,
+                PERFORMANCE,
+                available=bool(periods),
+                unavailable_availability="UNAVAILABLE_TIER",
+                reason_code="CMC_PERFORMANCE_TIER_RESTRICTED",
+            ),
+            "historical_risk_365d": _endpoint_provenance(
+                collector,
+                OHLCV,
+                available=data.annualized_volatility is not None,
+                unavailable_availability="UNAVAILABLE_TIER",
+                reason_code="CMC_OHLCV_TIER_RESTRICTED",
+            ),
+        },
+        warnings=warnings,
     )
 
 
@@ -1152,7 +1324,15 @@ async def analyze_momentum(
     bound = _bound(deps)
     symbols = list(dict.fromkeys([*params.symbols, "BTC"]))
     collector = Collector(bound.gateway, override_cmc_key, bound.capabilities)
-    ids, notes = await _resolve(bound, collector, symbols)
+    unresolved_syms: list[str] = []
+    ambiguous_syms: dict[str, list[dict[str, object]]] = {}
+    ids, notes = await _resolve(
+        bound,
+        collector,
+        symbols,
+        unresolved_out=unresolved_syms,
+        ambiguous_out=ambiguous_syms,
+    )
     assets = await _quoted(collector, ids, params.quote_currency)
     btc = quote_of(assets.get("BTC") or {}, params.quote_currency)
     rows: list[MomentumRow] = []
@@ -1178,6 +1358,9 @@ async def analyze_momentum(
         status = EvidenceStatus.PARTIAL
     else:
         status = EvidenceStatus.OK
+    warnings: list[str] = []
+    if unresolved_syms:
+        warnings.append(f"SYMBOL_NOT_FOUND: {', '.join(unresolved_syms)}")
     return await _envelope(
         "analyze_momentum",
         status,
@@ -1188,12 +1371,42 @@ async def analyze_momentum(
             "relative_strength",
             "composite_momentum_score",
             "acceleration_7d_vs_30d",
+            "daily_rate_spread_7d_vs_30d_pct",
         ],
         "latest quotes",
         [row.cmc_id for row in rows if row.cmc_id is not None],
         collector,
         bound,
         notes,
+        methodology_version=MOMENTUM_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "momentum_weights": MOMENTUM_WEIGHTS,
+            "acceleration_note": (
+                "acceleration_7d_vs_30d is cumulative (7d - 30d) pp spread; "
+                "daily_rate_spread_7d_vs_30d_pct normalizes to (7d/7) - (30d/30) pp/day."
+            ),
+            "resolved_count": resolved_count,
+            "requested_count": len(params.symbols),
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "quotes": _endpoint_provenance(
+                collector,
+                QUOTES,
+                available=resolved_count > 0,
+                unavailable_availability="INVALID_SYMBOL"
+                if resolved_count == 0 and unresolved_syms
+                else "UNAVAILABLE_SOURCE",
+            ),
+            "btc_benchmark": _endpoint_provenance(
+                collector,
+                QUOTES,
+                available=bool(btc),
+                unavailable_availability="UNAVAILABLE_SOURCE",
+                reason_code="BTC_BENCHMARK_MISSING",
+            ),
+        },
+        warnings=warnings,
     )
 
 
@@ -1350,17 +1563,74 @@ async def detect_market_anomalies(
         f"({len(high_vol_syms)} high-volume, {len(low_vol_syms)} low-volume/illiquidity, "
         f"{len(change_hits)} price-change) and {len(divergences)} BTC divergences."
     )
+    illiquid_price_outliers: list[str] = []
+    row_by_sym = {str(r.get("symbol") or ""): r for r in eligible_rows}
+    for hit in change_hits:
+        raw_r = row_by_sym.get(hit.symbol)
+        if raw_r is None:
+            continue
+        q = quote_of(raw_r, params.quote_currency)
+        v24 = as_float(q.get("volume_24h"))
+        mc = as_float(q.get("market_cap"))
+        v_mcap = volume_to_mcap(v24, mc)
+        if (v24 is not None and v24 < 100_000.0) or (v_mcap is not None and v_mcap < 0.001):
+            illiquid_price_outliers.append(hit.symbol)
+    anom_warnings: list[str] = []
+    if illiquid_price_outliers:
+        anom_warnings.append(
+            "Low-liquidity price outlier warning (unreliable / thin-book move): "
+            + ", ".join(illiquid_price_outliers)
+        )
     return await _envelope(
         "detect_market_anomalies",
         status,
         summary,
         data,
         ["z_score", "modified_z_score", "btc_divergence"],
-        f"top {params.universe_size} listings (verified stablecoins excluded)",
+        f"top {scan_limit} listings (verified stablecoins excluded)",
         [],
         collector,
         bound,
         notes,
+        methodology_version=ANOMALY_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "universe_policy_version": UNIVERSE_POLICY_VERSION,
+            "population_scanned": len(rows),
+            "population_eligible": len(eligible_rows),
+            "sample_size_ln_volume_to_mcap": valid_ratio_count,
+            "sample_size_percent_change_24h": valid_change_count,
+            "z_score_threshold": OUTLIER_Z,
+            "modified_z_score_threshold": OUTLIER_MODIFIED_Z,
+            "btc_divergence_threshold_pct": 8.0,
+            "excluded_stablecoins": excluded_stables,
+            "excluded_corrupt_returns": corrupt_excluded,
+            "unknown_classification_retained": unknown_class_count,
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "volume_mcap_outliers": _endpoint_provenance(
+                collector,
+                LISTINGS,
+                available=valid_ratio_count >= MIN_ANOMALY_SAMPLE,
+                unavailable_availability="INSUFFICIENT_SAMPLE",
+                reason_code="SAMPLE_BELOW_MIN",
+            ),
+            "price_change_outliers": _endpoint_provenance(
+                collector,
+                LISTINGS,
+                available=valid_change_count >= MIN_ANOMALY_SAMPLE,
+                unavailable_availability="INSUFFICIENT_SAMPLE",
+                reason_code="SAMPLE_BELOW_MIN",
+            ),
+            "btc_divergences": _endpoint_provenance(
+                collector,
+                LISTINGS,
+                available=btc_change is not None,
+                unavailable_availability="UNAVAILABLE_SOURCE",
+                reason_code="BTC_24H_MISSING",
+            ),
+        },
+        warnings=anom_warnings,
     )
 
 
@@ -1469,6 +1739,25 @@ async def analyze_market_regime(
         collector,
         bound,
         notes,
+        methodology_version=REGIME_RULES_VERSION,
+        methodology_parameters={
+            "quote_currency": quote_currency,
+            "breadth_sample_size": len(known_changes),
+            "stale_inputs": stale_inputs,
+            "thresholds": REGIME_THRESHOLDS,
+        },
+        request_parameters={"quote_currency": quote_currency},
+        field_provenance={
+            "macro_global": _endpoint_provenance(
+                collector, GLOBAL, available=data.total_mcap_change_24h_pct is not None
+            ),
+            "fear_and_greed": _endpoint_provenance(
+                collector, FEAR, available=data.fear_greed_value is not None
+            ),
+            "top50_breadth": _endpoint_provenance(
+                collector, LISTINGS, available=data.top50_breadth_positive_pct is not None
+            ),
+        },
     )
 
 
@@ -1708,6 +1997,29 @@ async def analyze_sector_rotation(
         collector,
         bound,
         notes,
+        methodology_version=METRICS_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "min_constituents": MIN_SECTOR_CONSTITUENTS,
+            "max_benchmark_timestamp_skew_seconds": MAX_BENCHMARK_TIMESTAMP_SKEW_SECONDS,
+            "unique_constituent_count": unique_count,
+            "overlapping_asset_count": overlap_count,
+            "non_mutually_exclusive_shares": True,
+        },
+        request_parameters=request.model_dump(mode="json"),
+        field_provenance={
+            "listings_benchmark": _endpoint_provenance(
+                collector, LISTINGS, available=benchmark.median_change_24h_pct is not None
+            ),
+            "rwa_universe_sample": _endpoint_provenance(
+                collector,
+                RWA_ASSETS_LIST,
+                available=rwa_universe is not None,
+                unavailable_availability="UNAVAILABLE_TIER"
+                if rwa_requested
+                else "NOT_APPLICABLE",
+                reason_code="RWA_SUBSET_ONLY" if rwa_requested else "NOT_REQUESTED",
+            ),
+        },
     )
 
 
@@ -1889,6 +2201,39 @@ async def get_historical_performance(
         collector,
         bound,
         notes,
+        methodology_version=METRICS_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "min_observations": MIN_OBSERVATIONS,
+            "used_warehouse_fallback": used_warehouse,
+            "overlap_days": data.overlap_days,
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "asset_history": _endpoint_provenance(
+                collector,
+                "warehouse://daily_asset_closes" if used_warehouse else OHLCV,
+                available=not asset.empty,
+                unavailable_availability="INVALID_SYMBOL"
+                if asset_id is None
+                else ("UNAVAILABLE_TIER" if tier_blocked else "UNAVAILABLE_SOURCE"),
+                reason_code=(
+                    "SYMBOL_NOT_FOUND"
+                    if asset_id is None
+                    else ("CMC_OHLCV_TIER_RESTRICTED" if tier_blocked else "OHLCV_UNAVAILABLE")
+                ),
+            ),
+            "btc_benchmark_history": _endpoint_provenance(
+                collector,
+                "warehouse://daily_asset_closes" if used_warehouse else OHLCV,
+                available=not benchmark.empty,
+                unavailable_availability=(
+                    "UNAVAILABLE_TIER" if tier_blocked else "INSUFFICIENT_SAMPLE"
+                ),
+                reason_code=(
+                    "CMC_OHLCV_TIER_RESTRICTED" if tier_blocked else "BTC_HISTORY_UNAVAILABLE"
+                ),
+            ),
+        },
     )
 
 
@@ -2106,6 +2451,50 @@ async def analyze_derivatives(
         collector,
         bound,
         notes,
+        methodology_version=METRICS_METHODOLOGY_VERSION,
+        methodology_parameters={
+            "pair_sample_limit": DERIVATIVES_PAIR_LIMIT,
+            "market_pair_count": data.market_pair_count,
+            "sampled_pair_count": data.sampled_pair_count,
+            "open_interest_pairs_included": data.open_interest_pairs_included,
+            "outlier_pairs_excluded": data.outlier_pairs_excluded,
+        },
+        request_parameters=params.model_dump(mode="json"),
+        field_provenance={
+            "open_interest_sampled": _endpoint_provenance(
+                collector,
+                DERIVATIVES,
+                available=data.open_interest is not None,
+                unavailable_availability="INSUFFICIENT_SAMPLE",
+                reason_code="NO_VALID_OI_PAIRS",
+            ),
+            "funding_rate_aggregate": FieldProvenance(
+                availability="NOT_APPLICABLE",
+                reason_code="UNIFORM_FUNDING_INTERVAL_UNAVAILABLE",
+                source="coinmarketcap",
+                endpoint=DERIVATIVES,
+            ),
+            "asset_liquidations_24h": FieldProvenance(
+                availability="UNAVAILABLE_SOURCE",
+                reason_code="ASSET_LEVEL_LIQUIDATIONS_UNSUPPORTED_BY_CMC_V5",
+                source="coinmarketcap",
+                endpoint=LIQUIDATIONS,
+            ),
+            "market_wide_liquidations": _endpoint_provenance(
+                collector,
+                LIQUIDATIONS,
+                available=market_wide_liquidations is not None,
+                unavailable_availability="UNAVAILABLE_TIER",
+                reason_code="MARKET_WIDE_LIQUIDATIONS_UNAVAILABLE",
+            ),
+            "derivatives_venues": _endpoint_provenance(
+                collector,
+                DERIVATIVES_EXCHANGES,
+                available=derivatives_venues is not None,
+                unavailable_availability="UNAVAILABLE_TIER",
+                reason_code="DERIVATIVES_VENUES_UNAVAILABLE",
+            ),
+        },
     )
 
 
@@ -2113,15 +2502,32 @@ async def _resolve(
     deps: ServiceDeps,
     collector: Collector,
     symbols: list[str],
+    *,
+    unresolved_out: list[str] | None = None,
+    ambiguous_out: dict[str, list[dict[str, object]]] | None = None,
 ) -> tuple[dict[str, int], list[str]]:
     resolution = await deps.assets.resolve(symbols)
     missing = [symbol for symbol in symbols if symbol not in resolution.ids]
     notes = list(resolution.limitations)
+    if ambiguous_out is not None and resolution.ambiguous_symbols:
+        ambiguous_out.update(resolution.ambiguous_symbols)
+    still_unresolved: list[str] = []
     if missing:
-        payload = await collector.get(MAP, {"symbol": ",".join(missing)})
+        payload, record = await collector.get_with_record(MAP, {"symbol": ",".join(missing)})
+        if record.error and record.error_category == "client_error":
+            # CMC /v1/cryptocurrency/map returns HTTP 400 when a ticker symbol does not exist.
+            # Translate user/domain lookup miss into a clean SYMBOL_NOT_FOUND note rather than
+            # marking downstream state as an upstream service failure.
+            record.error = None
+            record.error_category = "symbol_not_found"
         extra = choose_ids(missing, map_rows(payload or {}))
         resolution.ids.update(extra.ids)
         notes.extend(extra.limitations)
+        if ambiguous_out is not None and extra.ambiguous_symbols:
+            ambiguous_out.update(extra.ambiguous_symbols)
+        still_unresolved = [s for s in missing if s not in resolution.ids]
+    if unresolved_out is not None:
+        unresolved_out.extend(still_unresolved)
     return resolution.ids, notes
 
 
@@ -2359,6 +2765,7 @@ def _momentum_row(
         composite_momentum_score=score,
         timeframes_available=tf_count,
         acceleration_7d_vs_30d=relative_strength(change_7d, change_30d),
+        daily_rate_spread_7d_vs_30d_pct=daily_rate_spread_7d_vs_30d(change_7d, change_30d),
     )
 
 
@@ -2583,6 +2990,19 @@ async def get_capabilities(deps: ServiceDeps | None = None) -> EvidenceEnvelope[
                     ),
                 )
             )
+        elif name in {"analyze_asset", "compare_assets"} and not _capability_allows(
+            bound, OHLCV, None
+        ):
+            tools.append(
+                ToolAvailability(
+                    name=name,
+                    mode="full",
+                    reason=(
+                        "Primary quote and momentum path enabled ('full'); optional 365d "
+                        "OHLCV risk sub-fields remain null without caller BYOK."
+                    ),
+                )
+            )
         else:
             tools.append(ToolAvailability(name=name, mode="full"))
     data_mode = "VERIFIED_SNAPSHOT_FALLBACK" if snap.state == "CUTOFF" else "CACHED"
@@ -2596,7 +3016,9 @@ async def get_capabilities(deps: ServiceDeps | None = None) -> EvidenceEnvelope[
     )
     evidence_id = new_evidence_id()
     limitations = [
-        "This response reads the in-process budget snapshot and does not call CoinMarketCap."
+        "This response reads the in-process budget snapshot and does not call CoinMarketCap.",
+        "Mode 'full' indicates the tool execution path is active; optional tier-restricted "
+        "sub-fields (e.g. 365d OHLCV volatility/drawdown) stay null without caller BYOK.",
     ]
     try:
         await bound.evidence.persist(
@@ -2610,9 +3032,14 @@ async def get_capabilities(deps: ServiceDeps | None = None) -> EvidenceEnvelope[
                 credit_cost=0,
                 engine_version=get_settings().engine_version,
                 methodology={
+                    "version": "capabilities_snapshot_v1",
                     "metrics": ["budget_state", "tool_mode"],
                     "observation_window": "current",
                     "annualization_basis": "365d",
+                    "parameters": {
+                        "snapshot_scope": "system_capability_only",
+                        "is_market_data": False,
+                    },
                 },
                 limitations=limitations,
                 raw_excerpt={},
@@ -2627,9 +3054,14 @@ async def get_capabilities(deps: ServiceDeps | None = None) -> EvidenceEnvelope[
         summary="Capability and budget mode without a CoinMarketCap call.",
         data=data,
         methodology=MethodologyMeta(
+            version="capabilities_snapshot_v1",
             metrics=["budget_state", "tool_mode"],
             observation_window="current",
             annualization_basis="365d",
+            parameters={
+                "snapshot_scope": "system_capability_only",
+                "is_market_data": False,
+            },
         ),
         evidence=EvidenceMeta(
             evidence_id=evidence_id,
@@ -2657,6 +3089,69 @@ def _status(collector: Collector, required_present: bool) -> EvidenceStatus:
     return EvidenceStatus.OK if required_present else EvidenceStatus.INSUFFICIENT_DATA
 
 
+def _endpoint_provenance(
+    collector: Collector,
+    endpoint: str,
+    *,
+    available: bool,
+    unavailable_availability: FieldAvailability = "UNAVAILABLE_SOURCE",
+    reason_code: str | None = None,
+    source: str = "coinmarketcap",
+) -> FieldProvenance:
+    record = next(
+        (rec for rec in reversed(collector.records) if rec.endpoint == endpoint),
+        None,
+    )
+    meta = record.meta if record is not None else None
+    availability: FieldAvailability = "AVAILABLE" if available else unavailable_availability
+    if not available and reason_code is None and record is not None and record.error_category:
+        reason_code = record.error_category.upper()
+    return FieldProvenance(
+        availability=availability,
+        reason_code=reason_code if not available else None,
+        source=source,
+        endpoint=endpoint,
+        source_timestamp=meta.source_timestamp if meta is not None else None,
+        retrieved_at=meta.retrieved_at if meta is not None else None,
+        data_mode=(DataMode(meta.data_mode) if meta is not None else DataMode.UNAVAILABLE),
+        freshness=(Freshness(meta.freshness) if meta is not None else Freshness.STALE),
+    )
+
+
+def _bounded_pct(
+    value: float | None,
+    notes: list[str],
+    field_name: str,
+    *,
+    min_val: float = 0.0,
+    max_val: float = 100.0,
+) -> float | None:
+    if value is None:
+        return None
+    if value < min_val or value > max_val:
+        notes.append(
+            f"{field_name} ({value:.4g}) fell outside valid range [{min_val:g}, {max_val:g}] "
+            "and was nulled rather than reported with an impossible percentage."
+        )
+        return None
+    return value
+
+
+def _non_negative(
+    value: float | None,
+    notes: list[str],
+    field_name: str,
+) -> float | None:
+    if value is None:
+        return None
+    if value < 0.0:
+        notes.append(
+            f"{field_name} ({value:.4g}) was negative and nulled for data integrity."
+        )
+        return None
+    return value
+
+
 async def _envelope(
     tool: str,
     status: EvidenceStatus,
@@ -2668,15 +3163,29 @@ async def _envelope(
     collector: Collector,
     deps: ServiceDeps,
     notes: list[str] | None = None,
+    *,
+    methodology_version: str | None = METRICS_METHODOLOGY_VERSION,
+    methodology_parameters: dict[str, object] | None = None,
+    request_parameters: dict[str, object] | None = None,
+    field_provenance: dict[str, FieldProvenance] | None = None,
+    warnings: list[str] | None = None,
 ) -> EvidenceEnvelope:
     summary_calls = summarize_calls(collector.records, deps.now())
     limitations = dedupe_limitations([*summary_calls.limitations, *(notes or [])])
+    clean_warnings = dedupe_limitations(warnings or [])
     evidence_id = new_evidence_id()
-    methodology = {
+    methodology: dict[str, object] = {
         "metrics": metrics,
         "observation_window": window,
         "annualization_basis": "365d",
+        "response_status": status.value,
     }
+    if methodology_version is not None:
+        methodology["version"] = methodology_version
+    if methodology_parameters is not None:
+        methodology["parameters"] = methodology_parameters
+    if request_parameters is not None:
+        methodology["request_parameters"] = request_parameters
     draft = EvidenceDraft(
         evidence_id=evidence_id,
         tool_name=tool,
@@ -2703,9 +3212,11 @@ async def _envelope(
         summary=summary,
         data=data,
         methodology=MethodologyMeta(
+            version=methodology_version,
             metrics=metrics,
             observation_window=window,
             annualization_basis="365d",
+            parameters=methodology_parameters,
         ),
         evidence=EvidenceMeta(
             evidence_id=evidence_id,
@@ -2717,5 +3228,7 @@ async def _envelope(
             cmc_credit_cost=summary_calls.credit_cost,
             cache_hit=summary_calls.cache_hit,
         ),
+        field_provenance=field_provenance,
         limitations=limitations,
+        warnings=clean_warnings,
     )

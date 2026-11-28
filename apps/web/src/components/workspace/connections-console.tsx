@@ -289,6 +289,8 @@ export function ConnectionsConsole() {
             <span className="text-xs font-semibold text-muted-foreground">Hosted HTTPS</span>
             {loading ? (
               <StatusIndicator state="LOADING" />
+            ) : statusError || !mcpStatus ? (
+              <StatusIndicator state="UNVERIFIED" label={isId ? "BELUM DICEK" : "STANDBY"} />
             ) : remoteDeployed ? (
               <StatusIndicator state="CONNECTED" label="DEPLOYED" />
             ) : (

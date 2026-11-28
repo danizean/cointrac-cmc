@@ -9,10 +9,10 @@ const site = siteUrl();
 
 export const metadata: Metadata = {
   title: {
-    absolute: "CoinTrac — Crypto Market Intelligence API, Hidden Gem Discovery & MCP",
+    absolute: "CoinTrac — Trusted Crypto Market Data API & MCP Server",
   },
   description:
-    "Structured CoinMarketCap data as 10 REST intelligence tools, deterministic Hidden Gem Discovery, and 14 MCP tools with typed schemas, audited evidence envelopes, and null-safe responses.",
+    "Connect ChatGPT, Claude, Gemini, and apps to CoinMarketCap data via 14 MCP tools and 10 REST endpoints with audited EvidenceEnvelope responses.",
   alternates: {
     canonical: "/",
   },

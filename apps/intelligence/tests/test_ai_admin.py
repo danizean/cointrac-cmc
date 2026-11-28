@@ -423,3 +423,60 @@ async def test_muse_length_empty_content_recovers_cleanly(ai_env):
     )
     assert res.status_code == 200
     assert "Recovered" in res.json()["answer"]
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_returns_normalized_structured_cards_and_regime_fallback(
+    ai_env, monkeypatch
+):
+    from app.services import intelligence as workflows
+
+    client = ai_env["client"]
+    hdr_user = {"Authorization": f"Bearer {ai_env['tok_user']}"}
+
+    # 1. Verify structured_cards KPIs, tables, and timestamped evidence_refs on normal run
+    res = client.post(
+        "/v1/ai/chat",
+        headers=hdr_user,
+        json={"messages": [{"role": "user", "content": "Ringkas pasar sekarang"}], "locale": "id"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    cards = body["structured_cards"]
+    assert cards is not None
+    assert len(cards["kpis"]) >= 3
+    assert any(kpi["label"] in {"Kapitalisasi Pasar", "BTC Spot"} for kpi in cards["kpis"])
+    assert len(cards["tables"]) == 1
+    assert body["evidence_refs"][0]["retrieved_at_utc"] is not None
+
+    # 2. Verify analyze_market_regime retry once & fallback to cached snapshot after failure
+    svc: AIAnalystService = ai_env["svc"]
+    digest1, cit1, dumped1 = await svc._execute_tool(
+        user_id=ai_env["user_id"],
+        name="analyze_market_regime",
+        arguments_raw='{"quote_currency":"USD"}',
+        byok_cmc_key=None,
+    )
+    assert cit1 is not None and dumped1 is not None
+    assert digest1["data"]["regime"] is not None
+
+    calls = 0
+
+    async def always_fail(*args, **kwargs):
+        del args, kwargs
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("transient upstream failure")
+
+    monkeypatch.setattr(workflows, "analyze_market_regime", always_fail)
+    digest2, cit2, dumped2 = await svc._execute_tool(
+        user_id=ai_env["user_id"],
+        name="analyze_market_regime",
+        arguments_raw='{"quote_currency":"USD"}',
+        byok_cmc_key=None,
+    )
+    assert calls == 2  # Retried once before falling back
+    assert cit2 is not None and dumped2 is not None
+    assert cit2.data_mode == "CACHED"
+    assert digest2["data"]["regime"] == digest1["data"]["regime"]
+    assert any("Fallback to last cached snapshot" in note for note in digest2["limitations"])

@@ -9,15 +9,19 @@ import {
   TOOL_CATALOG,
 } from "./catalog.ts";
 import {
+  formatCompactQuoteCurrency,
   formatCompactUsd,
   formatDurationMs,
   formatInteger,
   formatNumber,
   formatPct,
+  formatQuoteCurrency,
   formatRatio,
   formatUsd,
   formatUtc,
   MISSING,
+  UNAVAILABLE,
+  unavailableLabel,
 } from "./format.ts";
 
 describe("format helpers preserve missing market values", () => {
@@ -49,6 +53,53 @@ describe("format helpers preserve missing market values", () => {
     assert.equal(formatCompactUsd(12_300), "$12.30K");
     assert.equal(formatCompactUsd(-1_900_000_000), "-$1.90B");
     assert.equal(formatCompactUsd(99.5), "$99.50");
+  });
+
+  it("formats non-USD quote currencies with proper currency symbols", () => {
+    assert.equal(formatQuoteCurrency(78_250.5, "EUR"), "€78,250.50");
+    assert.equal(formatCompactQuoteCurrency(2_150_000_000_000, "EUR"), "€2.15T");
+    assert.equal(formatQuoteCurrency(0.0324, "BTC"), "₿0.0324");
+    assert.equal(formatCompactQuoteCurrency(45_200_000, "GBP"), "£45.20M");
+    assert.equal(formatQuoteCurrency(null, "EUR"), MISSING);
+  });
+
+  it("enforces UX/SEO contract invariants across routes and styles", () => {
+    const capabilitiesSource = readFileSync(
+      new URL("../components/marketing/capabilities-view.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.equal(capabilitiesSource.includes("/playground?tool="), true);
+
+    const playgroundSource = readFileSync(
+      new URL("../components/playground-console.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.equal(playgroundSource.includes('get("tool")'), true);
+
+    const cssSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+    assert.equal(cssSource.includes("color-mix(in srgb, var(--card) 92%, transparent)"), false);
+
+    const sitemapSource = readFileSync(new URL("../app/sitemap.ts", import.meta.url), "utf8");
+    assert.equal(sitemapSource.includes('"/pricing"'), true);
+    assert.equal(sitemapSource.includes('"/capabilities"'), false);
+
+    const appLayoutSource = readFileSync(new URL("../app/app/layout.tsx", import.meta.url), "utf8");
+    assert.equal(appLayoutSource.includes("index: false"), true);
+
+    const aiConsoleSource = readFileSync(
+      new URL("../components/workspace/cointrac-ai-console.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.equal(aiConsoleSource.includes("openServerHistoryEntry(log)"), true);
+    assert.equal(aiConsoleSource.includes("handleFeedback(turn.id"), true);
+    assert.equal(aiConsoleSource.includes("AIStructuredCard"), true);
+    assert.equal(aiConsoleSource.includes("remaining_today_requests < 5"), true);
+
+    const aiMarkdownSource = readFileSync(
+      new URL("../components/workspace/ai-markdown.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.equal(aiMarkdownSource.includes("normalizeVerbosePercent"), true);
   });
 });
 
@@ -107,6 +158,38 @@ describe("MCP control plane catalog completeness", () => {
         false,
         `Deferred/forbidden field must NOT appear in types.ts: ${field}`,
       );
+    }
+  });
+
+  it("exposes explicit unavailable helpers and QA audit provenance/disclosures", () => {
+    assert.equal(UNAVAILABLE, "Unavailable");
+    assert.equal(unavailableLabel("en"), "Unavailable");
+    assert.equal(unavailableLabel("id"), "Tidak tersedia");
+
+    const typesSource = readFileSync(new URL("./types.ts", import.meta.url), "utf8");
+    for (const field of [
+      "field_provenance?: Record<string, FieldProvenance> | null;",
+      "warnings?: string[];",
+      "daily_rate_spread_7d_vs_30d_pct?: number | null;",
+      "rwa_universe?: RwaUniverseContext | null;",
+      "market_wide_liquidations?: MarketWideLiquidationsContext | null;",
+      "derivatives_venues?: DerivativesVenuesContext | null;",
+    ]) {
+      assert.equal(typesSource.includes(field), true, `Missing QA type field: ${field}`);
+    }
+
+    const reportSource = readFileSync(
+      new URL("../components/envelope-report.tsx", import.meta.url),
+      "utf8",
+    );
+    for (const phrase of [
+      "Source Timestamps, Freshness &amp; Field Provenance",
+      "Overlapping multi-tag membership: sector volume shares do NOT sum to 100%.",
+      "MARKET-WIDE ONLY — NOT ATTRIBUTABLE TO THIS COIN",
+      "System Capability Snapshot (Not Live Market Data)",
+      "Underlying RWA Universe — Sampled Subset Only (Not Full Universe)",
+    ]) {
+      assert.equal(reportSource.includes(phrase), true, `Missing UI disclosure: ${phrase}`);
     }
   });
 });

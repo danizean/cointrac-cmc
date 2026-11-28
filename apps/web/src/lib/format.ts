@@ -1,38 +1,105 @@
 export const MISSING = "—";
+export const UNAVAILABLE = "Unavailable";
+
+export function unavailableLabel(locale: "en" | "id" = "en"): string {
+  return locale === "id" ? "Tidak tersedia" : "Unavailable";
+}
 
 function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-export function formatUsd(value: number | null | undefined): string {
-  if (!isFiniteNumber(value)) return MISSING;
-  const abs = Math.abs(value);
-  const maximumFractionDigits = abs >= 100 ? 2 : abs >= 1 ? 3 : 6;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits,
-  }).format(value);
+const CURRENCY_PREFIXES: Record<string, string> = {
+  USD: "$",
+  USDT: "$",
+  USDC: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  CNY: "¥",
+  BTC: "₿",
+  ETH: "Ξ",
+  IDR: "Rp ",
+  SGD: "S$",
+  AUD: "A$",
+  CAD: "C$",
+  CHF: "CHF ",
+};
+
+function normalizeCurrencyCode(currency: string | null | undefined): string {
+  const cleaned = currency?.trim().toUpperCase();
+  return cleaned && cleaned.length > 0 ? cleaned : "USD";
 }
 
-export function formatCompactUsd(value: number | null | undefined): string {
+export function formatQuoteCurrency(
+  value: number | null | undefined,
+  currency: string | null | undefined = "USD"
+): string {
   if (!isFiniteNumber(value)) return MISSING;
+  const code = normalizeCurrencyCode(currency);
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+
+  if (code === "BTC" || code === "ETH") {
+    const decimals = abs >= 100 ? 2 : abs >= 1 ? 4 : 6;
+    const prefix = CURRENCY_PREFIXES[code] ?? `${code} `;
+    return `${sign}${prefix}${abs.toLocaleString("en-US", {
+      minimumFractionDigits: abs >= 1 ? 2 : 4,
+      maximumFractionDigits: decimals,
+    })}`;
+  }
+
+  const maximumFractionDigits = abs >= 100 ? 2 : abs >= 1 ? 3 : 6;
+  const minimumFractionDigits = code === "JPY" || code === "IDR" ? 0 : 2;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits,
+      maximumFractionDigits: Math.max(minimumFractionDigits, maximumFractionDigits),
+    }).format(value);
+  } catch {
+    const prefix = CURRENCY_PREFIXES[code] ?? `${code} `;
+    return `${sign}${prefix}${abs.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits,
+    })}`;
+  }
+}
+
+export function formatCompactQuoteCurrency(
+  value: number | null | undefined,
+  currency: string | null | undefined = "USD"
+): string {
+  if (!isFiniteNumber(value)) return MISSING;
+  const code = normalizeCurrencyCode(currency);
+  const prefix = CURRENCY_PREFIXES[code] ?? `${code} `;
   const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
   if (abs >= 1_000_000_000_000) {
-    return `${sign}$${(abs / 1_000_000_000_000).toFixed(2)}T`;
+    return `${sign}${prefix}${(abs / 1_000_000_000_000).toFixed(2)}T`;
   }
   if (abs >= 1_000_000_000) {
-    return `${sign}$${(abs / 1_000_000_000).toFixed(2)}B`;
+    return `${sign}${prefix}${(abs / 1_000_000_000).toFixed(2)}B`;
   }
   if (abs >= 1_000_000) {
-    return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+    return `${sign}${prefix}${(abs / 1_000_000).toFixed(2)}M`;
   }
   if (abs >= 1_000) {
-    return `${sign}$${(abs / 1_000).toFixed(2)}K`;
+    return `${sign}${prefix}${(abs / 1_000).toFixed(2)}K`;
   }
-  return `${sign}$${abs.toFixed(2)}`;
+  if (code === "BTC" || code === "ETH") {
+    return `${sign}${prefix}${abs.toFixed(abs >= 1 ? 2 : 4)}`;
+  }
+  return `${sign}${prefix}${abs.toFixed(2)}`;
+}
+
+export function formatUsd(value: number | null | undefined): string {
+  return formatQuoteCurrency(value, "USD");
+}
+
+export function formatCompactUsd(value: number | null | undefined): string {
+  return formatCompactQuoteCurrency(value, "USD");
 }
 
 export function formatPct(

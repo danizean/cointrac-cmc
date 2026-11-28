@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 
 from app.api.deps import AuthContext, require_api_key
@@ -71,6 +73,13 @@ async def list_scans(
     return await get_hidden_gem_service().list_scans(user_id, limit=limit)
 
 
+def _require_valid_uuid(raw_id: str, label: str) -> str:
+    try:
+        return str(UUID(str(raw_id).strip()))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=f"{label} not found") from exc
+
+
 @router.get(
     "/scans/{scan_run_id}",
     summary="Get Scan Run Detail & Rejections",
@@ -80,7 +89,8 @@ async def get_scan(
     auth: AuthContext = Depends(require_api_key),
 ) -> dict[str, object]:
     user_id = _require_scoped_user(auth)
-    result = await get_hidden_gem_service().get_scan_detail(user_id, scan_run_id)
+    valid_id = _require_valid_uuid(scan_run_id, "Scan run")
+    result = await get_hidden_gem_service().get_scan_detail(user_id, valid_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Scan run not found")
     run_summary, rejections = result
@@ -100,7 +110,8 @@ async def cancel_scan(
     auth: AuthContext = Depends(require_api_key),
 ) -> ScanRunSummary:
     user_id = _require_scoped_user(auth)
-    updated = await get_hidden_gem_service().cancel_scan(user_id, scan_run_id)
+    valid_id = _require_valid_uuid(scan_run_id, "Scan run")
+    updated = await get_hidden_gem_service().cancel_scan(user_id, valid_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="Scan run not found")
     return updated
@@ -148,7 +159,8 @@ async def get_candidate(
     auth: AuthContext = Depends(require_api_key),
 ) -> CandidateDetail:
     user_id = _require_scoped_user(auth)
-    detail = await get_hidden_gem_service().get_candidate_detail(user_id, candidate_id)
+    valid_id = _require_valid_uuid(candidate_id, "Candidate")
+    detail = await get_hidden_gem_service().get_candidate_detail(user_id, valid_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return detail

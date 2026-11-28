@@ -2,14 +2,36 @@
 
 import type { ReactNode } from "react";
 
+function normalizeVerbosePercent(segment: string): string {
+  // Normalize noisy 3+ decimal percentages from raw LLM prose (e.g. -3.723759% -> -3.7%)
+  return segment.replace(/([+-]?\d+\.\d{3,})%/g, (full, numStr: string) => {
+    const parsed = Number(numStr);
+    if (!Number.isFinite(parsed)) return full;
+    const prefix = numStr.startsWith("+") && parsed > 0 ? "+" : "";
+    return `${prefix}${parsed.toFixed(1)}%`;
+  });
+}
+
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  const normalized = normalizeVerbosePercent(text);
+  const parts = normalized.split(/(\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|`[^`]+`)/g);
   return parts.map((part, idx) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return (
         <strong key={`${keyPrefix}-b-${idx}`} className="font-semibold text-foreground">
           {part.slice(2, -2)}
         </strong>
+      );
+    }
+    if (
+      ((part.startsWith("*") && part.endsWith("*")) ||
+        (part.startsWith("_") && part.endsWith("_"))) &&
+      part.length > 2
+    ) {
+      return (
+        <em key={`${keyPrefix}-i-${idx}`} className="italic text-foreground/90">
+          {part.slice(1, -1)}
+        </em>
       );
     }
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
@@ -71,11 +93,19 @@ function parseTableCells(line: string): string[] {
 }
 
 function looksNumericCell(cell: string): boolean {
-  return /^[+-]?[$€£¥]?[\d,.]+[%KMBT]?$/i.test(cell.replace(/\*\*/g, "").trim());
+  return /^[+-]?[$€£¥₿]?[\d,.]+[%KMBT]?$/i.test(cell.replace(/\*\*/g, "").trim());
+}
+
+function cellToneClass(cell: string): string {
+  const cleaned = cell.replace(/\*\*/g, "").trim();
+  if (/^\+\d+(?:\.\d+)?%$/.test(cleaned)) return "text-positive font-semibold";
+  if (/^-\d+(?:\.\d+)?%$/.test(cleaned)) return "text-destructive font-semibold";
+  return "text-foreground";
 }
 
 type BlockNode =
   | { type: "heading"; level: 1 | 2 | 3; text: string }
+  | { type: "hr" }
   | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "ul"; items: string[] }
   | { type: "ol"; items: string[] }
@@ -92,6 +122,12 @@ function parseMarkdownBlocks(raw: string): BlockNode[] {
     const trimmed = line.trim();
 
     if (!trimmed) {
+      i += 1;
+      continue;
+    }
+
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      blocks.push({ type: "hr" });
       i += 1;
       continue;
     }
@@ -114,9 +150,9 @@ function parseMarkdownBlocks(raw: string): BlockNode[] {
     }
 
     // Heading
-    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
     if (headingMatch) {
-      const level = headingMatch[1].length as 1 | 2 | 3;
+      const level = Math.min(3, headingMatch[1].length) as 1 | 2 | 3;
       blocks.push({ type: "heading", level, text: headingMatch[2] });
       i += 1;
       continue;
@@ -162,7 +198,8 @@ function parseMarkdownBlocks(raw: string): BlockNode[] {
       const curTrim = cur.trim();
       if (!curTrim) break;
       if (
-        /^#{1,3}\s+/.test(curTrim) ||
+        /^#{1,4}\s+/.test(curTrim) ||
+        /^[-*_]{3,}$/.test(curTrim) ||
         curTrim.startsWith(">") ||
         /^[-*•]\s+/.test(curTrim) ||
         /^\d+\.\s+/.test(curTrim) ||
@@ -187,13 +224,17 @@ export function AiMarkdown({ text }: { text: string }) {
   return (
     <div className="space-y-3 text-[13.5px] leading-relaxed text-muted-foreground">
       {blocks.map((block, bIdx) => {
+        if (block.type === "hr") {
+          return <hr key={`hr-${bIdx}`} className="border-border/70" />;
+        }
+
         if (block.type === "heading") {
           const sizeClass =
             block.level === 1
               ? "text-base font-semibold text-foreground"
               : block.level === 2
-                ? "text-sm font-semibold text-foreground pt-1"
-                : "text-[13px] font-semibold uppercase tracking-wide text-link pt-1";
+                ? "pt-1 text-sm font-semibold text-foreground"
+                : "pt-1 text-[12.5px] font-semibold uppercase tracking-wide text-link";
           return (
             <p key={`h-${bIdx}`} className={sizeClass}>
               {renderInline(block.text, `h-${bIdx}`)}
@@ -228,8 +269,8 @@ export function AiMarkdown({ text }: { text: string }) {
                             key={`td-${bIdx}-${rIdx}-${cIdx}`}
                             className={`whitespace-nowrap px-3.5 py-2 ${
                               numeric
-                                ? "font-mono tabular-nums text-foreground"
-                                : "text-foreground"
+                                ? `font-mono tabular-nums ${cellToneClass(cell)}`
+                                : cellToneClass(cell)
                             }`}
                           >
                             {renderInline(cell, `td-${bIdx}-${rIdx}-${cIdx}`)}

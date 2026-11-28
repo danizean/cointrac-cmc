@@ -473,9 +473,9 @@ export function LoginForm({
       </form>
 
       <p className="text-center text-xs text-muted-foreground">
-        {isId ? "Belum punya akun? " : "Don\u2019t have an account? "}
+        {isId ? "Belum punya akun? " : "No account yet? "}
         <Link href="/signup" className="font-semibold text-link hover:underline">
-          {isId ? "Daftar gratis" : "Sign up"}
+          {isId ? "Buat akun gratis — 30 detik" : "Create one free — 30 seconds"}
         </Link>
       </p>
     </div>

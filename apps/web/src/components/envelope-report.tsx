@@ -4,15 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AlertCircle, ArrowUpRight, ShieldCheck } from "lucide-react";
 import {
-  formatCompactUsd,
+  formatCompactQuoteCurrency,
   formatInteger,
   formatNumber,
   formatPct,
+  formatQuoteCurrency,
   formatRatio,
-  formatUsd,
   formatUtc,
   MISSING,
   pctToneClass,
+  UNAVAILABLE,
 } from "@/lib/format";
 import type {
   AnalyzeAssetData,
@@ -33,6 +34,7 @@ import { SectorRotationChart } from "./sector-rotation-chart";
 import {
   AnomalyDirectionBadge,
   DataModeBadge,
+  explainEvidenceStatus,
   FreshnessBadge,
   MultiHorizonRiskBadge,
   RegimeBadge,
@@ -130,13 +132,13 @@ function renderToolData(envelope: EvidenceEnvelope) {
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             <MetricTile
               label="Total Market Cap"
-              value={formatCompactUsd(d.total_market_cap)}
+              value={formatCompactQuoteCurrency(d.total_market_cap, d.quote_currency)}
               sub={`24h: ${formatPct(d.total_market_cap_change_24h_pct, { signed: true })}`}
               toneClass={pctToneClass(d.total_market_cap_change_24h_pct)}
             />
             <MetricTile
               label="24h Total Volume"
-              value={formatCompactUsd(d.total_volume_24h)}
+              value={formatCompactQuoteCurrency(d.total_volume_24h, d.quote_currency)}
               sub={`Quote: ${d.quote_currency}`}
             />
             <div className="ct-surface-card flex flex-col justify-between rounded-[14px] p-4 transition-colors hover:border-border-strong">
@@ -217,7 +219,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
                       </div>
                       <div className="mt-3 flex items-baseline justify-between gap-2">
                         <p className="font-mono text-lg font-bold tabular-nums text-foreground">
-                          {formatUsd(coin.price)}
+                          {formatQuoteCurrency(coin.price, d.quote_currency)}
                         </p>
                         <ArrowUpRight
                           className="h-3.5 w-3.5 text-subtle-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-link"
@@ -259,7 +261,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
                             </Link>
                           </td>
                           <td className="px-4 py-2.5 text-right text-muted-foreground">
-                            {formatUsd(item.price)}
+                            {formatQuoteCurrency(item.price, d.quote_currency)}
                           </td>
                           <td className="px-4 py-2.5 text-right font-semibold text-positive">
                             {formatPct(item.percent_change_24h, { signed: true })}
@@ -298,7 +300,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
                             </Link>
                           </td>
                           <td className="px-4 py-2.5 text-right text-muted-foreground">
-                            {formatUsd(item.price)}
+                            {formatQuoteCurrency(item.price, d.quote_currency)}
                           </td>
                           <td className="px-4 py-2.5 text-right font-semibold text-destructive">
                             {formatPct(item.percent_change_24h, { signed: true })}
@@ -446,10 +448,10 @@ function renderToolData(envelope: EvidenceEnvelope) {
                     </Link>
                   </td>
                   <td className="px-3.5 py-2.5 text-right">
-                    {formatCompactUsd(row.market_cap)}
+                    {formatCompactQuoteCurrency(row.market_cap, d.quote_currency)}
                   </td>
                   <td className="px-3.5 py-2.5 text-right">
-                    {formatCompactUsd(row.volume_24h)}
+                    {formatCompactQuoteCurrency(row.volume_24h, d.quote_currency)}
                   </td>
                   <td className="px-3.5 py-2.5 text-right">
                     {formatRatio(row.volume_to_mcap)}
@@ -486,83 +488,89 @@ function renderToolData(envelope: EvidenceEnvelope) {
     case "compare_assets": {
       const d = envelope.data as CompareAssetsData;
       return (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[760px] text-left text-xs">
-            <thead>
-              <tr className="border-b border-border bg-card-elevated/70 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-3.5 py-2.5">Asset</th>
-                <th className="px-3.5 py-2.5 text-right">Price</th>
-                <th className="px-3.5 py-2.5 text-right">Vol/MCap</th>
-                <th className="px-3.5 py-2.5 text-right">FDV/MCap</th>
-                <th className="px-3.5 py-2.5 text-right">7d %</th>
-                <th className="px-3.5 py-2.5 text-right">RS vs BTC 7d</th>
-                <th className="px-3.5 py-2.5 text-right">Momentum</th>
-                <th className="px-3.5 py-2.5 text-right">Vol (365d)</th>
-                <th className="px-3.5 py-2.5 text-right">Max DD</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border font-mono tabular-nums">
-              {d.assets.map((asset) => (
-                <tr
-                  key={`${asset.cmc_id ?? asset.symbol}`}
-                  className="hover:bg-card-elevated/50"
-                >
-                  <td className="px-3.5 py-2.5 font-bold text-foreground">
-                    <span className="inline-flex items-center gap-2">
-                      <CoinLogo
-                        cmcId={asset.cmc_id}
-                        symbol={asset.symbol}
-                        name={asset.name}
-                        size="sm"
-                      />
-                      <span>
-                        {asset.symbol}
-                        {asset.cmc_id !== null && (
-                          <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
-                            CMC ID {asset.cmc_id}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right">
-                    {formatUsd(asset.price)}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right">
-                    {formatRatio(asset.volume_to_mcap)}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right">
-                    {formatRatio(asset.fdv_to_mcap_ratio, 2)}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right font-semibold ${pctToneClass(asset.percent_change_7d)}`}
-                  >
-                    {formatPct(asset.percent_change_7d, { signed: true })}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right font-semibold ${pctToneClass(asset.rs_vs_btc_7d)}`}
-                  >
-                    {formatPct(asset.rs_vs_btc_7d, { signed: true })}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right font-bold text-primary">
-                    {formatNumber(asset.composite_momentum_score, 1)}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right">
-                    {asset.annualized_volatility !== null
-                      ? formatPct(asset.annualized_volatility * 100, {
-                          decimals: 1,
-                        })
-                      : MISSING}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right text-destructive">
-                    {asset.max_drawdown !== null
-                      ? formatPct(asset.max_drawdown * 100, { decimals: 1 })
-                      : MISSING}
-                  </td>
+        <div className="space-y-2.5">
+          <p className="font-mono text-[11px] text-muted-foreground">
+            Comparison table only — row order does not imply winner ranking. Quote currency:{" "}
+            <strong className="text-foreground">{d.quote_currency}</strong>
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-border bg-card-elevated/70 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-3.5 py-2.5">Asset</th>
+                  <th className="px-3.5 py-2.5 text-right">Price</th>
+                  <th className="px-3.5 py-2.5 text-right">Vol/MCap</th>
+                  <th className="px-3.5 py-2.5 text-right">FDV/MCap</th>
+                  <th className="px-3.5 py-2.5 text-right">7d %</th>
+                  <th className="px-3.5 py-2.5 text-right">RS vs BTC 7d</th>
+                  <th className="px-3.5 py-2.5 text-right">Momentum</th>
+                  <th className="px-3.5 py-2.5 text-right">Vol (365d)</th>
+                  <th className="px-3.5 py-2.5 text-right">Max DD</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border font-mono tabular-nums">
+                {d.assets.map((asset) => (
+                  <tr
+                    key={`${asset.cmc_id ?? asset.symbol}`}
+                    className="hover:bg-card-elevated/50"
+                  >
+                    <td className="px-3.5 py-2.5 font-bold text-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <CoinLogo
+                          cmcId={asset.cmc_id}
+                          symbol={asset.symbol}
+                          name={asset.name}
+                          size="sm"
+                        />
+                        <span>
+                          {asset.symbol}
+                          {asset.cmc_id !== null && (
+                            <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                              CMC ID {asset.cmc_id}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right">
+                      {formatQuoteCurrency(asset.price, d.quote_currency)}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right">
+                      {formatRatio(asset.volume_to_mcap)}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right">
+                      {formatRatio(asset.fdv_to_mcap_ratio, 2)}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right font-semibold ${pctToneClass(asset.percent_change_7d)}`}
+                    >
+                      {formatPct(asset.percent_change_7d, { signed: true })}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right font-semibold ${pctToneClass(asset.rs_vs_btc_7d)}`}
+                    >
+                      {formatPct(asset.rs_vs_btc_7d, { signed: true })}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right font-bold text-primary">
+                      {formatNumber(asset.composite_momentum_score, 1)}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right text-muted-foreground">
+                      {asset.annualized_volatility !== null
+                        ? formatPct(asset.annualized_volatility * 100, {
+                            decimals: 1,
+                          })
+                        : UNAVAILABLE}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right text-destructive">
+                      {asset.max_drawdown !== null
+                        ? formatPct(asset.max_drawdown * 100, { decimals: 1 })
+                        : UNAVAILABLE}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     }
@@ -597,12 +605,12 @@ function renderToolData(envelope: EvidenceEnvelope) {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MetricTile
               label={`${d.symbol} Price`}
-              value={formatUsd(d.price)}
+              value={formatQuoteCurrency(d.price, d.quote_currency)}
               sub={d.cmc_id !== null ? `CMC ID #${d.cmc_id}` : "Canonical ID —"}
             />
             <MetricTile
               label="Market Cap"
-              value={formatCompactUsd(d.market_cap)}
+              value={formatCompactQuoteCurrency(d.market_cap, d.quote_currency)}
               sub={`Vol/MCap: ${formatRatio(d.volume_to_mcap)}`}
             />
             <MetricTile
@@ -647,12 +655,12 @@ function renderToolData(envelope: EvidenceEnvelope) {
               value={
                 d.annualized_volatility !== null
                   ? formatPct(d.annualized_volatility * 100, { decimals: 1 })
-                  : MISSING
+                  : UNAVAILABLE
               }
               sub={`Max DD: ${
                 d.max_drawdown !== null
                   ? formatPct(d.max_drawdown * 100, { decimals: 1 })
-                  : MISSING
+                  : UNAVAILABLE
               }`}
             />
           </div>
@@ -676,66 +684,80 @@ function renderToolData(envelope: EvidenceEnvelope) {
     case "analyze_momentum": {
       const d = envelope.data as AnalyzeMomentumData;
       return (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[720px] text-left text-xs">
-            <thead>
-              <tr className="border-b border-border bg-card-elevated/70 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-3.5 py-2.5">Symbol</th>
-                <th className="px-3.5 py-2.5 text-right">1h</th>
-                <th className="px-3.5 py-2.5 text-right">24h</th>
-                <th className="px-3.5 py-2.5 text-right">7d</th>
-                <th className="px-3.5 py-2.5 text-right">30d</th>
-                <th className="px-3.5 py-2.5 text-right">RS BTC 7d</th>
-                <th className="px-3.5 py-2.5 text-right">Accel</th>
-                <th className="px-3.5 py-2.5 text-right">Score</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border font-mono tabular-nums">
-              {d.assets.map((row) => (
-                <tr key={row.symbol} className="hover:bg-card-elevated/50">
-                  <td className="px-3.5 py-2.5 font-bold text-foreground">
-                    <span className="inline-flex items-center gap-2">
-                      <CoinLogo cmcId={row.cmc_id} symbol={row.symbol} size="sm" />
-                      <span>{row.symbol}</span>
-                    </span>
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_1h)}`}
-                  >
-                    {formatPct(row.percent_change_1h, { signed: true })}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_24h)}`}
-                  >
-                    {formatPct(row.percent_change_24h, { signed: true })}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_7d)}`}
-                  >
-                    {formatPct(row.percent_change_7d, { signed: true })}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_30d)}`}
-                  >
-                    {formatPct(row.percent_change_30d, { signed: true })}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right ${pctToneClass(row.rs_vs_btc_7d)}`}
-                  >
-                    {formatPct(row.rs_vs_btc_7d, { signed: true })}
-                  </td>
-                  <td
-                    className={`px-3.5 py-2.5 text-right ${pctToneClass(row.acceleration_7d_vs_30d)}`}
-                  >
-                    {formatNumber(row.acceleration_7d_vs_30d, 2)}
-                  </td>
-                  <td className="px-3.5 py-2.5 text-right font-bold text-primary">
-                    {formatNumber(row.composite_momentum_score, 1)}
-                  </td>
+        <div className="space-y-2.5">
+          <p className="font-mono text-[11px] text-muted-foreground">
+            Momentum metrics reflect past returns only and are not trade entry signals. Spread (7d−30d) shows cumulative return spread (pp); Daily Rate Δ normalizes to per-day rate.
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[780px] text-left text-xs">
+              <thead>
+                <tr className="border-b border-border bg-card-elevated/70 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-3.5 py-2.5">Symbol</th>
+                  <th className="px-3.5 py-2.5 text-right">1h</th>
+                  <th className="px-3.5 py-2.5 text-right">24h</th>
+                  <th className="px-3.5 py-2.5 text-right">7d</th>
+                  <th className="px-3.5 py-2.5 text-right">30d</th>
+                  <th className="px-3.5 py-2.5 text-right">RS BTC 7d</th>
+                  <th className="px-3.5 py-2.5 text-right">Spread (7d−30d)</th>
+                  <th className="px-3.5 py-2.5 text-right">Daily Rate Δ</th>
+                  <th className="px-3.5 py-2.5 text-right">Score</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border font-mono tabular-nums">
+                {d.assets.map((row) => (
+                  <tr key={row.symbol} className="hover:bg-card-elevated/50">
+                    <td className="px-3.5 py-2.5 font-bold text-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <CoinLogo cmcId={row.cmc_id} symbol={row.symbol} size="sm" />
+                        <span>{row.symbol}</span>
+                      </span>
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_1h)}`}
+                    >
+                      {formatPct(row.percent_change_1h, { signed: true })}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_24h)}`}
+                    >
+                      {formatPct(row.percent_change_24h, { signed: true })}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_7d)}`}
+                    >
+                      {formatPct(row.percent_change_7d, { signed: true })}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.percent_change_30d)}`}
+                    >
+                      {formatPct(row.percent_change_30d, { signed: true })}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.rs_vs_btc_7d)}`}
+                    >
+                      {formatPct(row.rs_vs_btc_7d, { signed: true })}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.acceleration_7d_vs_30d)}`}
+                    >
+                      {formatNumber(row.acceleration_7d_vs_30d, 2)}
+                    </td>
+                    <td
+                      className={`px-3.5 py-2.5 text-right ${pctToneClass(row.daily_rate_spread_7d_vs_30d_pct)}`}
+                    >
+                      {formatPct(row.daily_rate_spread_7d_vs_30d_pct, {
+                        signed: true,
+                        decimals: 2,
+                      })}
+                    </td>
+                    <td className="px-3.5 py-2.5 text-right font-bold text-primary">
+                      {formatNumber(row.composite_momentum_score, 1)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     }
@@ -905,14 +927,27 @@ function renderToolData(envelope: EvidenceEnvelope) {
       const d = envelope.data as SectorRotationData;
       return (
         <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warning/30 bg-warning-soft/40 px-3.5 py-2 font-mono text-[11px] text-muted-foreground">
+            <span>
+              Overlapping multi-tag membership: sector volume shares do NOT sum to 100%.
+            </span>
+            {(d.unique_constituent_count !== undefined && d.unique_constituent_count !== null) ||
+            (d.overlapping_asset_count !== undefined && d.overlapping_asset_count !== null) ? (
+              <span className="text-foreground">
+                Unique assets: {formatInteger(d.unique_constituent_count)} · Multi-sector overlap:{" "}
+                {formatInteger(d.overlapping_asset_count)}
+              </span>
+            ) : null}
+          </div>
           <SectorRotationChart sectors={d.sectors} />
           <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full min-w-[780px] text-left text-xs">
+            <table className="w-full min-w-[840px] text-left text-xs">
               <thead>
                 <tr className="border-b border-border bg-card-elevated/70 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
                   <th className="px-3.5 py-2.5">Sector</th>
                   <th className="px-3.5 py-2.5 text-right">Assets</th>
                   <th className="px-3.5 py-2.5 text-right">Median 24h</th>
+                  <th className="px-3.5 py-2.5 text-right">Cap-Wt 24h</th>
                   <th className="px-3.5 py-2.5 text-right">Excess 24h</th>
                   <th className="px-3.5 py-2.5 text-right">Median 7d</th>
                   <th className="px-3.5 py-2.5 text-right">Excess 7d</th>
@@ -943,6 +978,11 @@ function renderToolData(envelope: EvidenceEnvelope) {
                       {formatPct(s.median_change_24h_pct, { signed: true })}
                     </td>
                     <td
+                      className={`px-3.5 py-2.5 text-right font-medium ${pctToneClass(s.cap_weighted_change_24h_pct)}`}
+                    >
+                      {formatPct(s.cap_weighted_change_24h_pct, { signed: true })}
+                    </td>
+                    <td
                       className={`px-3.5 py-2.5 text-right font-medium ${pctToneClass(s.excess_change_24h_vs_market_pct)}`}
                     >
                       {formatPct(s.excess_change_24h_vs_market_pct, { signed: true })}
@@ -971,6 +1011,63 @@ function renderToolData(envelope: EvidenceEnvelope) {
               </tbody>
             </table>
           </div>
+
+          {d.rwa_universe ? (
+            <div className="space-y-3 rounded-xl border border-border bg-card-elevated/40 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground">
+                    Underlying RWA Universe — Sampled Subset Only (Not Full Universe)
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Isolated from crypto RWA governance tokens. Sampled{" "}
+                    {formatInteger(d.rwa_universe.sampled_rwa_assets)} of{" "}
+                    {formatInteger(d.rwa_universe.total_rwa_assets)} tracked instruments · Sampled cap:{" "}
+                    {formatCompactQuoteCurrency(d.rwa_universe.total_tokenized_market_cap, "USD")} · 24h vol:{" "}
+                    {formatCompactQuoteCurrency(d.rwa_universe.total_tokenized_volume_24h, "USD")}
+                  </p>
+                </div>
+                <span className="rounded-full border border-border bg-background px-2.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground">
+                  Scope: {d.rwa_universe.scope}
+                </span>
+              </div>
+              {d.rwa_universe.top_rwa_assets.length > 0 ? (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full min-w-[600px] text-left font-mono text-xs tabular-nums">
+                    <thead>
+                      <tr className="border-b border-border bg-background/60 text-[10.5px] uppercase text-muted-foreground">
+                        <th className="px-3 py-2">Asset</th>
+                        <th className="px-3 py-2">Type</th>
+                        <th className="px-3 py-2 text-right">Price</th>
+                        <th className="px-3 py-2 text-right">Market Cap</th>
+                        <th className="px-3 py-2 text-right">24h Vol</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {d.rwa_universe.top_rwa_assets.map((asset, idx) => (
+                        <tr key={`${asset.rwa_id ?? asset.symbol ?? idx}`}>
+                          <td className="px-3 py-2 font-semibold text-foreground">
+                            {asset.symbol ?? MISSING}
+                            {asset.name ? (
+                              <span className="ml-1.5 font-sans font-normal text-muted-foreground">
+                                {asset.name}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">
+                            {asset.asset_type ?? MISSING}
+                          </td>
+                          <td className="px-3 py-2 text-right">{formatQuoteCurrency(asset.price, "USD")}</td>
+                          <td className="px-3 py-2 text-right">{formatCompactQuoteCurrency(asset.market_cap, "USD")}</td>
+                          <td className="px-3 py-2 text-right">{formatCompactQuoteCurrency(asset.volume_24h, "USD")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -1010,9 +1107,9 @@ function renderToolData(envelope: EvidenceEnvelope) {
               value={
                 d.simple_return !== null
                   ? formatPct(d.simple_return * 100, { signed: true })
-                  : MISSING
+                  : UNAVAILABLE
               }
-              sub={`Log return: ${d.log_return !== null ? formatRatio(d.log_return, 4) : MISSING}`}
+              sub={`Log return: ${d.log_return !== null ? formatRatio(d.log_return, 4) : UNAVAILABLE}`}
               toneClass={pctToneClass(d.simple_return)}
             />
             <MetricTile
@@ -1020,7 +1117,7 @@ function renderToolData(envelope: EvidenceEnvelope) {
               value={
                 d.annualized_volatility !== null
                   ? formatPct(d.annualized_volatility * 100, { decimals: 2 })
-                  : MISSING
+                  : UNAVAILABLE
               }
             />
             <MetricTile
@@ -1028,17 +1125,21 @@ function renderToolData(envelope: EvidenceEnvelope) {
               value={
                 d.max_drawdown !== null
                   ? formatPct(d.max_drawdown * 100, { decimals: 2 })
-                  : MISSING
+                  : UNAVAILABLE
               }
               toneClass="text-destructive"
             />
             <MetricTile
               label="Beta vs BTC"
-              value={formatNumber(d.beta_vs_btc, 3)}
+              value={d.beta_vs_btc !== null ? formatNumber(d.beta_vs_btc, 3) : UNAVAILABLE}
             />
             <MetricTile
               label="Correlation vs BTC"
-              value={formatNumber(d.correlation_vs_btc, 3)}
+              value={
+                d.correlation_vs_btc !== null
+                  ? formatNumber(d.correlation_vs_btc, 3)
+                  : UNAVAILABLE
+              }
             />
           </div>
         </div>
@@ -1070,29 +1171,38 @@ function renderToolData(envelope: EvidenceEnvelope) {
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <MetricTile
-              label="Funding Rate"
+              label="Funding Rate (Agg)"
               value={
                 d.funding_rate !== null
                   ? formatPct(d.funding_rate * 100, { decimals: 4 })
-                  : MISSING
+                  : UNAVAILABLE
               }
             />
             <MetricTile
-              label="Open Interest (Sampled)"
-              value={formatCompactUsd(d.open_interest)}
+              label="Open Interest (Sampled Pairs)"
+              value={
+                d.open_interest !== null
+                  ? formatCompactQuoteCurrency(d.open_interest, d.quote_currency)
+                  : UNAVAILABLE
+              }
               sub={
                 d.open_interest_pairs_included !== undefined &&
                 d.open_interest_pairs_included !== null
-                  ? `Subset of ${formatInteger(d.open_interest_pairs_included)} pairs (not full market)`
+                  ? `Subset of ${formatInteger(d.open_interest_pairs_included)} valid OI pairs (not full market)`
                   : "Subset of sampled pairs; not full-market OI"
               }
             />
             <MetricTile
-              label="24h Liquidations"
-              value={formatCompactUsd(d.liquidations_24h)}
+              label="24h Liquidations (Asset)"
+              value={
+                d.liquidations_24h !== null
+                  ? formatCompactQuoteCurrency(d.liquidations_24h, d.quote_currency)
+                  : UNAVAILABLE
+              }
+              sub="Asset-specific liquidations not exposed on active CMC feed"
             />
             <MetricTile
-              label="Market Pairs"
+              label="Market Pairs (Sampled)"
               value={
                 d.sampled_pair_count !== undefined &&
                 d.sampled_pair_count !== null &&
@@ -1103,26 +1213,174 @@ function renderToolData(envelope: EvidenceEnvelope) {
               sub={
                 d.outlier_pairs_excluded !== undefined &&
                 d.outlier_pairs_excluded !== null
-                  ? `OI pairs: ${formatInteger(d.open_interest_pairs_included)} · Outliers excluded: ${formatInteger(d.outlier_pairs_excluded)}`
+                  ? `OI pairs: ${formatInteger(d.open_interest_pairs_included)} · Excluded: ${formatInteger(d.outlier_pairs_excluded)}`
                   : undefined
               }
             />
             <MetricTile
               label="Spot Volume 24h"
-              value={formatCompactUsd(d.spot_volume_24h)}
+              value={
+                d.spot_volume_24h !== null
+                  ? formatCompactQuoteCurrency(d.spot_volume_24h, d.quote_currency)
+                  : UNAVAILABLE
+              }
             />
             <MetricTile
               label="Ann. Volatility (365d)"
               value={
                 d.annualized_volatility !== null
                   ? formatPct(d.annualized_volatility * 100, { decimals: 2 })
-                  : MISSING
+                  : UNAVAILABLE
               }
             />
           </div>
+
+          {d.market_pairs && d.market_pairs.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <p className="border-b border-border bg-card-elevated/70 px-3.5 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-foreground">
+                Sampled Derivatives Pairs ({d.market_pairs.length})
+              </p>
+              <table className="w-full min-w-[780px] text-left font-mono text-xs tabular-nums">
+                <thead>
+                  <tr className="border-b border-border text-[10.5px] uppercase text-muted-foreground">
+                    <th className="px-3 py-2">Exchange</th>
+                    <th className="px-3 py-2">Pair</th>
+                    <th className="px-3 py-2">Quote</th>
+                    <th className="px-3 py-2 text-right">Open Interest</th>
+                    <th className="px-3 py-2 text-right">Volume 24h</th>
+                    <th className="px-3 py-2 text-right">Funding</th>
+                    <th className="px-3 py-2">Flags</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {d.market_pairs.map((pair, idx) => (
+                    <tr key={`${pair.market_id ?? pair.market_pair_symbol ?? idx}`}>
+                      <td className="px-3 py-2 font-sans font-medium text-foreground">
+                        {pair.exchange_name ?? MISSING}
+                      </td>
+                      <td className="px-3 py-2">{pair.market_pair_symbol ?? MISSING}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {pair.quote_currency ?? MISSING}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatCompactQuoteCurrency(pair.open_interest, d.quote_currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatCompactQuoteCurrency(pair.volume_24h, d.quote_currency)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {pair.funding_rate !== null
+                          ? formatPct(pair.funding_rate * 100, { decimals: 4 })
+                          : MISSING}
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-muted-foreground">
+                        {[
+                          pair.outlier_detected ? "outlier" : null,
+                          ...pair.exclusions,
+                        ]
+                          .filter(Boolean)
+                          .join(", ") || "included"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {d.market_wide_liquidations || d.derivatives_venues ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {d.market_wide_liquidations ? (
+                <div className="space-y-2 rounded-xl border border-warning/40 bg-warning-soft/30 p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-foreground">
+                      Market-Wide Exchange Liquidations
+                    </span>
+                    <span className="rounded-full border border-warning/50 bg-warning-soft px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-warning">
+                      MARKET-WIDE ONLY — NOT ATTRIBUTABLE TO THIS COIN
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 font-mono text-xs tabular-nums">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Total 24h</p>
+                      <p className="font-semibold text-foreground">
+                        {formatCompactQuoteCurrency(
+                          d.market_wide_liquidations.total_24h,
+                          d.market_wide_liquidations.quote_currency,
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Long 24h</p>
+                      <p className="font-semibold text-foreground">
+                        {formatCompactQuoteCurrency(
+                          d.market_wide_liquidations.long_24h,
+                          d.market_wide_liquidations.quote_currency,
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Short 24h</p>
+                      <p className="font-semibold text-foreground">
+                        {formatCompactQuoteCurrency(
+                          d.market_wide_liquidations.short_24h,
+                          d.market_wide_liquidations.quote_currency,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {d.derivatives_venues ? (
+                <div className="space-y-2 rounded-xl border border-warning/40 bg-warning-soft/30 p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-foreground">
+                      Market-Wide Derivatives Venues ({d.derivatives_venues.sampled_exchanges} sampled)
+                    </span>
+                    <span className="rounded-full border border-warning/50 bg-warning-soft px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-warning">
+                      MARKET-WIDE ONLY — NOT ATTRIBUTABLE TO THIS COIN
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 font-mono text-xs tabular-nums">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Venue Sample OI</p>
+                      <p className="font-semibold text-foreground">
+                        {formatCompactQuoteCurrency(
+                          d.derivatives_venues.total_open_interest,
+                          d.derivatives_venues.quote_currency,
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Venue Sample Vol 24h</p>
+                      <p className="font-semibold text-foreground">
+                        {formatCompactQuoteCurrency(
+                          d.derivatives_venues.total_volume_24h,
+                          d.derivatives_venues.quote_currency,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       );
     }
+
+    case "get_capabilities":
+      return (
+        <div className="space-y-2.5">
+          <div className="rounded-xl border border-primary/35 bg-primary/8 px-3.5 py-2 font-mono text-[11px] font-semibold text-link">
+            System Capability Snapshot (Not Live Market Data)
+          </div>
+          <pre className="overflow-auto rounded-xl border border-border bg-background/80 p-3 font-mono text-xs">
+            {JSON.stringify(envelope.data, null, 2)}
+          </pre>
+        </div>
+      );
 
     default:
       return (
@@ -1159,6 +1417,9 @@ export function EnvelopeFormattedReport({
           <p className="text-sm leading-relaxed text-foreground">
             {envelope.summary}
           </p>
+          <p className="font-mono text-[11px] text-muted-foreground">
+            {explainEvidenceStatus(envelope.status)}
+          </p>
         </div>
 
         <Link
@@ -1171,7 +1432,96 @@ export function EnvelopeFormattedReport({
         </Link>
       </div>
 
+      {envelope.warnings && envelope.warnings.length > 0 ? (
+        <div className="space-y-1 rounded-xl border border-warning/40 bg-warning-soft/50 px-3.5 py-2.5 text-xs text-foreground">
+          <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-warning">
+            Warnings
+          </p>
+          <ul className="list-inside list-disc space-y-0.5 text-muted-foreground">
+            {envelope.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {renderToolData(envelope)}
+
+      <details className="rounded-xl border border-border bg-background/50 px-3.5 py-2.5 text-xs">
+        <summary className="cursor-pointer font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">
+          Source Timestamps, Freshness &amp; Field Provenance
+        </summary>
+        <div className="mt-3 space-y-3 font-mono text-[11px]">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div>
+              <span className="text-subtle-foreground">Retrieved UTC: </span>
+              <span className="text-foreground">
+                {formatUtc(envelope.evidence.retrieved_at_utc)}
+              </span>
+            </div>
+            <div>
+              <span className="text-subtle-foreground">Methodology: </span>
+              <span className="text-foreground">
+                {envelope.methodology.version ?? MISSING} ({envelope.methodology.annualization_basis})
+              </span>
+            </div>
+            <div>
+              <span className="text-subtle-foreground">CMC Credits / Cache: </span>
+              <span className="text-foreground">
+                {envelope.evidence.cmc_credit_cost} cr ·{" "}
+                {envelope.evidence.cache_hit ? "cache_hit=true" : "cache_hit=false"}
+              </span>
+            </div>
+          </div>
+
+          {Object.keys(envelope.evidence.source_timestamps ?? {}).length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-[10.5px] uppercase text-subtle-foreground">Source Timestamps</p>
+              <div className="grid gap-1 sm:grid-cols-2">
+                {Object.entries(envelope.evidence.source_timestamps).map(([key, ts]) => (
+                  <div key={key} className="truncate text-muted-foreground">
+                    <span className="text-foreground">{key}</span>: {ts}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {envelope.field_provenance &&
+          Object.keys(envelope.field_provenance).length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-[10.5px] uppercase text-subtle-foreground">Field Provenance</p>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border bg-card-elevated/60 text-muted-foreground">
+                      <th className="px-2.5 py-1.5">Field / Metric</th>
+                      <th className="px-2.5 py-1.5">Availability</th>
+                      <th className="px-2.5 py-1.5">Source / Endpoint</th>
+                      <th className="px-2.5 py-1.5">Reason / Mode</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {Object.entries(envelope.field_provenance).map(([field, prov]) => (
+                      <tr key={field}>
+                        <td className="px-2.5 py-1.5 font-semibold text-foreground">{field}</td>
+                        <td className="px-2.5 py-1.5">{prov.availability}</td>
+                        <td className="px-2.5 py-1.5 text-muted-foreground">
+                          {prov.endpoint ?? prov.source ?? MISSING}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-muted-foreground">
+                          {prov.reason_code ?? prov.data_mode ?? MISSING}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </details>
+
       <LimitationsBox limitations={envelope.limitations} />
     </article>
   );

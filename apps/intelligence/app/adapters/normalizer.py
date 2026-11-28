@@ -2,7 +2,7 @@ import asyncio
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 _SYMBOL = re.compile(r"^[A-Z0-9]{1,20}$")
@@ -12,6 +12,8 @@ _SYMBOL = re.compile(r"^[A-Z0-9]{1,20}$")
 class SymbolResolution:
     ids: dict[str, int]
     limitations: list[str]
+    ambiguous_symbols: dict[str, list[dict[str, object]]] = field(default_factory=dict)
+    unresolved_symbols: list[str] = field(default_factory=list)
 
 
 def choose_ids(
@@ -42,21 +44,36 @@ def choose_ids(
 
     ids: dict[str, int] = {}
     limitations: list[str] = []
+    ambiguous_symbols: dict[str, list[dict[str, object]]] = {}
+    unresolved_symbols: list[str] = []
     for symbol in requested:
         candidates = grouped.get(symbol, {})
         if not candidates:
             limitations.append(f"{symbol} was not found in market_assets")
+            unresolved_symbols.append(symbol)
             continue
         best_id = min(candidates, key=lambda cmc_id: _rank_sort(candidates[cmc_id]) + (cmc_id,))
         ids[symbol] = best_id
         if len(candidates) > 1:
             rank = candidates[best_id]
+            ordered = sorted(
+                candidates.items(),
+                key=lambda item: _rank_sort(item[1]) + (item[0],),
+            )
+            ambiguous_symbols[symbol] = [
+                {"cmc_id": cid, "rank": r} for cid, r in ordered[:5]
+            ]
             note = (
                 f"{symbol} matched {len(candidates)} assets; "
-                f"resolved to cmc_id {best_id} at rank {rank}"
+                f"resolved to cmc_id {best_id} at rank {rank} (AMBIGUOUS_SYMBOL_RANK_SELECTED)"
             )
             limitations.append(note)
-    return SymbolResolution(ids=ids, limitations=limitations)
+    return SymbolResolution(
+        ids=ids,
+        limitations=limitations,
+        ambiguous_symbols=ambiguous_symbols,
+        unresolved_symbols=unresolved_symbols,
+    )
 
 
 async def resolve_symbols_to_ids(
@@ -481,6 +498,15 @@ def parse_derivatives_pairs(
         last_updated = quote_entry.get("last_updated") or reported_entry.get("last_updated")
         quote_sym = quote_entry.get("convert_symbol") or reported_entry.get("convert_symbol")
 
+        is_zero_oi_with_volume = (
+            open_interest is not None
+            and open_interest == 0.0
+            and volume_24h is not None
+            and volume_24h > 0.0
+        )
+        if is_zero_oi_with_volume and "zero_oi_with_positive_volume" not in exclusions:
+            exclusions.append("zero_oi_with_positive_volume")
+
         observations.append(
             {
                 "market_id": valid_market_id,
@@ -507,11 +533,11 @@ def parse_derivatives_pairs(
                 outlier_excluded += 1
                 if exchange_name:
                     outlier_names.append(exchange_name)
+            elif is_zero_oi_with_volume:
+                zero_oi_active_count += 1
             else:
                 oi_sum += open_interest
                 oi_included += 1
-                if open_interest == 0.0 and volume_24h is not None and volume_24h > 0.0:
-                    zero_oi_active_count += 1
                 if open_interest > max_oi:
                     max_oi = open_interest
                     max_oi_exchange = exchange_name or exchange_slug or pair_symbol
@@ -556,7 +582,8 @@ def parse_derivatives_pairs(
         if zero_oi_active_count > 0:
             notes.append(
                 f"{zero_oi_active_count} sampled pair(s) reported positive 24h volume with "
-                "zero open_interest; verify venue reporting quality independently."
+                "zero open_interest and were excluded from OI aggregation; verify venue "
+                "reporting quality independently."
             )
         if outlier_excluded > 0:
             label = f" ({', '.join(outlier_names[:5])})" if outlier_names else ""
