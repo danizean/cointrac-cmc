@@ -124,6 +124,30 @@ class SupabaseKeyStore:
 
         return await asyncio.to_thread(read)
 
+    async def list_last_used_for_user(self, user_id: str) -> dict[str, str]:
+        from app.core.db import supabase_client
+
+        def read() -> dict[str, str]:
+            resp = (
+                supabase_client()
+                .table("request_logs")
+                .select("api_key_id,created_at")
+                .eq("user_id", user_id)
+                .not_.is_("api_key_id", "null")
+                .order("created_at", desc=True)
+                .limit(1000)
+                .execute()
+            )
+            latest: dict[str, str] = {}
+            for row in resp.data or []:
+                kid = row.get("api_key_id")
+                ts = row.get("created_at")
+                if kid and ts and str(kid) not in latest:
+                    latest[str(kid)] = str(ts)
+            return latest
+
+        return await asyncio.to_thread(read)
+
     async def create_for_user(
         self,
         *,
@@ -187,8 +211,13 @@ def reset_key_store() -> None:
     _key_store = SupabaseKeyStore()
 
 
-def _to_summary(row: dict[str, Any]) -> ApiKeySummary:
+def _to_summary(row: dict[str, Any], *, last_used_at: str | None = None) -> ApiKeySummary:
     prefix = str(row["key_prefix"])
+    resolved_last_used = (
+        last_used_at
+        if last_used_at is not None
+        else (str(row["last_used_at"]) if row.get("last_used_at") is not None else None)
+    )
     return ApiKeySummary(
         id=str(row["id"]),
         label=str(row["label"]),
@@ -198,7 +227,7 @@ def _to_summary(row: dict[str, Any]) -> ApiKeySummary:
         revoked_at=str(row["revoked_at"]) if row.get("revoked_at") is not None else None,
         rate_limit_per_min=int(row["rate_limit_per_min"]),
         created_at=str(row["created_at"]),
-        last_used_at=None,
+        last_used_at=resolved_last_used,
     )
 
 
@@ -220,7 +249,20 @@ async def list_keys(
         rows = await _key_store.list_for_user(user.user_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="API key store is unavailable") from exc
-    summaries = [_to_summary(row) for row in rows]
+
+    last_used_by_key: dict[str, str] = {}
+    last_used_fn = getattr(_key_store, "list_last_used_for_user", None)
+    if rows and callable(last_used_fn):
+        try:
+            fetched = await last_used_fn(user.user_id)
+            if isinstance(fetched, dict):
+                last_used_by_key = {str(k): str(v) for k, v in fetched.items() if v}
+        except Exception as exc:
+            logger.warning("Failed to load last_used_at from request_logs: %s", exc)
+
+    summaries = [
+        _to_summary(row, last_used_at=last_used_by_key.get(str(row["id"]))) for row in rows
+    ]
     active_count = sum(1 for item in summaries if item.is_active)
     return ListKeysResponse(
         keys=summaries,

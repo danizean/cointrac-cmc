@@ -26,8 +26,10 @@ import { publicMcpUrl } from "@/lib/catalog";
 import {
   fetchApiKeys,
   fetchMcpStatus,
+  fetchUsage,
   type ApiKeySummary,
   type McpStatusPayload,
+  type UsagePayload,
 } from "@/lib/control-plane-api";
 
 type TransportMode = "local" | "remote";
@@ -118,6 +120,7 @@ export function ConnectionsConsole() {
   const { pushToast } = useToast();
 
   const [mcpStatus, setMcpStatus] = useState<McpStatusPayload | null>(null);
+  const [usage, setUsage] = useState<UsagePayload | null>(null);
   const [keys, setKeys] = useState<ApiKeySummary[]>([]);
   const [activeKeyCount, setActiveKeyCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -125,7 +128,7 @@ export function ConnectionsConsole() {
   const [statusError, setStatusError] = useState<{ status: number; message: string } | null>(null);
   const [keysError, setKeysError] = useState<{ status: number; message: string } | null>(null);
 
-  const [mode, setMode] = useState<TransportMode>("local");
+  const [mode, setMode] = useState<TransportMode>("remote");
   const [presetId, setPresetId] = useState<ClientPresetId>("universal");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -136,7 +139,11 @@ export function ConnectionsConsole() {
       setStatusError(null);
       setKeysError(null);
 
-      const [statusRes, keysRes] = await Promise.all([fetchMcpStatus(), fetchApiKeys()]);
+      const [statusRes, keysRes, usageRes] = await Promise.all([
+        fetchMcpStatus(),
+        fetchApiKeys(),
+        fetchUsage(),
+      ]);
       setLoading(false);
       setRefreshing(false);
 
@@ -153,6 +160,9 @@ export function ConnectionsConsole() {
         setActiveKeyCount(null);
         setKeysError({ status: keysRes.status, message: keysRes.message });
       }
+      if (usageRes.ok) {
+        setUsage(usageRes.data);
+      }
 
       if (isManual) {
         if (!statusRes.ok || !keysRes.ok) {
@@ -168,7 +178,11 @@ export function ConnectionsConsole() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [statusRes, keysRes] = await Promise.all([fetchMcpStatus(), fetchApiKeys()]);
+      const [statusRes, keysRes, usageRes] = await Promise.all([
+        fetchMcpStatus(),
+        fetchApiKeys(),
+        fetchUsage(),
+      ]);
       if (!active) return;
       setLoading(false);
       if (statusRes.ok) {
@@ -181,6 +195,9 @@ export function ConnectionsConsole() {
         setActiveKeyCount(keysRes.data.active_count);
       } else {
         setKeysError({ status: keysRes.status, message: keysRes.message });
+      }
+      if (usageRes.ok) {
+        setUsage(usageRes.data);
       }
     })();
     return () => {
@@ -281,13 +298,26 @@ export function ConnectionsConsole() {
           {loading ? (
             <Skeleton className="h-5 w-full" />
           ) : (
-            <p className="truncate font-mono text-xs text-muted-foreground">
-              {remoteDeployed && mcpStatus?.remote_url
-                ? mcpStatus.remote_url
-                : isId
-                  ? "Pakai Local MCP untuk dev"
-                  : "Use Local MCP for dev"}
-            </p>
+            <div className="space-y-1">
+              <p className="truncate font-mono text-xs text-muted-foreground">
+                {remoteDeployed && mcpStatus?.remote_url
+                  ? mcpStatus.remote_url
+                  : isId
+                    ? "Pakai Local MCP untuk dev"
+                    : "Use Local MCP for dev"}
+              </p>
+              {usage ? (
+                <Link
+                  href="/app/usage"
+                  className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-link hover:underline"
+                >
+                  <span>
+                    {usage.tool_quota.calls_by_surface.mcp ?? 0} {isId ? "panggilan MCP tercatat (OAuth & Key)" : "MCP calls tracked (OAuth & Key)"}
+                  </span>
+                  <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                </Link>
+              ) : null}
+            </div>
           )}
         </Card>
 

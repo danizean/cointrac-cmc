@@ -329,6 +329,39 @@ def test_super_admin_routes_strictly_protected_and_mask_api_key(ai_env):
     )
     assert self_demote.status_code == 400
 
+    # Add Remote MCP (OAuth & API key) + REST logs into platform store
+    now_iso = datetime.now(UTC).isoformat()
+    ai_env["store"].platform_request_logs.extend(
+        [
+            {
+                "id": "rl_1",
+                "user_id": ai_env["user_id"],
+                "api_key_id": None,
+                "surface": "mcp",
+                "tool_name": "get_market_overview",
+                "status_code": 200,
+                "latency_ms": 180,
+                "cache_hit": True,
+                "credit_cost": 0,
+                "evidence_id": "ev_mcp_oauth",
+                "created_at": now_iso,
+            },
+            {
+                "id": "rl_2",
+                "user_id": ai_env["user_id"],
+                "api_key_id": "key_123",
+                "surface": "rest",
+                "tool_name": "analyze_asset",
+                "status_code": 200,
+                "latency_ms": 420,
+                "cache_hit": False,
+                "credit_cost": 2,
+                "evidence_id": "ev_rest_key",
+                "created_at": now_iso,
+            },
+        ]
+    )
+
     # Can view overview telemetry
     overview = client.get("/v1/admin/ai/overview", headers=hdr_admin)
     assert overview.status_code == 200
@@ -338,6 +371,16 @@ def test_super_admin_routes_strictly_protected_and_mask_api_key(ai_env):
     assert ov_json["summary"]["total_registered_users"] == 2
     assert ov_json["summary"]["super_admin_count"] == 1
     assert len(ov_json["daily_series"]) == 14
+    assert ov_json["platform_summary"]["requests_30d"] == 2
+    assert ov_json["platform_summary"]["mcp_requests_30d"] == 1
+    assert ov_json["platform_summary"]["oauth_mcp_requests_30d"] == 1
+    assert ov_json["platform_summary"]["rest_requests_30d"] == 1
+    assert ov_json["platform_summary"]["cmc_credits_30d"] == 2
+    assert len(ov_json["recent_api_logs"]) == 2
+    trader_row = next(u for u in ov_json["users"] if u["user_id"] == ai_env["user_id"])
+    assert trader_row["mcp_calls_30d"] == 1
+    assert trader_row["rest_calls_30d"] == 1
+    assert trader_row["cmc_credits_30d"] == 2
 
 
 @pytest.mark.asyncio

@@ -310,6 +310,10 @@ class AIStore(Protocol):
         self, *, days: int = 30, limit: int = 2000
     ) -> list[dict[str, Any]]: ...
 
+    async def list_recent_platform_request_logs(
+        self, *, days: int = 30, limit: int = 2000
+    ) -> list[dict[str, Any]]: ...
+
 
 class MemoryAIStore:
     """In-memory AI store for isolated unit tests and zero-DB local runs."""
@@ -322,6 +326,7 @@ class MemoryAIStore:
         )
         self.user_limits: dict[str, AIUserLimitsRecord] = {}
         self.logs: list[dict[str, Any]] = []
+        self.platform_request_logs: list[dict[str, Any]] = []
         self.profiles: dict[str, dict[str, Any]] = {}
 
     async def get_config(self) -> _StoredConfig:
@@ -410,6 +415,18 @@ class MemoryAIStore:
     ) -> list[dict[str, Any]]:
         cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
         return [r for r in self.logs if str(r.get("created_at") or "") >= cutoff][:limit]
+
+    async def list_recent_platform_request_logs(
+        self, *, days: int = 30, limit: int = 2000
+    ) -> list[dict[str, Any]]:
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        filtered = [
+            dict(r)
+            for r in self.platform_request_logs
+            if str(r.get("created_at") or "") >= cutoff
+        ]
+        filtered.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        return filtered[:limit]
 
 
 class SupabaseAIStore:
@@ -759,6 +776,33 @@ class SupabaseAIStore:
             return await asyncio.to_thread(read)
         except Exception:
             return await self._fallback.list_recent_usage_logs(days=days, limit=limit)
+
+    async def list_recent_platform_request_logs(
+        self, *, days: int = 30, limit: int = 2000
+    ) -> list[dict[str, Any]]:
+        from app.core.db import supabase_client
+
+        since_iso = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+
+        def read() -> list[dict[str, Any]]:
+            resp = (
+                supabase_client()
+                .table("request_logs")
+                .select(
+                    "id,user_id,api_key_id,surface,tool_name,status_code,"
+                    "latency_ms,cache_hit,credit_cost,evidence_id,created_at"
+                )
+                .gte("created_at", since_iso)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return [dict(r) for r in (resp.data or [])]
+
+        try:
+            return await asyncio.to_thread(read)
+        except Exception:
+            return await self._fallback.list_recent_platform_request_logs(days=days, limit=limit)
 
 
 class MuseTransport(Protocol):

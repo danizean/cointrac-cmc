@@ -81,9 +81,16 @@ class _MemKeyStoreAndDirectory:
 
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
+        self.last_used_by_key_id: dict[str, str] = {}
 
     async def list_for_user(self, user_id: str) -> list[dict[str, Any]]:
         return [dict(r) for r in self.rows if r["user_id"] == user_id]
+
+    async def list_last_used_for_user(self, user_id: str) -> dict[str, str]:
+        owned_ids = {str(r["id"]) for r in self.rows if r["user_id"] == user_id}
+        return {
+            kid: ts for kid, ts in self.last_used_by_key_id.items() if kid in owned_ids
+        }
 
     async def create_for_user(
         self,
@@ -418,6 +425,22 @@ def test_api_key_active_cap_enforced(cp_env):
         assert res.status_code == 201
     over = client.post("/v1/keys", json={"label": "Over Cap"}, headers=hdr_a)
     assert over.status_code == 400
+
+
+def test_list_keys_populates_last_used_at_from_request_logs(cp_env):
+    client = cp_env["client"]
+    hdr_a = {"Authorization": f"Bearer {cp_env['tok_a']}"}
+
+    created = client.post("/v1/keys", json={"label": "Custom GPT Key"}, headers=hdr_a)
+    assert created.status_code == 201
+    key_id = created.json()["key"]["id"]
+
+    ts = "2026-11-28T07:30:49+00:00"
+    cp_env["store"].last_used_by_key_id[key_id] = ts
+
+    listed = client.get("/v1/keys", headers=hdr_a)
+    assert listed.status_code == 200
+    assert listed.json()["keys"][0]["last_used_at"] == ts
 
 
 def test_usage_endpoint_strictly_tenant_scoped_and_separates_cmc_credits(cp_env):

@@ -237,6 +237,11 @@ export interface AdminAIUserRow {
   used_30d_requests: number;
   used_30d_tokens: number;
   estimated_cost_30d_usd: number;
+  mcp_calls_30d?: number;
+  rest_calls_30d?: number;
+  api_calls_today?: number;
+  cmc_credits_30d?: number;
+  last_api_activity_at?: string | null;
 }
 
 export interface AdminDailySeriesPoint {
@@ -247,6 +252,49 @@ export interface AdminDailySeriesPoint {
   errors: number;
   tokens: number;
   estimated_cost_usd: number;
+  mcp_requests?: number;
+  rest_requests?: number;
+  api_credits?: number;
+}
+
+export interface AdminPlatformSummary {
+  requests_today: number;
+  requests_30d: number;
+  mcp_requests_today: number;
+  mcp_requests_30d: number;
+  rest_requests_30d: number;
+  playground_requests_30d: number;
+  oauth_mcp_requests_30d: number;
+  api_key_mcp_requests_30d: number;
+  cmc_credits_30d: number;
+  cache_hit_rate_pct: number | null;
+  error_count_30d: number;
+  avg_latency_ms: number | null;
+  active_users_30d: number;
+}
+
+export interface AdminPlatformToolRow {
+  tool_name: string;
+  calls: number;
+  mcp_calls: number;
+  rest_calls: number;
+  credits: number;
+}
+
+export interface PlatformRequestLogItem {
+  id: string;
+  user_id: string;
+  user_email?: string | null;
+  api_key_id?: string | null;
+  auth_mode: "api_key" | "oauth" | "session" | string;
+  surface: "mcp" | "rest" | "playground" | string;
+  tool_name: string;
+  status_code: number;
+  latency_ms: number;
+  cache_hit: boolean;
+  credit_cost: number;
+  evidence_id?: string | null;
+  created_at: string;
 }
 
 export interface AdminAIOverviewPayload {
@@ -266,10 +314,13 @@ export interface AdminAIOverviewPayload {
     ai_paused_users?: number;
     custom_limit_users?: number;
   };
+  platform_summary?: AdminPlatformSummary;
   daily_series?: AdminDailySeriesPoint[];
   top_tools: Array<{ tool_name: string; calls: number }>;
+  platform_top_tools?: AdminPlatformToolRow[];
   users: AdminAIUserRow[];
   recent_logs: AIUsageLogItem[];
+  recent_api_logs?: PlatformRequestLogItem[];
 }
 
 export type ControlPlaneResult<T> =

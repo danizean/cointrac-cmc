@@ -188,12 +188,22 @@ export function AdminOverviewView() {
   if (!data) return null;
 
   const { config, summary, top_tools, users } = data;
+  const platformSummary = data.platform_summary;
+  const platformTopTools = data.platform_top_tools ?? [];
   const series = data.daily_series ?? [];
   const engineReady = config.enabled && config.api_key_configured;
   const maxToolCalls = Math.max(1, ...top_tools.map((t) => t.calls));
+  const maxPlatformToolCalls = Math.max(1, ...platformTopTools.map((t) => t.calls));
 
   const topUsers = [...users]
-    .sort((a, b) => b.used_30d_requests - a.used_30d_requests || b.used_30d_tokens - a.used_30d_tokens)
+    .sort(
+      (a, b) =>
+        (b.mcp_calls_30d ?? 0) +
+          (b.rest_calls_30d ?? 0) +
+          b.used_30d_requests -
+        ((a.mcp_calls_30d ?? 0) + (a.rest_calls_30d ?? 0) + a.used_30d_requests) ||
+        b.used_30d_tokens - a.used_30d_tokens,
+    )
     .slice(0, 5);
 
   const recentIssues = data.recent_logs
@@ -357,6 +367,122 @@ export function AdminOverviewView() {
         </Card>
       </div>
 
+      {/* Platform-Wide Remote MCP & REST API Telemetry (30d) */}
+      {platformSummary ? (
+        <Card className="p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-foreground">
+                  {isId ? "Telemetri Remote MCP & REST API (30 Hari)" : "Remote MCP & REST API Telemetry (30d)"}
+                </h2>
+                <Badge tone={platformSummary.mcp_requests_today > 0 ? "positive" : "neutral"}>
+                  {platformSummary.mcp_requests_today} {isId ? "MCP hr ini" : "MCP today"}
+                </Badge>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {isId
+                  ? "Mencakup panggilan ChatGPT Custom GPT / OAuth Remote MCP, MCP via API key, dan REST API lintas seluruh akun."
+                  : "Tracks ChatGPT / OAuth Remote MCP connectors, API-key MCP calls, and REST API traffic across all accounts."}
+              </p>
+            </div>
+            <Link
+              href="/app/admin/audit"
+              className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-link hover:underline"
+            >
+              <span>{isId ? "Buka Log MCP & REST" : "Inspect MCP & REST Logs"}</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="rounded-[12px] border border-border bg-background/60 p-3.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-subtle-foreground">
+                {isId ? "Total Remote MCP (30h)" : "Remote MCP Calls (30d)"}
+              </p>
+              <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-foreground">
+                {platformSummary.mcp_requests_30d.toLocaleString()}
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {platformSummary.oauth_mcp_requests_30d} OAuth · {platformSummary.api_key_mcp_requests_30d} Key
+              </p>
+            </div>
+
+            <div className="rounded-[12px] border border-border bg-background/60 p-3.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-subtle-foreground">
+                {isId ? "REST & Playground (30h)" : "REST & Playground (30d)"}
+              </p>
+              <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-foreground">
+                {(platformSummary.rest_requests_30d + platformSummary.playground_requests_30d).toLocaleString()}
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {platformSummary.rest_requests_30d} REST · {platformSummary.playground_requests_30d} UI
+              </p>
+            </div>
+
+            <div className="rounded-[12px] border border-border bg-background/60 p-3.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-subtle-foreground">
+                {isId ? "Kredit CMC Terpakai" : "CMC Credits Used"}
+              </p>
+              <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-link">
+                {platformSummary.cmc_credits_30d.toLocaleString()}
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {platformSummary.cache_hit_rate_pct !== null
+                  ? `${platformSummary.cache_hit_rate_pct}% cache hit`
+                  : isId
+                    ? "Belum ada cache sample"
+                    : "No cache samples"}
+              </p>
+            </div>
+
+            <div className="rounded-[12px] border border-border bg-background/60 p-3.5">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-subtle-foreground">
+                {isId ? "Akun API Aktif & Latensi" : "API Accounts & Latency"}
+              </p>
+              <p className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-foreground">
+                {platformSummary.active_users_30d}
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                {platformSummary.avg_latency_ms !== null
+                  ? `${platformSummary.avg_latency_ms} ms avg · ${platformSummary.error_count_30d} err`
+                  : `${platformSummary.error_count_30d} err`}
+              </p>
+            </div>
+          </div>
+
+          {platformTopTools.length > 0 ? (
+            <div className="mt-4 border-t border-border pt-4">
+              <p className="mb-2.5 font-mono text-[11px] uppercase tracking-wider text-subtle-foreground">
+                {isId ? "Tool MCP / REST Paling Sering Dipanggil" : "Top Remote MCP & REST Endpoints"}
+              </p>
+              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                {platformTopTools.slice(0, 6).map((item) => {
+                  const pct = Math.max(8, Math.round((item.calls / maxPlatformToolCalls) * 100));
+                  return (
+                    <div
+                      key={item.tool_name}
+                      className="rounded-[10px] border border-border bg-background/50 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-2 font-mono text-xs">
+                        <span className="truncate font-semibold text-foreground">{item.tool_name}</span>
+                        <span className="shrink-0 text-link">{item.calls}</span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-positive" style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="mt-1.5 font-mono text-[10px] text-subtle-foreground">
+                        {item.mcp_calls} MCP · {item.rest_calls} REST · {item.credits} cr
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
       {/* 14-day Trend */}
       {series.length > 0 ? (
         <DailyActivityChart series={series} isId={isId} locale={locale} />
@@ -434,11 +560,11 @@ export function AdminOverviewView() {
                         ) : null}
                       </div>
                       <p className="font-mono text-[11px] text-subtle-foreground">
-                        {u.used_30d_requests} req · {u.used_30d_tokens.toLocaleString()} tok
+                        {(u.mcp_calls_30d ?? 0)} MCP · {(u.rest_calls_30d ?? 0)} REST · {u.used_30d_requests} AI
                       </p>
                     </div>
                     <span className="shrink-0 font-mono text-xs font-semibold text-foreground">
-                      ${u.estimated_cost_30d_usd.toFixed(4)}
+                      {(u.cmc_credits_30d ?? 0)} cr · ${u.estimated_cost_30d_usd.toFixed(4)}
                     </span>
                   </Link>
                 </li>

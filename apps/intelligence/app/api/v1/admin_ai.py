@@ -68,6 +68,10 @@ async def get_admin_ai_overview(
     limits_by_user = await store.list_all_user_limits()
     profiles = await store.list_profiles(limit=200)
     logs = await store.list_recent_usage_logs(days=30, limit=2000)
+    platform_logs_fn = getattr(store, "list_recent_platform_request_logs", None)
+    platform_logs: list[dict[str, Any]] = (
+        await platform_logs_fn(days=30, limit=2000) if callable(platform_logs_fn) else []
+    )
 
     now_utc = datetime.now(UTC)
     day_prefix = now_utc.strftime("%Y-%m-%d")
@@ -89,6 +93,27 @@ async def get_admin_ai_overview(
     per_user_30d_tok: dict[str, int] = defaultdict(int)
     per_user_30d_cost: dict[str, float] = defaultdict(float)
 
+    api_req_24h = 0
+    api_req_30d = 0
+    mcp_req_24h = 0
+    mcp_req_30d = 0
+    rest_req_30d = 0
+    playground_req_30d = 0
+    oauth_mcp_req_30d = 0
+    api_key_mcp_req_30d = 0
+    cmc_credits_30d = 0
+    api_cache_hits_30d = 0
+    api_error_count_30d = 0
+    api_latency_sum_30d = 0
+    api_latency_samples_30d = 0
+    platform_tool_stats: dict[str, dict[str, Any]] = {}
+
+    per_user_api_today: dict[str, int] = defaultdict(int)
+    per_user_mcp_30d: dict[str, int] = defaultdict(int)
+    per_user_rest_30d: dict[str, int] = defaultdict(int)
+    per_user_credits_30d: dict[str, int] = defaultdict(int)
+    per_user_last_api_at: dict[str, str] = {}
+
     daily_buckets: dict[str, dict[str, Any]] = {}
     for offset in range(13, -1, -1):
         day_key = (now_utc - timedelta(days=offset)).strftime("%Y-%m-%d")
@@ -100,6 +125,9 @@ async def get_admin_ai_overview(
             "errors": 0,
             "tokens": 0,
             "estimated_cost_usd": 0.0,
+            "mcp_requests": 0,
+            "rest_requests": 0,
+            "api_credits": 0,
         }
 
     email_by_uid = {str(p["id"]): p.get("email") for p in profiles if p.get("id")}
@@ -151,6 +179,80 @@ async def get_admin_ai_overview(
                 if is_cached:
                     daily_buckets[log_day]["cached"] += 1
 
+    for row in platform_logs:
+        uid = str(row.get("user_id") or "")
+        surface = str(row.get("surface") or "rest").lower()
+        tool_name = str(row.get("tool_name") or "unknown")
+        status_code = int(row.get("status_code") or 200)
+        lat_ms = int(row.get("latency_ms") or 0)
+        credits = int(row.get("credit_cost") or 0)
+        is_cached = bool(row.get("cache_hit"))
+        created_at = str(row.get("created_at") or "")
+        log_day = created_at[:10]
+        is_today = created_at.startswith(day_prefix)
+        has_key = row.get("api_key_id") is not None
+
+        api_req_30d += 1
+        cmc_credits_30d += credits
+        if is_today:
+            api_req_24h += 1
+        if is_cached:
+            api_cache_hits_30d += 1
+        if status_code >= 400:
+            api_error_count_30d += 1
+        if lat_ms > 0:
+            api_latency_sum_30d += lat_ms
+            api_latency_samples_30d += 1
+
+        if surface == "mcp":
+            mcp_req_30d += 1
+            if is_today:
+                mcp_req_24h += 1
+            if has_key:
+                api_key_mcp_req_30d += 1
+            else:
+                oauth_mcp_req_30d += 1
+        elif surface == "playground":
+            playground_req_30d += 1
+        else:
+            rest_req_30d += 1
+
+        if uid:
+            if is_today:
+                per_user_api_today[uid] += 1
+            if surface == "mcp":
+                per_user_mcp_30d[uid] += 1
+            elif surface != "playground":
+                per_user_rest_30d[uid] += 1
+            per_user_credits_30d[uid] += credits
+            prev_ts = per_user_last_api_at.get(uid)
+            if created_at and (prev_ts is None or created_at > prev_ts):
+                per_user_last_api_at[uid] = created_at
+
+        tool_entry = platform_tool_stats.setdefault(
+            tool_name,
+            {
+                "tool_name": tool_name,
+                "calls": 0,
+                "mcp_calls": 0,
+                "rest_calls": 0,
+                "credits": 0,
+            },
+        )
+        tool_entry["calls"] += 1
+        tool_entry["credits"] += credits
+        if surface == "mcp":
+            tool_entry["mcp_calls"] += 1
+        elif surface != "playground":
+            tool_entry["rest_calls"] += 1
+
+        if log_day in daily_buckets:
+            if surface == "mcp":
+                daily_buckets[log_day]["mcp_requests"] += 1
+            elif surface != "playground":
+                daily_buckets[log_day]["rest_requests"] += 1
+            daily_buckets[log_day]["api_credits"] += credits
+
     users_rows: list[dict[str, Any]] = []
     seen_uids: set[str] = set()
     for p in profiles:
@@ -191,10 +293,21 @@ async def get_admin_ai_overview(
                 "used_30d_requests": per_user_30d_req[uid],
                 "used_30d_tokens": per_user_30d_tok[uid],
                 "estimated_cost_30d_usd": round(per_user_30d_cost[uid], 6),
+                "mcp_calls_30d": per_user_mcp_30d[uid],
+                "rest_calls_30d": per_user_rest_30d[uid],
+                "api_calls_today": per_user_api_today[uid],
+                "cmc_credits_30d": per_user_credits_30d[uid],
+                "last_api_activity_at": per_user_last_api_at.get(uid),
             }
         )
 
-    for uid in set(per_user_30d_req.keys()) - seen_uids:
+    extra_active_uids = (
+        set(per_user_30d_req.keys())
+        | set(per_user_mcp_30d.keys())
+        | set(per_user_rest_30d.keys())
+        | set(per_user_api_today.keys())
+    ) - seen_uids - {""}
+    for uid in sorted(extra_active_uids):
         lim = limits_by_user.get(uid)
         users_rows.append(
             {
@@ -228,6 +341,11 @@ async def get_admin_ai_overview(
                 "used_30d_requests": per_user_30d_req[uid],
                 "used_30d_tokens": per_user_30d_tok[uid],
                 "estimated_cost_30d_usd": round(per_user_30d_cost[uid], 6),
+                "mcp_calls_30d": per_user_mcp_30d[uid],
+                "rest_calls_30d": per_user_rest_30d[uid],
+                "api_calls_today": per_user_api_today[uid],
+                "cmc_credits_30d": per_user_credits_30d[uid],
+                "last_api_activity_at": per_user_last_api_at.get(uid),
             }
         )
 
@@ -272,6 +390,33 @@ async def get_admin_ai_overview(
         )
     )
 
+    recent_api_logs = [
+        {
+            "id": str(r.get("id") or idx),
+            "user_id": str(r.get("user_id") or ""),
+            "user_email": email_by_uid.get(str(r.get("user_id") or "")),
+            "api_key_id": str(r["api_key_id"]) if r.get("api_key_id") is not None else None,
+            "auth_mode": (
+                "api_key"
+                if r.get("api_key_id") is not None
+                else ("oauth" if str(r.get("surface") or "").lower() == "mcp" else "session")
+            ),
+            "surface": str(r.get("surface") or "rest"),
+            "tool_name": str(r.get("tool_name") or "unknown"),
+            "status_code": int(r.get("status_code") or 200),
+            "latency_ms": int(r.get("latency_ms") or 0),
+            "cache_hit": bool(r.get("cache_hit")),
+            "credit_cost": int(r.get("credit_cost") or 0),
+            "evidence_id": str(r["evidence_id"]) if r.get("evidence_id") else None,
+            "created_at": str(r.get("created_at") or ""),
+        }
+        for idx, r in enumerate(platform_logs[:100])
+    ]
+
+    api_active_users = len(
+        {str(r.get("user_id") or "") for r in platform_logs if r.get("user_id")}
+    )
+
     return {
         "config": public_cfg.model_dump(mode="json"),
         "summary": {
@@ -291,13 +436,39 @@ async def get_admin_ai_overview(
             "ai_paused_users": ai_paused_count,
             "custom_limit_users": custom_limit_count,
         },
+        "platform_summary": {
+            "requests_today": api_req_24h,
+            "requests_30d": api_req_30d,
+            "mcp_requests_today": mcp_req_24h,
+            "mcp_requests_30d": mcp_req_30d,
+            "rest_requests_30d": rest_req_30d,
+            "playground_requests_30d": playground_req_30d,
+            "oauth_mcp_requests_30d": oauth_mcp_req_30d,
+            "api_key_mcp_requests_30d": api_key_mcp_req_30d,
+            "cmc_credits_30d": cmc_credits_30d,
+            "cache_hit_rate_pct": (
+                round(100.0 * api_cache_hits_30d / api_req_30d, 2) if api_req_30d > 0 else None
+            ),
+            "error_count_30d": api_error_count_30d,
+            "avg_latency_ms": (
+                round(api_latency_sum_30d / api_latency_samples_30d)
+                if api_latency_samples_30d > 0
+                else None
+            ),
+            "active_users_30d": api_active_users,
+        },
         "daily_series": daily_series,
         "top_tools": [
             {"tool_name": name, "calls": count}
             for name, count in sorted(tool_counts.items(), key=lambda kv: (-kv[1], kv[0]))
         ],
+        "platform_top_tools": sorted(
+            platform_tool_stats.values(),
+            key=lambda item: (-int(item["calls"]), str(item["tool_name"])),
+        ),
         "users": users_rows,
         "recent_logs": recent_logs,
+        "recent_api_logs": recent_api_logs,
     }
 
 

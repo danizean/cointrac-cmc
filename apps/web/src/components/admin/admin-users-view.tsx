@@ -316,7 +316,8 @@ export function AdminUsersView() {
                     <th className="px-4 py-3">{isId ? "Akun" : "Account"}</th>
                     <th className="px-4 py-3">Role</th>
                     <th className="px-4 py-3">{isId ? "Status AI" : "AI Access"}</th>
-                    <th className="px-4 py-3">{isId ? "Pemakaian Hari Ini" : "Today Usage"}</th>
+                    <th className="px-4 py-3">{isId ? "Pemakaian AI Hari Ini" : "AI Today"}</th>
+                    <th className="px-4 py-3">{isId ? "MCP / REST (30h)" : "MCP / REST (30d)"}</th>
                     <th className="px-4 py-3">{isId ? "Kebijakan Limit" : "Rate Policy"}</th>
                     <th className="px-4 py-3 text-right">{isId ? "Est. 30h" : "30d Spend"}</th>
                     <th className="px-4 py-3 text-right">{isId ? "Aksi" : "Action"}</th>
@@ -377,6 +378,14 @@ export function AdminUsersView() {
                             {u.effective_daily_tokens_limit.toLocaleString()} tok
                           </p>
                         </td>
+                        <td className="px-4 py-3 font-mono tabular-nums">
+                          <p className="text-xs font-semibold text-foreground">
+                            {(u.mcp_calls_30d ?? 0)} MCP · {(u.rest_calls_30d ?? 0)} REST
+                          </p>
+                          <p className="mt-0.5 text-[10px] text-subtle-foreground">
+                            {(u.cmc_credits_30d ?? 0)} cr · {(u.api_calls_today ?? 0)} {isId ? "hr ini" : "today"}
+                          </p>
+                        </td>
                         <td className="px-4 py-3 font-mono">
                           <div className="flex items-center gap-1.5">
                             <Badge tone={custom ? "info" : "neutral"}>
@@ -430,8 +439,9 @@ export function AdminUsersView() {
                       </Badge>
                     </div>
                     <p className="font-mono text-[11px] text-muted-foreground">
-                      {u.used_today_requests}/{u.effective_daily_requests_limit} req ·{" "}
-                      {u.effective_rate_limit_per_min}/m · ${u.estimated_cost_30d_usd.toFixed(4)}
+                      {u.used_today_requests}/{u.effective_daily_requests_limit} AI ·{" "}
+                      {(u.mcp_calls_30d ?? 0)} MCP · {(u.rest_calls_30d ?? 0)} REST · $
+                      {u.estimated_cost_30d_usd.toFixed(4)}
                     </p>
                   </div>
                   <Badge tone={u.ai_enabled ? "positive" : "destructive"}>
@@ -516,6 +526,26 @@ export function AdminUsersView() {
                     <p className="text-[10px] text-muted-foreground">{isId ? "Biaya 30h" : "30d Cost"}</p>
                     <p className="text-xs font-semibold text-link">
                       ${selectedUser.estimated_cost_30d_usd.toFixed(4)}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border pt-3 font-mono">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Remote MCP (30d)</p>
+                    <p className="text-xs font-semibold text-foreground">
+                      {selectedUser.mcp_calls_30d ?? 0}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">REST API (30d)</p>
+                    <p className="text-xs font-semibold text-foreground">
+                      {selectedUser.rest_calls_30d ?? 0}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">CMC Credits (30d)</p>
+                    <p className="text-xs font-semibold text-link">
+                      {selectedUser.cmc_credits_30d ?? 0}
                     </p>
                   </div>
                 </div>
